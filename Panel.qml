@@ -90,70 +90,10 @@ Panel {
       height: parent.height
       color: Color.popups.background
 
-      // ---- header ------------------------------------------------------
-      Rectangle {
-        width: parent.width
-        height: Style.space(46)
-        color: "transparent"
-        Rectangle {
-          anchors.bottom: parent.bottom
-          anchors.left: parent.left
-          anchors.right: parent.right
-          height: 1
-          color: Color.popups.border
-        }
-
-        Item {
-          anchors.fill: parent
-          anchors.leftMargin: Style.spacing.panelPadding
-          anchors.rightMargin: Style.spacing.panelPadding
-
-          Row {
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.spacing.md
-
-            Rectangle {
-              width: Style.space(10)
-              height: Style.space(10)
-              radius: Style.space(3)
-              anchors.verticalCenter: parent.verticalCenter
-              color: Color.accent
-            }
-
-            Text {
-              text: "Lanchat"
-              color: Color.popups.text
-              font.family: Style.font.family
-              font.pixelSize: Style.font.subtitle
-              font.weight: Font.Bold
-            }
-
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              text: root.selectedPeer ? root.selectedPeer.name : ""
-              color: Color.muted
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              elide: Text.ElideRight
-            }
-          }
-
-          Text {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            text: (Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online"
-            color: Lanchat.onlineCount > 0 ? Color.accent : Color.muted
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-        }
-      }
-
       // ---- body: peer list + thread -----------------------------------
       Rectangle {
         width: parent.width
-        height: parent.height - Style.space(46)
+        height: parent.height
         color: "transparent"
 
         Row {
@@ -275,6 +215,20 @@ Panel {
                     Text {
                       text: Lanchat.httpEnabled ? ":" + Lanchat.httpPort : "off"
                       color: Lanchat.httpEnabled ? Color.accent : Color.muted
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    Text {
+                      text: "·"
+                      color: Color.muted
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    Text {
+                      text: (Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online"
+                      color: Lanchat.onlineCount > 0 ? Color.accent : Color.muted
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                     }
