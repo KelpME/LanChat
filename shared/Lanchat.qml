@@ -78,6 +78,11 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setName", name: clean }) + "\n")
   }
 
+  // Ask the daemon to re-roll to a fresh random friendly name.
+  function regenerateName() {
+    daemon.write(JSON.stringify({ cmd: "regenerateName" }) + "\n")
+  }
+
   // ---- events from the daemon -------------------------------------------
 
   function onDaemonLine(raw) {

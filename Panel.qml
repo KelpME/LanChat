@@ -323,15 +323,26 @@ Panel {
                       id: nameInput
                       anchors.left: nameLabel.right
                       anchors.leftMargin: Style.spacing.sm
-                      anchors.right: parent.right
+                      anchors.right: rollButton.left
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
                       maximumLength: 12
-                      placeholderText: Lanchat.myName || "your name"
+                      text: Lanchat.myName
+                      placeholderText: "your name"
                       horizontalPadding: Style.space(8)
                       verticalPadding: Style.space(4)
                       onAccepted: Lanchat.setMyName(nameInput.text)
                       onEditingFinished: if (nameInput.text.trim() !== "") Lanchat.setMyName(nameInput.text)
+                    }
+
+                    // Re-roll to a fresh random friendly name.
+                    Button {
+                      id: rollButton
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "\uF046"
+                      onClicked: Lanchat.regenerateName()
                     }
                   }
                 }

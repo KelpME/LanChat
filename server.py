@@ -23,6 +23,7 @@ import http.server
 import hashlib
 import json
 import os
+import random
 import secrets
 import socket
 import sys
@@ -637,6 +638,25 @@ def stdin_loop() -> None:
                     "httpEnabled": http_enabled(),
                     "httpPort": http_port(),
                 })
+        elif kind == "regenerateName":
+            # Pick a fresh random friendly {modifier}{trick} name. Seed the
+            # RNG from the current time so a re-roll usually differs from the
+            # previous one.
+            rng = random.Random()
+            rng.seed(time.time_ns())
+            trick = rng.choice(_SKATE_TRICKS)
+            modifier = rng.choice(_TRICK_MODIFIERS)
+            name = f"{modifier}{trick}"[:12]
+            CONFIG["displayName"] = name
+            _save_config()
+            _emit({
+                "event": "ready",
+                "id": host_id(),
+                "name": display_name(),
+                "port": port(),
+                "httpEnabled": http_enabled(),
+                "httpPort": http_port(),
+            })
 
 
 # --------------------------------------------------------------------------
