@@ -272,9 +272,16 @@ Panel {
                   font.pixelSize: Style.font.caption
                 }
 
+                // Message bubble. The text anchors to fill the bubble with a
+                // set padding; the bubble grows with the text (no circular
+                // width dependency that used to clip long messages).
                 Rectangle {
-                  width: Math.min(list.width * 0.8, messageText.implicitWidth + Style.space(28))
-                  height: messageText.implicitHeight + Style.space(16)
+                  readonly property real bubbleMaxWidth: list.width * 0.8
+                  readonly property real bubblePaddingX: Style.space(14)
+                  readonly property real bubblePaddingY: Style.space(9)
+
+                  width: Math.min(bubbleMaxWidth, messageText.implicitWidth + bubblePaddingX * 2)
+                  height: messageText.implicitHeight + bubblePaddingY * 2
                   radius: Math.max(Style.cornerRadius, Style.space(6))
                   anchors.left: modelData.outgoing ? undefined : parent.left
                   anchors.right: modelData.outgoing ? parent.right : undefined
@@ -286,8 +293,11 @@ Panel {
 
                   Text {
                     id: messageText
-                    anchors.centerIn: parent
-                    width: list.width * 0.8 - Style.space(28)
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.leftMargin: parent.bubblePaddingX
+                    anchors.rightMargin: parent.bubblePaddingX
                     text: modelData.text
                     color: Color.popups.text
                     font.family: Style.font.family
@@ -313,7 +323,7 @@ Panel {
             Rectangle {
               id: composeBox
               width: parent.width
-              height: Style.space(54)
+              height: Style.space(58)
               color: "transparent"
               Rectangle {
                 anchors.top: parent.top
@@ -326,8 +336,8 @@ Panel {
               TextField {
                 id: input
                 anchors.fill: parent
-                anchors.topMargin: Style.spacing.sm
-                anchors.bottomMargin: Style.spacing.sm
+                anchors.topMargin: Style.spacing.md
+                anchors.bottomMargin: Style.spacing.md
                 anchors.leftMargin: Style.spacing.panelPadding
                 anchors.rightMargin: Style.spacing.panelPadding
                 placeholderText: root.selectedPeer
