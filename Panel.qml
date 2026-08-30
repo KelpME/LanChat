@@ -154,6 +154,14 @@ Panel {
     Quickshell.execDetached(["xdg-open", root.helpPath()])
   }
 
+  // Last component of a path (folder name).
+  function pathBasename(path) {
+    var p = String(path || "")
+    p = p.replace(/\/+$/, "")
+    var idx = p.lastIndexOf("/")
+    return idx >= 0 ? p.slice(idx + 1) : p
+  }
+
   onOpenedChanged: {
     Lanchat.panelOpen = root.opened
     if (root.opened) {
@@ -198,16 +206,17 @@ Panel {
     Lanchat.send(selectedPeerId, "", { name: path.split("/").pop(), path: path })
   }
 
-  // Panel dimensions by size setting. "full" uses the screen size.
+  // Panel dimensions by size setting. "full" fills the screen (minus a small
+  // margin so the top bar stays visible and the card has breathing room).
   readonly property int panelW: Lanchat.panelSize === "small" ? Style.space(440)
     : Lanchat.panelSize === "large" ? Style.space(720)
     : Lanchat.panelSize === "xl" ? Style.space(900)
-    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.width : 1440) * 0.92)
+    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.width : 1440) - Style.space(16) * 2)
     : Style.space(580)
   readonly property int panelH: Lanchat.panelSize === "small" ? Style.space(360)
     : Lanchat.panelSize === "large" ? Style.space(560)
     : Lanchat.panelSize === "xl" ? Style.space(700)
-    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.height : 900) * 0.88)
+    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.height : 900) - Style.space(16) * 2 - Style.space(35))
     : Style.space(460)
 
   KeyboardPanel {
@@ -710,12 +719,31 @@ Panel {
                       text: "Folder where accepted files are saved (default ~/Downloads)."
                     }
 
-                    Button {
+                    Row {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "\u2026"
-                      onClicked: root.pickDownloadDir()
+                      spacing: Style.spacing.xs
+
+                      Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Style.space(110)
+                        text: root.pathBasename(Lanchat.downloadDir)
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                        horizontalAlignment: Text.AlignRight
+                      }
+
+                      Button {
+                        width: Style.space(22)
+                        height: Style.space(18)
+                        text: "\u2026"
+                        fontSize: Style.font.caption
+                        onClicked: root.pickDownloadDir()
+                      }
                     }
                   }
 
