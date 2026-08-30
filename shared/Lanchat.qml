@@ -47,6 +47,7 @@ QtObject {
   property var messages: []       // [{from,fromName,text,ts,outgoing}]
   property int unreadCount: 0
   property int onlineCount: 0
+  property var diagnostics: []    // [{ts, message, ...}] diagnostic log lines
 
   // Per-peer lazy-load state: total messages on the server and how many we've
   // loaded for each peer (so we can fetch older ones on scroll).
@@ -581,6 +582,23 @@ QtObject {
       lanchat.statusMessage = obj.message || ""
       lanchat.statusTimer.restart()
       break
+
+    case "diagnostic": {
+      // Keep a rolling log of diagnostics so they can be read inline in the
+      // panel (peer expiry, dropped messages, send failures, etc.).
+      var d = {
+        ts: obj.ts || Date.now(),
+        message: obj.message || ""
+      }
+      for (var dk in obj) {
+        if (dk !== "event" && dk !== "message" && dk !== "ts") d[dk] = obj[dk]
+      }
+      var diag = lanchat.diagnostics.slice()
+      diag.push(d)
+      if (diag.length > 100) diag = diag.slice(diag.length - 100)
+      lanchat.diagnostics = diag
+      break
+    }
     }
   }
 

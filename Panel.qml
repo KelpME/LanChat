@@ -133,6 +133,7 @@ Panel {
   // Begin editing a message: load its text into the compose box and flag the
   // next send as an edit of that mid.
   property string editingMid: ""
+  property bool diagExpanded: false
   function editMsg(mid, text) {
     editingMid = mid
     input.text = text
@@ -152,6 +153,16 @@ Panel {
   function copyToClipboard(text) {
     if (!text) return
     Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(text) + " | wl-copy"])
+  }
+
+  // Copy all current diagnostic log lines to the clipboard.
+  function copyDiagnostics() {
+    var lines = []
+    for (var i = 0; i < Lanchat.diagnostics.length; i++) {
+      var d = Lanchat.diagnostics[i]
+      lines.push(root.timeLabel(d.ts) + "  " + d.message)
+    }
+    copyToClipboard(lines.join("\n"))
   }
 
   function isConfirmedFriend(id) {
@@ -983,43 +994,73 @@ Panel {
                     }
                   }
 
-                  // Help & diagnostics row.
+                  // Diagnostics section — shows the daemon's diagnostic log
+                  // lines inline (peer expiry, dropped messages, send failures).
                   Item {
                     width: parent.width
-                    height: Style.space(28)
+                    height: Style.space(30)
 
                     Text {
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "Help"
+                      text: "Diagnostics"
                       color: Color.popups.text
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
                     }
 
-                    Row {
+                    // Copy all diagnostic lines to the clipboard.
+                    Button {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(72)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "\uF0C5"  // nf-fa-copy
+                      tooltipText: "Copy all logs"
+                      fontSize: Style.font.bodySmall
+                      onClicked: root.copyDiagnostics()
+                    }
+
+                    // Toggle the diagnostics list open/closed.
+                    Button {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      spacing: Style.spacing.xs
+                      text: diagExpanded ? "\u25B2 Hide" : "\u25BC Show"
+                      fontSize: Style.font.caption
+                      onClicked: diagExpanded = !diagExpanded
+                    }
+                  }
 
-                      // Help button — opens HELP.md in the default viewer.
-                      Button {
-                        text: "\uF059"  // nf-fa-question-circle
-                        tooltipText: "Open help"
-                        fontSize: Style.font.body
-                        onClicked: root.openHelp()
-                      }
+                  // The diagnostic lines, scrollable, newest last.
+                  Item {
+                    visible: diagExpanded
+                    width: parent.width
+                    height: Math.min(Lanchat.diagnostics.length > 0
+                      ? Math.min(160, Lanchat.diagnostics.length * Style.space(16))
+                      : Style.space(20),
+                      parent.height)
+                    clip: true
 
-                      // Diagnostics button — opens the daemon.log (why peers
-                      // vanish, why messages drop).
-                      Button {
-                        text: "\uF188"  // nf-fa-bug
-                        tooltipText: "Open diagnostics log"
-                        fontSize: Style.font.body
-                        onClicked: root.openLog()
+                    Flickable {
+                      anchors.fill: parent
+                      contentHeight: diagCol.implicitHeight
+                      Column {
+                        id: diagCol
+                        width: parent.width
+                        spacing: Style.spacing.xs
+                        Repeater {
+                          model: Lanchat.diagnostics
+                          Text {
+                            width: parent.width
+                            text: root.timeLabel(modelData.ts) + "  " + modelData.message
+                            color: Color.muted
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.caption
+                            wrapMode: Text.Wrap
+                          }
+                        }
                       }
                     }
                   }
