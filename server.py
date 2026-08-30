@@ -817,6 +817,7 @@ def _handle_incoming(line: bytes, addr) -> None:
             # They accepted: reveal the messages we held until then.
             with _pending_lock:
                 held = _pending_sent.pop(pid, [])
+            _diag("inbound-friend-accept", peer=pid[:12], name=pname, revealed=len(held))
             _reveal(held)
         return
     if msg.get("t") == "friendReject":
@@ -825,6 +826,7 @@ def _handle_incoming(line: bytes, addr) -> None:
         with _pending_lock:
             _pending_sent.pop(pid, None)
         _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
+        _diag("inbound-friend-reject", peer=pid[:12])
         return
     if msg.get("t") == "typing":
         _emit({"event": "typing", "from": str(msg.get("from", "")), "fromName": str(msg.get("fromName") or friendly_name(msg.get("from", "")))})
@@ -885,9 +887,11 @@ def _handle_incoming(line: bytes, addr) -> None:
         with _pending_lock:
             _pending_first.setdefault(pid, []).append(message)
         _emit({"event": "friend-request", "from": pid, "fromName": from_name, "text": text, "ts": ts, "mid": message["mid"]})
+        _diag("inbound-friend-request", peer=pid[:12], name=from_name, text=text[:40])
         return
     append_history(message)
     _emit({"event": "message", "message": message})
+    _diag("inbound-message", peer=pid[:12], name=from_name, text=text[:40])
 
 
 # --------------------------------------------------------------------------
@@ -1020,11 +1024,13 @@ def send_message(peer_id: str, text: str, friend_request: bool = False, attachme
         if friend_request:
             _emit({"event": "friend-request", "outgoing": True, "to": peer_id, "toName": peer["name"],
                    "text": text, "ts": msg["ts"], "mid": msg["mid"]})
+            _diag("outbound-friend-request", to=peer_id[:12], name=peer["name"], text=text[:40])
         else:
             msg["to"] = peer_id
             msg["outgoing"] = True
             append_history(msg)
             _emit({"event": "message", "message": msg})
+            _diag("outbound-message-sent", to=peer_id[:12], name=peer["name"], text=text[:40])
         return True
     except OSError as e:
         _emit({"event": "error", "message": "could not reach %s: %s" % (peer["name"], e)})
@@ -1348,7 +1354,10 @@ def stdin_loop() -> None:
                 # Reveal the messages we held from them until acceptance.
                 with _pending_lock:
                     held = _pending_first.pop(pid, [])
+                _diag("accepted-friend-request", peer=pid[:12], name=pname, revealed=len(held))
                 _reveal(held)
+            else:
+                _diag("accept-friend-failed", peer=pid[:12], name=pname)
         elif kind == "rejectFriend":
             pid = str(cmd.get("id", ""))
             send_control(pid, "friendReject")
@@ -1356,6 +1365,7 @@ def stdin_loop() -> None:
             with _pending_lock:
                 _pending_first.pop(pid, None)
             _emit({"event": "friend-rejected", "id": pid})
+            _diag("rejected-friend-request", peer=pid[:12])
         elif kind == "unfriend":
             pid = str(cmd.get("id", ""))
             if unfriend(pid):
