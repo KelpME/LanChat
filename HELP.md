@@ -33,12 +33,17 @@ anything.
 ## The bar icon
 
 Click the chat icon in the bar to open Lanchat. The badge shows unread messages
-and how many peers are online.
+and how many peers are online. The **icon's color reflects your status**:
+white = Available, red = Do Not Disturb, orange = Away, yellow = Be Right Back.
+**Right-click** the icon for a menu: toggle online/offline, or pick a status.
 
 ## The chat panel
 
-- **Left column** — your online peers, the peer count, and Settings.
+- **Left column** — your online peers (each with a status dot), the peer count,
+  and Settings.
 - **Right column** — the selected peer's conversation and the compose box.
+- **Draggable divider** — drag the thin bar between the peer list and the chat
+  to resize the columns.
 - **Paperclip** — attach and send a file. The receiver gets an **Incoming
   file** bar with a **Save** button; accepting saves it to your download
   folder.
@@ -51,6 +56,8 @@ and how many peers are online.
 - **Name** — your display name, with a re-roll button for a fresh friendly
   name.
 - **Online** — go offline to stop broadcasting and drop inbound messages.
+- **Status** — set your status: **Available**, **DND**, **Away**, or **BRB**.
+  Shown to friends on their peer list and via the bar icon color.
 - **API** — the HTTP API for scripts/agents (see below).
 - **Agent full access** — when the API is on, whether the agent can *read* your
   chat data or only *send*.

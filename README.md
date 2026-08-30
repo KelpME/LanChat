@@ -100,6 +100,7 @@ agents) — it is not needed for peer messaging.
 | `downloadDir` | `~/Downloads`      | Where accepted attachments are saved         |
 | `sendDelay`   | `0`                | Undo window in seconds (`0` = off)           |
 | `panelSize`   | `medium`           | Panel size: `small`, `medium`, `large`, `xl`, `full` |
+| `status`      | `available`        | Your status: `available`, `dnd`, `away`, `brb`       |
 
 ## Using the app
 

@@ -1,13 +1,14 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "shared"
 
-// Lanchat bar widget: one chat icon, a live online/unread badge, and a
-// click that summons the chat panel. The panel is hosted here (loaded via a
-// Loader, clock-style) and the bar renders it as a popup off this button.
+// Lanchat bar widget: a chat icon whose color reflects your status, a live
+// online/unread badge, a left-click that opens the chat panel, and a
+// right-click menu to toggle online/offline or set your status.
 BarWidget {
   id: root
   moduleName: "KelpME.lanchat"
@@ -36,6 +37,17 @@ BarWidget {
     if ("hostWidget" in target) target.hostWidget = root
   }
 
+  // Icon color reflects status: red=DND, white=Available, yellow=BRB, orange=Away.
+  readonly property color statusColor: Lanchat.status === "dnd" ? Color.urgent
+    : Lanchat.status === "brb" ? Qt.rgba(0.95, 0.8, 0.2, 1)
+    : Lanchat.status === "away" ? Qt.rgba(0.95, 0.55, 0.2, 1)
+    : Color.foreground  // available
+
+  readonly property string statusLabel: Lanchat.status === "dnd" ? "Do Not Disturb"
+    : Lanchat.status === "brb" ? "Be Right Back"
+    : Lanchat.status === "away" ? "Away"
+    : "Available"
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -59,12 +71,54 @@ BarWidget {
     bar: root.bar
     text: "\uF086" // nf-fa-comments
     active: Lanchat.onlineCount > 0
-    tooltipText: Lanchat.onlineCount === 0
-      ? "Lanchat — no peers online"
-      : "Lanchat — " + Lanchat.onlineCount + " online" +
-        (Lanchat.unreadCount > 0 ? " · " + Lanchat.unreadCount + " unread" : "")
+    useActiveColor: false
+    foreground: Lanchat.online ? root.statusColor : Qt.darker(root.statusColor, 1.4)
+    tooltipText: "Lanchat — " + root.statusLabel +
+      (Lanchat.online ? "" : " (offline)") +
+      (Lanchat.onlineCount > 0 ? " · " + Lanchat.onlineCount + " online" : "")
     onPressed: function(b) {
       if (b === Qt.LeftButton) root.togglePanel()
+      else if (b === Qt.RightButton) statusMenu.open()
+    }
+  }
+
+  // Right-click menu: online/offline toggle + status presets.
+  Popup {
+    id: statusMenu
+    x: button.width / 2
+    y: button.height + 4
+    width: 180
+    padding: 0
+    background: Rectangle {
+      color: Color.popups.background
+      radius: Style.cornerRadius
+      border.color: Color.popups.border
+      border.width: 1
+    }
+
+    Column {
+      width: parent.width
+      spacing: 1
+
+      MenuItem {
+        text: Lanchat.online ? "Go offline" : "Go online"
+        onClicked: Lanchat.setOnline(!Lanchat.online)
+      }
+
+      Rectangle { width: parent.width; height: 1; color: Color.popups.border }
+
+      Text {
+        text: "Status"
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        color: Color.muted
+        leftPadding: 10
+        topPadding: 4
+      }
+      MenuItem { text: "Available"; onClicked: Lanchat.setStatus("available") }
+      MenuItem { text: "Do Not Disturb"; onClicked: Lanchat.setStatus("dnd") }
+      MenuItem { text: "Away"; onClicked: Lanchat.setStatus("away") }
+      MenuItem { text: "Be Right Back"; onClicked: Lanchat.setStatus("brb") }
     }
   }
 

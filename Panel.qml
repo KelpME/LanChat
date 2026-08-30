@@ -19,6 +19,9 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
 
+  // Width of the left peer column (draggable via the divider). Not persisted.
+  property real peerColW: Style.space(280)
+
   // The conversation currently on screen ("" = none selected).
   property string selectedPeerId: ""
 
@@ -226,7 +229,7 @@ Panel {
 
           // Left: peer list
           Rectangle {
-            width: Style.space(280)
+            width: root.peerColW
             height: parent.height
             color: Util.alpha(Color.foreground, 0.04)
 
@@ -270,10 +273,24 @@ Panel {
                     color: Color.accent
                   }
 
-                  Text {
+                  // Status dot: colored per the peer's status.
+                  Rectangle {
+                    width: Style.space(8)
+                    height: Style.space(8)
+                    radius: width / 2
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: Style.spacing.sm
+                    color: modelData.status === "dnd" ? Color.urgent
+                      : modelData.status === "away" ? Qt.rgba(0.9,0.7,0.2,1)
+                      : modelData.status === "brb" ? Qt.rgba(0.9,0.5,0.3,1)
+                      : Color.accent  // available
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.spacing.xl
                     anchors.right: parent.right
                     anchors.rightMargin: Style.spacing.sm
                     text: modelData.name
@@ -457,6 +474,46 @@ Panel {
                     }
                   }
 
+                  // Status row.
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: statusTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Status"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: statusTipHover.containsMouse
+                      text: "Your status is shown to friends."
+                    }
+
+                    Row {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.spacing.xs
+
+                      Button { text: "Available"; fontSize: Style.font.caption; onClicked: Lanchat.setStatus("available") }
+                      Button { text: "DND"; fontSize: Style.font.caption; onClicked: Lanchat.setStatus("dnd") }
+                      Button { text: "Away"; fontSize: Style.font.caption; onClicked: Lanchat.setStatus("away") }
+                      Button { text: "BRB"; fontSize: Style.font.caption; onClicked: Lanchat.setStatus("brb") }
+                    }
+                  }
+
                   // API row
                   Item {
                     width: parent.width
@@ -518,7 +575,7 @@ Panel {
 
                     Text {
                       anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm + Style.space(8)
+                      anchors.leftMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
                       text: "Agent full access"
                       color: Color.popups.text
@@ -545,6 +602,12 @@ Panel {
                     width: parent.width
                     height: Style.space(28)
 
+                    MouseArea {
+                      id: undoTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
                     Text {
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
@@ -554,6 +617,11 @@ Panel {
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: undoTipHover.containsMouse
+                      text: "Hold messages for N seconds so you can undo them before they send."
                     }
 
                     TextField {
@@ -577,6 +645,12 @@ Panel {
                     width: parent.width
                     height: Style.space(28)
 
+                    MouseArea {
+                      id: saveTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
                     Text {
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
@@ -586,6 +660,11 @@ Panel {
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: saveTipHover.containsMouse
+                      text: "Folder where accepted files are saved (default ~/Downloads)."
                     }
 
                     Button {
@@ -602,6 +681,12 @@ Panel {
                     width: parent.width
                     height: Style.space(28)
 
+                    MouseArea {
+                      id: sizeTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
                     Text {
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
@@ -611,6 +696,11 @@ Panel {
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: sizeTipHover.containsMouse
+                      text: "S/M/L/XL/F — panel window size. F fills the screen."
                     }
 
                     Row {
@@ -688,15 +778,39 @@ Panel {
             }
           }
 
+          // Draggable divider between peer list and thread.
           Rectangle {
-            width: 1
+            width: Style.space(8)
             height: parent.height
-            color: Color.popups.border
+            color: "transparent"
+            anchors.margins: 0
+
+            Rectangle {
+              width: 1
+              height: parent.height
+              anchors.horizontalCenter: parent.horizontalCenter
+              color: Color.popups.border
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.SizeHorCursor
+              property bool dragging: false
+              onPressed: dragging = true
+              onReleased: dragging = false
+              onPositionChanged: {
+                // New width = handle's center X within the panel (parent of the Row).
+                if (dragging) {
+                  var px = parent.mapToItem(parent.parent, mouse.x, 0).x
+                  root.peerColW = Math.max(Style.space(140), Math.min(px + Style.space(4), parent.parent.width - Style.space(200)))
+                }
+              }
+            }
           }
 
           // Right: thread + compose
           Column {
-            width: parent.width - Style.space(280) - 1
+            width: parent.width - root.peerColW - 1
             height: parent.height
 
             ListView {
