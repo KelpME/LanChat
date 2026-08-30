@@ -15,12 +15,20 @@ cloud.
   machines can be offline.
 - **A native bar UI** — one chat icon in the bar, an online-peer + unread
   badge, and a click opens the chat panel (peer list + thread + compose box).
+- **Undoable sends** — an optional send-delay window holds a message with a
+  countdown so you can undo it before it goes out.
+- **LocalSend-style file attachments** — send single files over the encrypted
+  transport; the receiver accepts them and they're saved to your chosen
+  folder (default `~/Downloads`).
+- **Lazy-loaded conversations** — long threads page in as you scroll, keeping
+  the panel fluid.
 
-> ⚠️ **Security caveat.** This is plaintext messaging over your local network.
-> The shared token gates *who can talk to you*, but it does not encrypt the
-> traffic. It is intended for a trusted home or office LAN. Anyone who can
-> sniff the wire can read messages. Don't use it on a public or untrusted
-> network.
+> 🔒 **Security.** All messaging and file transfer is **TLS-encrypted** with a
+> per-install self-signed certificate. Your device's identity is its cert's
+> SHA-256 fingerprint (not its hostname), and peers verify each other's
+> fingerprint. A **friend/handshake** gate means only approved friends (or
+> peers you've requested) can message you. An **online/offline** toggle drops
+> inbound traffic when you're away. The shared token still gates discovery.
 
 ## Requirements
 

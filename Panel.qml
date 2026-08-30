@@ -69,6 +69,8 @@ Panel {
 
   function selectPeer(id) {
     selectedPeerId = id
+    Lanchat.resetHistoryMeta(id)
+    Lanchat.refreshHistory(id, 0, 50)
     list.positionViewAtEnd()
   }
 
@@ -527,6 +529,16 @@ Panel {
               footer: Item { width: parent.width; height: Style.spacing.lg }
 
               onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
+
+              // Lazy-load: when scrolled to the top, fetch an older page.
+              onAtYBeginningChanged: {
+                if (list.atYBeginning && root.selectedPeerId)
+                  Lanchat.loadOlder(root.selectedPeerId)
+              }
+              onContentYChanged: {
+                if (contentY <= 2 && root.selectedPeerId)
+                  Lanchat.loadOlder(root.selectedPeerId)
+              }
 
               delegate: Column {
                 required property var modelData

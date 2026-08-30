@@ -36,6 +36,10 @@ QtObject {
   property int unreadCount: 0
   property int onlineCount: 0
 
+  // Per-peer lazy-load state: total messages on the server and how many we've
+  // loaded for each peer (so we can fetch older ones on scroll).
+  property var historyMeta: ({})   // peerId -> {total, loaded}
+
   readonly property bool hasPeers: onlineCount > 0
 
   // ---- daemon lifecycle -------------------------------------------------
@@ -76,6 +80,19 @@ QtObject {
 
   function refreshHistory(peer, offset, limit) {
     daemon.write(JSON.stringify({ cmd: "history", peer: peer || "", offset: offset || 0, limit: limit || 100 }) + "\n")
+  }
+
+  // Load an older page of a peer's history (lazy-load on scroll to top).
+  function loadOlder(peer) {
+    var meta = historyMeta[peer] || { total: 0, loaded: 0 }
+    if (meta.loaded >= meta.total) return
+    var chunk = 50
+    daemon.write(JSON.stringify({ cmd: "history", peer: peer, offset: meta.loaded, limit: chunk }) + "\n")
+  }
+
+  // Reset a peer's history view (e.g. on clear chat or peer switch).
+  function resetHistoryMeta(peer) {
+    historyMeta[peer] = { total: 0, loaded: 0 }
   }
 
   function refreshPeers() {
@@ -241,9 +258,35 @@ QtObject {
       break
     }
 
-    case "history":
-      lanchat.messages = obj.messages || []
+    case "history": {
+      // Full snapshot (no peer) replaces everything.
+      if (!obj.peer) { lanchat.messages = obj.messages || []; break }
+
+      // Per-peer lazy-load page: track meta + merge older messages (prepend).
+      var peer = obj.peer
+      var meta = lanchat.historyMeta[peer] || { total: 0, loaded: 0 }
+      meta.total = obj.total !== undefined ? obj.total : meta.total
+      meta.loaded = (obj.messages || []).length
+      var nextMeta = {}
+      for (var mk in lanchat.historyMeta) nextMeta[mk] = lanchat.historyMeta[mk]
+      nextMeta[peer] = meta
+      lanchat.historyMeta = nextMeta
+
+      // Prepend the older page to messages, dedup by mid.
+      var incoming = obj.messages || []
+      var have = {}
+      for (var i = 0; i < lanchat.messages.length; i++) {
+        var m = lanchat.messages[i]
+        if (m.mid) have[m.mid] = true
+      }
+      var merged = incoming.slice()
+      for (var j = 0; j < lanchat.messages.length; j++) {
+        var mm = lanchat.messages[j]
+        if (!mm.mid || !have[mm.mid]) merged.push(mm)
+      }
+      lanchat.messages = merged
       break
+    }
 
     case "peers":
       lanchat.peers = obj.peers || []
