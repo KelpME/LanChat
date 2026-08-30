@@ -359,7 +359,11 @@ Panel {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                height: settingsHeader.height + (settings.expanded ? settingsBody.height : 0)
+                // Cap height to the column so the body scrolls instead of
+                // overflowing off the app when the panel is short/narrow.
+                height: settingsHeader.height + (settings.expanded
+                  ? Math.min(settingsBody.contentHeight, Math.max(0, parent.height - settingsHeader.height - Style.space(30)))
+                  : 0)
 
                 // header
                 Item {
@@ -404,16 +408,28 @@ Panel {
                   }
                 }
 
-                // body (name + online + API + undo + save) — compact rows
-                Column {
+                // body (name + online + API + undo + save) — compact rows,
+                // scrollable so it never overflows the panel.
+                Flickable {
                   id: settingsBody
                   width: parent.width
+                  height: Math.min(bodyCol.implicitHeight, parent.height - settingsHeader.height - Style.space(30))
                   visible: settings.expanded
-                  spacing: Style.spacing.xs
+                  contentWidth: width
+                  contentHeight: bodyCol.implicitHeight
+                  clip: true
+                  boundsBehavior: Flickable.StopAtBounds
+                  interactive: contentHeight > height
 
-                  // Name row (top)
-                  Item {
+                  Column {
+                    id: bodyCol
                     width: parent.width
+                    spacing: Style.spacing.xs
+                    anchors.top: parent.top
+
+                    // Name row (top)
+                    Item {
+                      width: parent.width
                     height: Style.space(30)
 
                     Text {
@@ -845,6 +861,7 @@ Panel {
                       font.pixelSize: Style.font.caption
                     }
                   }
+                  }
                 }
               }
             }
@@ -874,7 +891,7 @@ Panel {
                 // New width = handle's center X within the panel (parent of the Row).
                 if (dragging) {
                   var px = parent.mapToItem(parent.parent, mouse.x, 0).x
-                  root.peerColW = Math.max(Style.space(140), Math.min(px + Style.space(4), parent.parent.width - Style.space(200)))
+                  root.peerColW = Math.max(Style.space(260), Math.min(px + Style.space(4), parent.parent.width - Style.space(200)))
                 }
               }
             }
