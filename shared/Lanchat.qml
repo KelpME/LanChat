@@ -27,6 +27,10 @@ QtObject {
   property bool online: true
   property var friends: []        // [{id,address,name,confirmed}]
 
+  property string downloadDir: ""
+  property int sendDelay: 0
+  property var pendingSends: []  // [{mid, to, text, remaining, total}]
+
   property var peers: []          // [{id,name,address,port,lastSeen}]
   property var messages: []       // [{from,fromName,text,ts,outgoing}]
   property int unreadCount: 0
@@ -50,13 +54,28 @@ QtObject {
 
   // ---- commands to the daemon -------------------------------------------
 
-  function send(to, text) {
-    if (!text || !to) return
-    daemon.write(JSON.stringify({ cmd: "send", to: to, text: text }) + "\n")
+  // Send a message, honoring the undo/send-delay window. When sendDelay>0 the
+  // message is held in pendingSends and auto-released after the delay, so the
+  // user can undo it.
+  function send(to, text, attachment) {
+    if (!text && !attachment) return
+    if (!to) return
+    var mid = "m" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)
+    if (sendDelay > 0) {
+      pendingSends = pendingSends.concat([{ mid: mid, to: to, text: text, attachment: attachment, total: sendDelay, remaining: sendDelay }])
+      undoTimer.restart()
+    } else {
+      daemon.write(JSON.stringify({ cmd: "send", to: to, text: text || "", attachment: attachment || null }) + "\n")
+    }
   }
 
-  function refreshHistory() {
-    daemon.write(JSON.stringify({ cmd: "history" }) + "\n")
+  // Cancel a held (undelivered) message.
+  function undo(mid) {
+    pendingSends = pendingSends.filter(function(s) { return s.mid !== mid })
+  }
+
+  function refreshHistory(peer, offset, limit) {
+    daemon.write(JSON.stringify({ cmd: "history", peer: peer || "", offset: offset || 0, limit: limit || 100 }) + "\n")
   }
 
   function refreshPeers() {
@@ -65,6 +84,28 @@ QtObject {
 
   function clearUnread() {
     unreadCount = 0
+  }
+
+  function clearChat(peer) {
+    daemon.write(JSON.stringify({ cmd: "clearChat", peer: peer }) + "\n")
+  }
+
+  function deleteMessage(mid) {
+    daemon.write(JSON.stringify({ cmd: "deleteMessage", mid: mid }) + "\n")
+  }
+
+  function setDownloadDir(dir) {
+    downloadDir = dir
+    daemon.write(JSON.stringify({ cmd: "setDownloadDir", dir: dir }) + "\n")
+  }
+
+  function setSendDelay(seconds) {
+    sendDelay = seconds
+    daemon.write(JSON.stringify({ cmd: "setSendDelay", seconds: seconds }) + "\n")
+  }
+
+  function acceptAttachment(from, fileId, name) {
+    daemon.write(JSON.stringify({ cmd: "acceptAttachment", from: from, fileId: fileId, name: name }) + "\n")
   }
 
   // Toggle the optional HTTP API (start/stop the daemon's HTTP server).
@@ -116,6 +157,8 @@ QtObject {
       if (obj.httpPort !== undefined) lanchat.httpPort = obj.httpPort
       if (obj.online !== undefined) lanchat.online = obj.online
       if (obj.friends !== undefined) lanchat.friends = obj.friends
+      if (obj.downloadDir !== undefined) lanchat.downloadDir = obj.downloadDir
+      if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
       lanchat.refreshHistory()
       lanchat.refreshPeers()
       break
@@ -140,6 +183,32 @@ QtObject {
 
     case "friend-rejected":
       lanchat.statusMessage = (obj.name || "Peer") + " declined your request"
+      lanchat.statusTimer.restart()
+      break
+
+    case "download-dir":
+      lanchat.downloadDir = obj.dir || ""
+      break
+
+    case "send-delay":
+      lanchat.sendDelay = obj.seconds || 0
+      break
+
+    case "chat-cleared":
+      // Remove all messages with this peer from the UI list.
+      lanchat.messages = lanchat.messages.filter(function(m) {
+        return !(m.to === obj.peer || m.from === obj.peer)
+      })
+      break
+
+    case "message-deleted":
+      if (obj.ok) {
+        lanchat.messages = lanchat.messages.filter(function(m) { return m.mid !== obj.mid })
+      }
+      break
+
+    case "attachment-saved":
+      lanchat.statusMessage = obj.ok ? ("Saved to " + obj.path) : ("Failed to save attachment: " + obj.path)
       lanchat.statusTimer.restart()
       break
 
@@ -204,6 +273,27 @@ QtObject {
   property Timer statusTimer: Timer {
     interval: 6000
     onTriggered: lanchat.statusMessage = ""
+  }
+
+  // Drives the send-delay countdown; releases held messages when their time
+  // elapses, decrementing remaining so the UI can draw a countdown ring.
+  property Timer undoTimer: Timer {
+    interval: 100
+    repeat: true
+    onTriggered: {
+      var still = []
+      for (var i = 0; i < lanchat.pendingSends.length; i++) {
+        var s = lanchat.pendingSends[i]
+        s.remaining -= 0.1
+        if (s.remaining <= 0) {
+          daemon.write(JSON.stringify({ cmd: "send", to: s.to, text: s.text || "", attachment: s.attachment || null }) + "\n")
+        } else {
+          still.push(s)
+        }
+      }
+      lanchat.pendingSends = still
+      if (still.length === 0) stop()
+    }
   }
 
   property Process daemon: Process {

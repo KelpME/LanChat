@@ -188,6 +188,10 @@ def load_config() -> None:
     # Online presence + friend list (persisted).
     CONFIG.setdefault("online", True)
     CONFIG.setdefault("friends", [])
+    # Attachment download folder (defaults to the system Downloads dir).
+    CONFIG.setdefault("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads"))
+    # Send-delay/undo window in seconds (0 = disabled).
+    CONFIG.setdefault("sendDelay", 0)
     # Stable, unique per-install id (independent of hostname so two machines
     # with the same hostname still distinguish each other).
     CONFIG.setdefault("id", secrets.token_hex(6))
@@ -323,21 +327,58 @@ def load_history() -> None:
 
 def append_history(message: dict) -> None:
     global _history
+    if not message.get("mid"):
+        message["mid"] = secrets.token_hex(8)
     with _hist_lock:
         _history.append(message)
         if len(_history) > HISTORY_LIMIT:
             _history = _history[-HISTORY_LIMIT:]
-        try:
-            os.makedirs(STATE_DIR, exist_ok=True)
-            with open(HISTORY_PATH, "w", encoding="utf-8") as f:
-                json.dump(_history, f, separators=(",", ":"))
-        except OSError:
-            pass
+        _save_history_locked()
+
+
+def _save_history_locked() -> None:
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(_history, f, separators=(",", ":"))
+    except OSError:
+        pass
 
 
 def history_snapshot() -> list:
     with _hist_lock:
         return list(_history)
+
+
+def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
+    """Lazy-load a peer's thread, newest-last, paged by offset/limit."""
+    with _hist_lock:
+        peer_msgs = [m for m in _history if (m.get("to") == peer_id or m.get("from") == peer_id)]
+    total = len(peer_msgs)
+    start = max(0, total - offset - limit)
+    page = peer_msgs[start:max(start + limit, total - offset)] if total else []
+    return {"peer": peer_id, "total": total, "messages": page}
+
+
+def clear_history_for_peer(peer_id: str) -> int:
+    global _history
+    with _hist_lock:
+        before = len(_history)
+        _history = [m for m in _history if not (m.get("to") == peer_id or m.get("from") == peer_id)]
+        removed = before - len(_history)
+        _save_history_locked()
+    return removed
+
+
+def delete_message(mid: str) -> bool:
+    global _history
+    with _hist_lock:
+        before = len(_history)
+        _history = [m for m in _history if m.get("mid") != mid]
+        removed = before != len(_history)
+        if removed:
+            _save_history_locked()
+    return removed
 
 
 # --------------------------------------------------------------------------
@@ -356,7 +397,7 @@ def peer_snapshot() -> list:
         )
 
 
-def upsert_peer(pid: str, name: str, address: str, pport: int) -> None:
+def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: int = None) -> None:
     now = time.time()
     with _peers_lock:
         existed = pid in _peers
@@ -365,6 +406,7 @@ def upsert_peer(pid: str, name: str, address: str, pport: int) -> None:
             "name": name,
             "address": address,
             "port": pport,
+            "httpPort": phttp,
             "lastSeen": int(now * 1000),
         }
     if not existed:
@@ -480,6 +522,7 @@ def _udp_listener(sock: socket.socket) -> None:
                 name,
                 addr[0],
                 int(pkt.get("port", DEFAULT_PORT)),
+                int(pkt.get("httpPort", 0)) or None,
             )
             # Reply so the caller learns about us immediately.
             _udp_send(sock, {"t": "pong"})
@@ -489,6 +532,7 @@ def _udp_send(sock: socket.socket, pkt: dict) -> None:
     pkt["id"] = host_id()
     pkt["name"] = display_name()
     pkt["port"] = port()
+    pkt["httpPort"] = http_port()
     pkt["token"] = CONFIG.get("token")
     try:
         sock.sendto(json.dumps(pkt).encode("utf-8"), ("255.255.255.255", port()))
@@ -647,6 +691,53 @@ def _handle_incoming(line: bytes, addr) -> None:
 # Sending
 # --------------------------------------------------------------------------
 
+_attachments = {}   # fileId -> {"path": str, "name": str, "expires": float}
+_att_lock = threading.Lock()
+
+
+def _file_sha256(path: str) -> str:
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+    except OSError:
+        return ""
+    return h.hexdigest()
+
+
+def register_attachment(file_id: str, path: str, name: str, ttl: float = 600.0) -> None:
+    with _att_lock:
+        _attachments[file_id] = {"path": path, "name": name, "expires": time.time() + ttl}
+
+
+def get_attachment(file_id: str):
+    with _att_lock:
+        a = _attachments.get(file_id)
+        if a and a["expires"] > time.time():
+            return a
+        return None
+
+
+def _download_attachment(peer: dict, file_id: str, save_to: str) -> bool:
+    """Receiver fetches a file from a peer's HTTPS server and saves it."""
+    import urllib.request
+    import urllib.error
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE  # fingerprint-verified peer already
+    url = "https://%s:%d/attachment?fileId=%s&token=%s" % (
+        peer["address"], peer.get("httpPort") or http_port(), file_id, CONFIG.get("token"))
+    try:
+        with urllib.request.urlopen(url, timeout=60, context=ctx) as resp:
+            os.makedirs(os.path.dirname(save_to) or ".", exist_ok=True)
+            with open(save_to, "wb") as f:
+                f.write(resp.read())
+        return True
+    except Exception:
+        return False
+
+
 def _tls_connect(peer: dict, expected_fingerprint: str = ""):
     """Connect to a peer over TLS and verify their cert fingerprint.
 
@@ -677,7 +768,7 @@ def _tls_connect(peer: dict, expected_fingerprint: str = ""):
         return None
 
 
-def send_message(peer_id: str, text: str, friend_request: bool = False) -> bool:
+def send_message(peer_id: str, text: str, friend_request: bool = False, attachment: dict = None) -> bool:
     peer = find_peer(peer_id)
     if peer is None:
         _emit({"event": "error", "message": "peer '%s' is not online yet" % peer_id})
@@ -697,6 +788,8 @@ def send_message(peer_id: str, text: str, friend_request: bool = False) -> bool:
             "text": text,
             "ts": int(time.time() * 1000),
         }
+        if attachment:
+            msg["attachment"] = attachment  # {name,size,mime,fileId,sha256}
         if friend_request:
             msg["friendRequest"] = True
             # Record the peer as a pending-request friend on our side, so they
@@ -789,6 +882,23 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
             return self._send_json(200, {"ok": True, "peers": peer_snapshot()})
         if parsed.path == "/messages":
             return self._send_json(200, {"ok": True, "messages": history_snapshot()})
+        if parsed.path == "/attachment":
+            file_id = (qs.get("fileId") or [""])[0]
+            att = get_attachment(file_id)
+            if not att:
+                return self._send_json(404, {"ok": False, "error": "not found"})
+            try:
+                with open(att["path"], "rb") as f:
+                    data = f.read()
+            except OSError:
+                return self._send_json(404, {"ok": False, "error": "file missing"})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Disposition", "attachment; filename=%s" % att["name"])
+            self.end_headers()
+            self.wfile.write(data)
+            return
         self._send_json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self):
@@ -865,13 +975,57 @@ def stdin_loop() -> None:
             continue
         kind = cmd.get("cmd")
         if kind == "send":
+            att = cmd.get("attachment")
+            if att and att.get("path"):
+                # Local file: register it for the receiver to fetch, build metadata.
+                path = str(att["path"])
+                file_id = secrets.token_hex(8)
+                name = str(att.get("name") or os.path.basename(path))
+                try:
+                    size = os.path.getsize(path)
+                except OSError:
+                    size = 0
+                register_attachment(file_id, path, name)
+                att = {"name": name, "size": size, "mime": "application/octet-stream",
+                       "fileId": file_id, "sha256": _file_sha256(path)}
             send_message(
                 str(cmd.get("to", "")),
                 str(cmd.get("text", "")),
                 bool(cmd.get("friend_request")),
+                att,
             )
         elif kind == "history":
-            _emit({"event": "history", "messages": history_snapshot()})
+            peer = str(cmd.get("peer", ""))
+            if peer:
+                _emit({"event": "history", "peer": peer,
+                       "total": history_for_peer(peer)["total"],
+                       "messages": history_for_peer(peer, int(cmd.get("offset", 0)), int(cmd.get("limit", 100)))["messages"]})
+            else:
+                _emit({"event": "history", "messages": history_snapshot()})
+        elif kind == "clearChat":
+            removed = clear_history_for_peer(str(cmd.get("peer", "")))
+            _emit({"event": "chat-cleared", "peer": str(cmd.get("peer", "")), "removed": removed})
+        elif kind == "deleteMessage":
+            ok = delete_message(str(cmd.get("mid", "")))
+            _emit({"event": "message-deleted", "mid": str(cmd.get("mid", "")), "ok": ok})
+        elif kind == "setDownloadDir":
+            CONFIG["downloadDir"] = str(cmd.get("dir", ""))
+            _save_config()
+            _emit({"event": "download-dir", "dir": CONFIG["downloadDir"]})
+        elif kind == "setSendDelay":
+            CONFIG["sendDelay"] = int(cmd.get("seconds", 0))
+            _save_config()
+            _emit({"event": "send-delay", "seconds": CONFIG["sendDelay"]})
+        elif kind == "acceptAttachment":
+            peer = find_peer(str(cmd.get("from", "")))
+            if not peer:
+                _emit({"event": "error", "message": "attachment sender not found"})
+                continue
+            file_id = str(cmd.get("fileId", ""))
+            name = str(cmd.get("name", "download"))
+            save_to = os.path.join(CONFIG.get("downloadDir", os.path.expanduser("~/Downloads")), name)
+            ok = _download_attachment(peer, file_id, save_to)
+            _emit({"event": "attachment-saved", "ok": ok, "path": save_to})
         elif kind == "list":
             _emit({"event": "peers", "peers": peer_snapshot()})
         elif kind == "setHttp":
@@ -936,6 +1090,8 @@ def _ready_event() -> dict:
         "httpPort": http_port(),
         "online": is_online(),
         "friends": friends_list(),
+        "downloadDir": CONFIG.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),
+        "sendDelay": CONFIG.get("sendDelay", 0),
     }
 
 

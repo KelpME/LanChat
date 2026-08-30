@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "shared"
@@ -20,6 +21,17 @@ Panel {
 
   // The conversation currently on screen ("" = none selected).
   property string selectedPeerId: ""
+
+  // The most recent un-accepted incoming attachment for the selected peer.
+  readonly property var pendingAttachment: {
+    var all = Lanchat.messages
+    for (var i = all.length - 1; i >= 0; i--) {
+      var m = all[i]
+      if (!m.outgoing && m.from === selectedPeerId && m.attachment && !m.attachment.accepted)
+        return m.attachment
+    }
+    return null
+  }
 
   readonly property var selectedPeer: {
     var list = Lanchat.peers
@@ -45,6 +57,16 @@ Panel {
 
   readonly property bool hasThread: thread.length > 0
 
+  // Held (un-sent) messages for the selected peer, for the undo bar.
+  readonly property var pendingForPeer: {
+    var out = []
+    var list = Lanchat.pendingSends
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].to === selectedPeerId) out.push(list[i])
+    }
+    return out
+  }
+
   function selectPeer(id) {
     selectedPeerId = id
     list.positionViewAtEnd()
@@ -56,6 +78,31 @@ Panel {
     Lanchat.send(selectedPeerId, text)
     input.text = ""
     list.positionViewAtEnd()
+  }
+
+  // Pick a file to attach and send it.
+  function attachAndSend() {
+    if (!selectedPeerId) return
+    attachProc.command = ["zenity", "--file-selection", "--title", "Choose file to send"]
+    attachProc.running = true
+  }
+
+  // Undo a held (un-sent) message.
+  function undoPending(mid) {
+    Lanchat.undo(mid)
+  }
+
+  function clearChat() {
+    if (selectedPeerId) Lanchat.clearChat(selectedPeerId)
+  }
+
+  function deleteMsg(mid) {
+    Lanchat.deleteMessage(mid)
+  }
+
+  function pickDownloadDir() {
+    dirProc.command = ["zenity", "--file-selection", "--directory", "--title", "Choose download folder"]
+    dirProc.running = true
   }
 
   function timeLabel(ts) {
@@ -94,6 +141,38 @@ Panel {
   }
 
   Component.onCompleted: Lanchat.panelOpen = false
+
+  // File picker for attaching a file to send.
+  Process {
+    id: attachProc
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(data) {
+        var path = String(data).trim()
+        if (!path || path === "") return
+        root.sendFile(path)
+      }
+    }
+  }
+
+  // Folder picker for the download directory.
+  Process {
+    id: dirProc
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(data) {
+        var dir = String(data).trim()
+        if (!dir || dir === "") return
+        Lanchat.setDownloadDir(dir)
+      }
+    }
+  }
+
+  // Register an attachment and send it to the selected peer.
+  function sendFile(path) {
+    if (!selectedPeerId) return
+    Lanchat.send(selectedPeerId, "", { name: path.split("/").pop(), path: path })
+  }
 
   KeyboardPanel {
     id: win
@@ -363,6 +442,63 @@ Panel {
                       onClicked: Lanchat.regenerateName()
                     }
                   }
+
+                  // Send-delay row (undo window).
+                  Item {
+                    width: parent.width
+                    height: Style.space(42)
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Undo delay"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    TextField {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Style.space(48)
+                      text: Lanchat.sendDelay
+                      maximumLength: 3
+                      horizontalPadding: Style.space(6)
+                      verticalPadding: Style.space(4)
+                      onEditingFinished: {
+                        var v = parseInt(text, 10)
+                        if (!isNaN(v)) Lanchat.setSendDelay(v)
+                      }
+                    }
+                  }
+
+                  // Download folder row.
+                  Item {
+                    width: parent.width
+                    height: Style.space(42)
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Save to"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Button {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "…"
+                      onClicked: root.pickDownloadDir()
+                    }
+                  }
                 }
               }
             }
@@ -526,6 +662,114 @@ Panel {
               }
             }
 
+            // ---- pending attachment accept bar -------------------------
+            Rectangle {
+              id: pendingBar
+              visible: root.pendingAttachment !== null
+              width: parent.width
+              height: Style.space(38)
+              color: Style.selectedAccentFill
+              Rectangle {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 1
+                color: Color.popups.border
+              }
+
+              Row {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.spacing.sm
+                anchors.rightMargin: Style.spacing.sm
+                spacing: Style.spacing.sm
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.pendingAttachment
+                    ? "Incoming file: " + root.pendingAttachment.name
+                    : ""
+                  color: Color.popups.text
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+
+                Item { width: Style.space(10); height: 1 }
+
+                Button {
+                  text: "Save"
+                  onClicked: {
+                    if (root.pendingAttachment)
+                      Lanchat.acceptAttachment(root.pendingAttachment.from, root.pendingAttachment.fileId, root.pendingAttachment.name)
+                  }
+                }
+              }
+            }
+
+            // ---- pending message undo (countdown ring) -----------------
+            Rectangle {
+              visible: root.pendingForPeer.length > 0
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: composeBox.top
+              height: Style.space(40)
+              color: Style.pressedFill
+              Rectangle {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 1
+                color: Color.popups.border
+              }
+
+              Repeater {
+                model: root.pendingForPeer
+                delegate: Row {
+                  required property var modelData
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.spacing.sm
+
+                  // Undo button with countdown ring.
+                  Rectangle {
+                    width: Style.space(26)
+                    height: Style.space(26)
+                    radius: width / 2
+                    color: "transparent"
+                    border.width: 2
+                    border.color: Color.accent
+                    // countdown ring: arc via a Canvas is heavy; use opacity as a
+                    // simple visual proxy of remaining fraction.
+                    opacity: 0.5 + 0.5 * (modelData.remaining / modelData.total)
+
+                    Text {
+                      anchors.centerIn: parent
+                      text: "\u21A9"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    MouseArea {
+                      anchors.fill: parent
+                      onClicked: root.undoPending(modelData.mid)
+                    }
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Pending… " + Math.ceil(modelData.remaining) + "s"
+                    color: Color.popups.text
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+              }
+            }
+
             // ---- compose box -----------------------------------------
             Rectangle {
               id: composeBox
@@ -540,18 +784,36 @@ Panel {
                 color: Color.popups.border
               }
 
-              TextField {
-                id: input
+              Item {
                 anchors.fill: parent
-                anchors.topMargin: Style.spacing.md
-                anchors.bottomMargin: Style.spacing.md
-                anchors.leftMargin: Style.spacing.panelPadding
-                anchors.rightMargin: Style.spacing.panelPadding
-                placeholderText: root.selectedPeer
-                  ? "Message " + root.selectedPeer.name + "…"
-                  : "Select a peer to chat"
-                enabled: root.selectedPeer !== null
-                onAccepted: root.send()
+                anchors.leftMargin: Style.spacing.sm
+                anchors.rightMargin: Style.spacing.sm
+
+                // Attachment button.
+                Button {
+                  id: attachBtn
+                  width: Style.space(34)
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "\uF0C6"  // nf-fa-paperclip
+                  onClicked: root.attachAndSend()
+                  enabled: root.selectedPeer !== null
+                }
+
+                TextField {
+                  id: input
+                  anchors.left: attachBtn.right
+                  anchors.leftMargin: Style.spacing.sm
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.topMargin: Style.spacing.md
+                  anchors.bottomMargin: Style.spacing.md
+                  placeholderText: root.selectedPeer
+                    ? "Message " + root.selectedPeer.name + "…"
+                    : "Select a peer to chat"
+                  enabled: root.selectedPeer !== null
+                  onAccepted: root.send()
+                }
               }
             }
           }
