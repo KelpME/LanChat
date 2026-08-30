@@ -115,6 +115,8 @@ agents) — it is not needed for peer messaging.
    message is cancelled.
 5. **Go offline** — toggle **Online** in Settings to stop receiving.
 6. **Clear a chat / delete a message** — via the thread controls (local-only).
+7. **Help** — the **?** button in the Settings header opens the built-in help
+   document (`HELP.md`). Hover any setting for a short explanation.
 
 ## HTTP API (optional)
 
@@ -128,6 +130,13 @@ require the shared token.
 | `GET`  | `/peers?token=…`    | token       | List online peers                             |
 | `GET`  | `/messages?token=…` | token       | This machine's message history                |
 | `POST` | `/send`             | token (body)| Send a message to a peer                      |
+
+**API access mode** — the **Agent full access** toggle in Settings controls
+whether the API can *read* chat data:
+- **On:** `/peers`, `/messages`, and file downloads work (full access).
+- **Off (default):** the API is **send-only** — the agent can send messages to
+  your friends but cannot read history, list peers, or download files. Read
+  endpoints return `403`.
 
 Send a message:
 

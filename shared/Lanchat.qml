@@ -24,6 +24,7 @@ QtObject {
 
   property bool httpEnabled: false
   property int httpPort: 4814
+  property bool apiFullAccess: false
 
   property bool online: true
   property var friends: []        // [{id,address,name,confirmed}]
@@ -159,6 +160,12 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "rejectFriend", id: id }) + "\n")
   }
 
+  // Toggle full API access to chat data (read history/peers) vs send-only.
+  function setApiFullAccess(on) {
+    apiFullAccess = on
+    daemon.write(JSON.stringify({ cmd: "setApiFullAccess", enabled: on }) + "\n")
+  }
+
   // ---- events from the daemon -------------------------------------------
 
   function onDaemonLine(raw) {
@@ -178,8 +185,13 @@ QtObject {
       if (obj.friends !== undefined) lanchat.friends = obj.friends
       if (obj.downloadDir !== undefined) lanchat.downloadDir = obj.downloadDir
       if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
+      if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
       lanchat.refreshHistory()
       lanchat.refreshPeers()
+      break
+
+    case "api-full-access":
+      lanchat.apiFullAccess = obj.enabled === true
       break
 
     case "http":

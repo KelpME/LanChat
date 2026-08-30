@@ -132,6 +132,18 @@ Panel {
     Lanchat.rejectFriend(id)
   }
 
+  // Path to the help document (HELP.md next to the panel).
+  function helpPath() {
+    var url = Qt.resolvedUrl("HELP.md").toString()
+    if (url.indexOf("file://") === 0) url = url.slice(7)
+    return decodeURIComponent(url)
+  }
+
+  // Open the help document in the default viewer.
+  function openHelp() {
+    Quickshell.execDetached(["xdg-open", root.helpPath()])
+  }
+
   onOpenedChanged: {
     Lanchat.panelOpen = root.opened
     if (root.opened) {
@@ -332,6 +344,18 @@ Panel {
                     font.pixelSize: Style.font.caption
                     font.weight: Font.Bold
                   }
+
+                  // Help button — opens HELP.md in the default viewer.
+                  Button {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.spacing.sm
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(24)
+                    height: Style.space(18)
+                    text: "\uF059"  // nf-fa-question-circle
+                    fontSize: Style.font.bodySmall
+                    onClicked: root.openHelp()
+                  }
                 }
 
                 // body (name + online + API + undo + save) — compact rows
@@ -390,6 +414,12 @@ Panel {
                     width: parent.width
                     height: Style.space(28)
 
+                    MouseArea {
+                      id: tooltipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
                     Text {
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
@@ -399,6 +429,11 @@ Panel {
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: tooltipHover.containsMouse
+                      text: "Go offline to stop broadcasting and drop inbound messages."
                     }
 
                     ToggleSwitch {
@@ -414,6 +449,12 @@ Panel {
                   Item {
                     width: parent.width
                     height: Style.space(28)
+
+                    MouseArea {
+                      id: apiTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
 
                     Row {
                       anchors.left: parent.left
@@ -437,12 +478,53 @@ Panel {
                       }
                     }
 
+                    PanelToolTip {
+                      visible: apiTipHover.containsMouse
+                      text: "HTTP API for scripts/agents. On = agents can send messages."
+                    }
+
                     ToggleSwitch {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
                       checked: Lanchat.httpEnabled
                       onToggled: Lanchat.setHttpEnabled(!Lanchat.httpEnabled)
+                    }
+                  }
+
+                  // API full-access row (agent can read chat data).
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+                    visible: Lanchat.httpEnabled
+
+                    MouseArea {
+                      id: fullTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm + Style.space(8)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Agent full access"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.apiFullAccess
+                      onToggled: Lanchat.setApiFullAccess(!Lanchat.apiFullAccess)
+                    }
+
+                    PanelToolTip {
+                      visible: fullTipHover.containsMouse
+                      text: "On = agent can read your chats, peers, and files. Off = send-only."
                     }
                   }
 

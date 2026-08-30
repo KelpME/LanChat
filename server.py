@@ -189,6 +189,10 @@ def load_config() -> None:
     # Defaults for the optional HTTP API (always present so toggling is simple).
     CONFIG.setdefault("httpEnabled", False)
     CONFIG.setdefault("httpPort", DEFAULT_HTTP_PORT)
+    # Full API access to chat data (read history/peers) vs send-only.
+    # When False, the agent can send messages to friends but cannot read
+    # history, list peers, or download attachments.
+    CONFIG.setdefault("apiFullAccess", False)
     # Online presence + friend list (persisted).
     CONFIG.setdefault("online", True)
     CONFIG.setdefault("friends", [])
@@ -301,6 +305,11 @@ def port() -> int:
 
 def http_enabled() -> bool:
     return bool(CONFIG.get("httpEnabled", False))
+
+
+def api_full_access() -> bool:
+    """Whether the API can read chat data (history/peers/attachments) or is send-only."""
+    return bool(CONFIG.get("apiFullAccess", False))
 
 
 def http_port() -> int:
@@ -483,16 +492,17 @@ def add_friend(pid: str, address: str, name: str, confirmed: bool) -> None:
 
 
 def is_trusted(pid: str, address: str = "") -> bool:
-    """IP-gating: accept traffic only from confirmed friends or pending-request peers."""
+    """Accept traffic only from confirmed friends or pending-request peers.
+
+    Trust is keyed on the peer's identity (cert fingerprint id), not the IP
+    address — so a forged/unknown id from the same IP as a friend is NOT
+    trusted.
+    """
     if not is_online():
         return False
     for f in CONFIG.get("friends", []):
         if f.get("id") == pid:
             return True  # confirmed friend OR a peer we're requesting (we initiated)
-    # Fall back to address match for confirmed friends whose id differs.
-    for f in CONFIG.get("friends", []):
-        if f.get("confirmed") and f.get("address") == address:
-            return True
     return False
 
 
@@ -938,10 +948,16 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
         if not self._auth_ok(token):
             return self._send_json(401, {"ok": False, "error": "unauthorized"})
         if parsed.path == "/peers":
+            if not api_full_access():
+                return self._send_json(403, {"ok": False, "error": "read access disabled"})
             return self._send_json(200, {"ok": True, "peers": peer_snapshot()})
         if parsed.path == "/messages":
+            if not api_full_access():
+                return self._send_json(403, {"ok": False, "error": "read access disabled"})
             return self._send_json(200, {"ok": True, "messages": history_snapshot()})
         if parsed.path == "/attachment":
+            if not api_full_access():
+                return self._send_json(403, {"ok": False, "error": "read access disabled"})
             file_id = (qs.get("fileId") or [""])[0]
             att = get_attachment(file_id)
             if not att:
@@ -1095,6 +1111,10 @@ def stdin_loop() -> None:
                 _stop_http()
             CONFIG["httpEnabled"] = enabled
             _save_config()
+        elif kind == "setApiFullAccess":
+            CONFIG["apiFullAccess"] = bool(cmd.get("enabled"))
+            _save_config()
+            _emit({"event": "api-full-access", "enabled": bool(cmd.get("enabled"))})
         elif kind == "setName":
             name = str(cmd.get("name", "")).strip()[:NAME_MAX]
             if name:
@@ -1152,6 +1172,7 @@ def _ready_event() -> dict:
         "friends": friends_list(),
         "downloadDir": CONFIG.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),
         "sendDelay": CONFIG.get("sendDelay", 0),
+        "apiFullAccess": api_full_access(),
     }
 
 

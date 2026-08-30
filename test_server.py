@@ -231,10 +231,18 @@ def main():
         assert m2 and m2["message"]["text"] == "via http", "http message not delivered"
         print("OK  HTTP POST /send delivered authenticated message")
 
-        # /peers with token.
+        # Send-only mode: reads (peers/messages) blocked by default (apiFullAccess=False).
+        code, res = http("GET", "/peers", token=TOKEN)
+        assert code == 403, "read should be blocked in send-only mode, got %d" % code
+        print("OK  HTTP GET /peers blocked in send-only mode")
+
+        # Enable full access -> reads work.
+        a.cmd(cmd="setApiFullAccess", enabled=True)
+        aev = a.wait_event("api-full-access")
+        assert aev and aev["enabled"] is True
         code, res = http("GET", "/peers", token=TOKEN)
         assert code == 200 and any(p["id"] == idb for p in res["peers"])
-        print("OK  HTTP GET /peers lists peers")
+        print("OK  HTTP GET /peers lists peers with full access")
 
         # Wrong token rejected.
         code, res = http("POST", "/send", {"to": "beta", "text": "nope"}, token="WRONG")
