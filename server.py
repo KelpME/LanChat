@@ -953,8 +953,10 @@ def _tls_connect(peer: dict, expected_fingerprint: str = ""):
     is the LocalSend-style trust model: the fingerprint is the identity.
     Returns the wrapped socket, or None on failure/mismatch.
     """
+    addr = peer.get("address", "?")
+    pport = peer.get("port", "?")
     try:
-        raw = socket.create_connection((peer["address"], peer["port"]), timeout=5)
+        raw = socket.create_connection((addr, pport), timeout=5)
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE  # we do fingerprint verification ourselves
@@ -963,17 +965,19 @@ def _tls_connect(peer: dict, expected_fingerprint: str = ""):
             der = s.getpeercert(binary_form=True)
             if not der:
                 s.close()
+                _log("tls-connect-failed peer=%s addr=%s:%s err=no-cert" % (peer.get("name"), addr, pport))
                 return None
             actual = hashlib.sha256(der).hexdigest()
             if actual != expected_fingerprint:
                 s.close()
+                _log("tls-connect-failed peer=%s addr=%s:%s err=fingerprint-mismatch" % (peer.get("name"), addr, pport))
                 return None
         return s
     except OSError as e:
-        _log("tls-connect-failed peer=%s err=%s" % (peer.get("name"), e))
+        _log("tls-connect-failed peer=%s addr=%s:%s err=%s" % (peer.get("name"), addr, pport, e))
         return None
     except Exception as e:
-        _log("tls-connect-failed peer=%s err=%s" % (peer.get("name"), e))
+        _log("tls-connect-failed peer=%s addr=%s:%s err=%s" % (peer.get("name"), addr, pport, e))
         return None
 
 

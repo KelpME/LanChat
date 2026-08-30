@@ -159,10 +159,19 @@ Panel {
   function copyDiagnostics() {
     var lines = []
     for (var i = 0; i < Lanchat.diagnostics.length; i++) {
-      var d = Lanchat.diagnostics[i]
-      lines.push(root.timeLabel(d.ts) + "  " + d.message)
+      lines.push(root.diagLine(Lanchat.diagnostics[i]))
     }
     copyToClipboard(lines.join("\n"))
+  }
+
+  // Format one diagnostic entry: timestamp + message + any extra fields.
+  function diagLine(d) {
+    if (!d) return ""
+    var line = root.timeLabel(d.ts) + "  " + d.message
+    for (var k in d) {
+      if (k !== "ts" && k !== "message") line += "  " + k + "=" + d[k]
+    }
+    return line
   }
 
   function isConfirmedFriend(id) {
@@ -1054,7 +1063,7 @@ Panel {
                           model: Lanchat.diagnostics
                           Text {
                             width: parent.width
-                            text: root.timeLabel(modelData.ts) + "  " + modelData.message
+                            text: root.diagLine(modelData)
                             color: Color.muted
                             font.family: Style.font.family
                             font.pixelSize: Style.font.caption
