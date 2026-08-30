@@ -128,6 +128,8 @@ CONFIG = {}
 _out_lock = threading.Lock()
 _stdout = sys.stdout
 
+NAME_MAX = 32  # maximum length of a display name (generated or custom)
+
 
 def _emit(event: dict) -> None:
     """Write one newline-delimited JSON event to stdout (thread-safe)."""
@@ -343,6 +345,7 @@ def _udp_send(sock: socket.socket, pkt: dict) -> None:
 
 
 def udp_loop() -> None:
+    global _udp_sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -351,6 +354,7 @@ def udp_loop() -> None:
     except OSError as e:
         _emit({"event": "error", "message": "lanchat UDP bind failed on port %d: %s" % (port(), e)})
         return
+    _udp_sock = sock
     threading.Thread(target=_udp_listener, args=(sock,), daemon=True).start()
 
     last_broadcast = 0.0
@@ -361,6 +365,15 @@ def udp_loop() -> None:
             last_broadcast = now
         expire_peers()
         time.sleep(0.5)
+
+
+_udp_sock = None
+
+
+def broadcast_now() -> None:
+    """Immediately announce ourselves so a name change reaches peers right away."""
+    if _udp_sock is not None:
+        _udp_send(_udp_sock, {"t": "hello"})
 
 
 # --------------------------------------------------------------------------
@@ -626,10 +639,11 @@ def stdin_loop() -> None:
             CONFIG["httpEnabled"] = enabled
             _save_config()
         elif kind == "setName":
-            name = str(cmd.get("name", "")).strip()[:12]
+            name = str(cmd.get("name", "")).strip()[:NAME_MAX]
             if name:
                 CONFIG["displayName"] = name
                 _save_config()
+                broadcast_now()
                 _emit({
                     "event": "ready",
                     "id": host_id(),
@@ -646,9 +660,10 @@ def stdin_loop() -> None:
             rng.seed(time.time_ns())
             trick = rng.choice(_SKATE_TRICKS)
             modifier = rng.choice(_TRICK_MODIFIERS)
-            name = f"{modifier}{trick}"[:12]
+            name = f"{modifier}{trick}"[:NAME_MAX]
             CONFIG["displayName"] = name
             _save_config()
+            broadcast_now()
             _emit({
                 "event": "ready",
                 "id": host_id(),

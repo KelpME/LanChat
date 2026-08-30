@@ -106,7 +106,7 @@ Panel {
 
           // Left: peer list
           Rectangle {
-            width: Style.space(196)
+            width: Style.space(280)
             height: parent.height
             color: Util.alpha(Color.foreground, 0.04)
 
@@ -326,7 +326,7 @@ Panel {
                       anchors.right: rollButton.left
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      maximumLength: 12
+                      maximumLength: 32
                       text: Lanchat.myName
                       placeholderText: "your name"
                       horizontalPadding: Style.space(8)
@@ -358,7 +358,7 @@ Panel {
 
           // Right: thread + compose
           Column {
-            width: parent.width - Style.space(196) - 1
+            width: parent.width - Style.space(280) - 1
             height: parent.height
 
             ListView {
