@@ -195,6 +195,8 @@ def load_config() -> None:
     CONFIG.setdefault("apiFullAccess", False)
     # Panel size: "small" | "medium" | "large" | "xl" | "full".
     CONFIG.setdefault("panelSize", "medium")
+    # User status: "available" | "dnd" | "away" | "brb". Broadcast to friends.
+    CONFIG.setdefault("status", "available")
     # Online presence + friend list (persisted).
     CONFIG.setdefault("online", True)
     CONFIG.setdefault("friends", [])
