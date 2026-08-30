@@ -19,6 +19,7 @@ Security model:
     and is intended for a trusted home/office LAN only.
 """
 
+import http.server
 import json
 import os
 import secrets
@@ -26,6 +27,7 @@ import socket
 import sys
 import threading
 import time
+import urllib.parse
 
 # --------------------------------------------------------------------------
 # Paths & config
@@ -37,6 +39,7 @@ STATE_DIR = os.path.join(os.path.expanduser("~"), ".local", "state", "lanchat")
 HISTORY_PATH = os.path.join(STATE_DIR, "history.json")
 
 DEFAULT_PORT = 4812
+DEFAULT_HTTP_PORT = 4814
 PEER_TIMEOUT_S = 15.0      # drop a peer after this long without a hello
 BROADCAST_INTERVAL_S = 5.0
 HISTORY_LIMIT = 500
@@ -58,6 +61,15 @@ def _emit(event: dict) -> None:
             os._exit(0)
 
 
+def _save_config() -> None:
+    try:
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(CONFIG, f, indent=2)
+            f.write("\n")
+    except OSError:
+        pass
+
+
 def load_config() -> None:
     global CONFIG
     os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -70,9 +82,6 @@ def load_config() -> None:
             "port": DEFAULT_PORT,
             "displayName": socket.gethostname(),
         }
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(CONFIG, f, indent=2)
-            f.write("\n")
         _emit({
             "event": "notice",
             "message": (
@@ -80,6 +89,11 @@ def load_config() -> None:
                 "Copy the token to every other machine you want to reach."
             ),
         })
+
+    # Defaults for the optional HTTP API (always present so toggling is simple).
+    CONFIG.setdefault("httpEnabled", False)
+    CONFIG.setdefault("httpPort", DEFAULT_HTTP_PORT)
+    _save_config()
 
     token = str(CONFIG.get("token", "")).strip()
     if len(token) < 8:
@@ -100,6 +114,17 @@ def port() -> int:
         return int(CONFIG.get("port", DEFAULT_PORT))
     except (TypeError, ValueError):
         return DEFAULT_PORT
+
+
+def http_enabled() -> bool:
+    return bool(CONFIG.get("httpEnabled", False))
+
+
+def http_port() -> int:
+    try:
+        return int(CONFIG.get("httpPort", DEFAULT_HTTP_PORT))
+    except (TypeError, ValueError):
+        return DEFAULT_HTTP_PORT
 
 
 # --------------------------------------------------------------------------
@@ -345,11 +370,11 @@ def _handle_incoming(line: bytes, addr) -> None:
 # Sending
 # --------------------------------------------------------------------------
 
-def send_message(peer_id: str, text: str) -> None:
+def send_message(peer_id: str, text: str) -> bool:
     peer = find_peer(peer_id)
     if peer is None:
         _emit({"event": "error", "message": "peer '%s' is not online yet" % peer_id})
-        return
+        return False
     try:
         s = socket.create_connection((peer["address"], peer["port"]), timeout=5)
         s.sendall(json.dumps({"token": CONFIG.get("token")}).encode("utf-8") + b"\n")
@@ -368,8 +393,121 @@ def send_message(peer_id: str, text: str) -> None:
         msg["outgoing"] = True
         append_history(msg)
         _emit({"event": "message", "message": msg})
+        return True
     except OSError as e:
         _emit({"event": "error", "message": "could not reach %s: %s" % (peer["name"], e)})
+        return False
+
+
+# --------------------------------------------------------------------------
+# Optional HTTP API
+# --------------------------------------------------------------------------
+# A small stdlib HTTP server for sending messages / reading state from other
+# tools (curl, scripts, an agent). Disabled by default; toggled on/off from the
+# panel UI. Authenticated with the same shared token as the TCP/UDP layer.
+
+_http_server = None
+_http_server_thread = None
+
+
+class _ApiHandler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args):  # silence request logging
+        pass
+
+    def _auth_ok(self, token):
+        return bool(token) and token == CONFIG.get("token")
+
+    def _send_json(self, code, obj):
+        data = json.dumps(obj).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _body(self):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except ValueError:
+            return {}
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        token = (qs.get("token") or [""])[0]
+        if parsed.path == "/health":
+            return self._send_json(200, {"ok": True})
+        if not self._auth_ok(token):
+            return self._send_json(401, {"ok": False, "error": "unauthorized"})
+        if parsed.path == "/peers":
+            return self._send_json(200, {"ok": True, "peers": peer_snapshot()})
+        if parsed.path == "/messages":
+            return self._send_json(200, {"ok": True, "messages": history_snapshot()})
+        self._send_json(404, {"ok": False, "error": "not found"})
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        body = self._body()
+        if parsed.path == "/send":
+            token = body.get("token")
+            if not self._auth_ok(token):
+                return self._send_json(401, {"ok": False, "error": "unauthorized"})
+            to = str(body.get("to", ""))
+            text = str(body.get("text", ""))
+            if not to or not text.strip():
+                return self._send_json(400, {"ok": False, "error": "to and text required"})
+            if find_peer(to) is None:
+                return self._send_json(404, {"ok": False, "error": "peer offline"})
+            if not send_message(to, text):
+                return self._send_json(500, {"ok": False, "error": "delivery failed"})
+            return self._send_json(200, {"ok": True})
+        self._send_json(404, {"ok": False, "error": "not found"})
+
+
+def _start_http() -> bool:
+    global _http_server, _http_server_thread
+    if _http_server is not None:
+        return True
+    # Retry briefly: after a daemon restart the previous HTTP socket may still
+    # be settling, and a single failed bind would otherwise leave the API off
+    # until the toggle is flipped. Each attempt is cheap (immediate on success).
+    last_err = None
+    for attempt in range(5):
+        try:
+            srv = http.server.ThreadingHTTPServer(("", http_port()), _ApiHandler)
+            _http_server = srv
+            _http_server_thread = threading.Thread(target=srv.serve_forever, daemon=True)
+            _http_server_thread.start()
+            _emit({"event": "http", "enabled": True, "port": http_port()})
+            return True
+        except OSError as e:
+            last_err = e
+            time.sleep(0.4)
+    _emit({"event": "http", "enabled": False, "port": http_port(), "error": str(last_err)})
+    return False
+
+
+def _stop_http() -> None:
+    global _http_server, _http_server_thread
+    srv = _http_server
+    _http_server = None
+    if srv is not None:
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+    _emit({"event": "http", "enabled": False, "port": http_port()})
 
 
 # --------------------------------------------------------------------------
@@ -392,6 +530,14 @@ def stdin_loop() -> None:
             _emit({"event": "history", "messages": history_snapshot()})
         elif kind == "list":
             _emit({"event": "peers", "peers": peer_snapshot()})
+        elif kind == "setHttp":
+            enabled = bool(cmd.get("enabled"))
+            if enabled:
+                _start_http()
+            else:
+                _stop_http()
+            CONFIG["httpEnabled"] = enabled
+            _save_config()
 
 
 # --------------------------------------------------------------------------
@@ -406,7 +552,11 @@ def main() -> None:
         "id": host_id(),
         "name": display_name(),
         "port": port(),
+        "httpEnabled": http_enabled(),
+        "httpPort": http_port(),
     })
+    if http_enabled():
+        _start_http()
     threading.Thread(target=tcp_loop, daemon=True).start()
     threading.Thread(target=udp_loop, daemon=True).start()
     stdin_loop()  # blocks until the shell closes stdin; also supervises the process lifetime

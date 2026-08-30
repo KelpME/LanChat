@@ -74,6 +74,43 @@ token, update it everywhere.
 | `token`       | *(random)*         | Shared secret — must match on every machine  |
 | `port`        | `4812`             | TCP + UDP port (same value on every machine) |
 | `displayName` | hostname           | Name shown to other machines                 |
+| `httpEnabled` | `false`            | On/off for the HTTP API (toggle in the UI)   |
+| `httpPort`    | `4814`             | Port the HTTP API listens on                 |
+
+## HTTP API (optional)
+
+Lanchat ships a small HTTP API so other tools — scripts, agents like Hermes, or
+curl — can send messages and read state without the desktop UI. It is **off by
+default**; toggle it from the **API** switch in the chat panel's peer-list
+footer (it restarts the listener live, no reboot needed).
+
+Once enabled, all endpoints except `/health` require the shared token. Get the
+token from `~/.config/omarchy/lanchat.json`.
+
+| Method | Path                | Auth        | What it does                                   |
+|--------|---------------------|-------------|------------------------------------------------|
+| `GET`  | `/health`           | —           | Liveness probe (`{"ok":true}`)                 |
+| `GET`  | `/peers?token=…`    | token       | List online peers                             |
+| `GET`  | `/messages?token=…` | token       | This machine's message history                |
+| `POST` | `/send`             | token (body)| Send a message to a peer                      |
+
+Send a message (JSON body carries the token):
+
+```bash
+curl -X POST http://localhost:4814/send \
+  -H 'Content-Type: application/json' \
+  -d '{"token":"<TOKEN>","to":"laptop","text":"hello from the shell"}'
+```
+
+List peers:
+
+```bash
+curl 'http://localhost:4814/peers?token=<TOKEN>'
+```
+
+> The API listens on all interfaces, so it is reachable by any machine on your
+> LAN that has the token. Same plaintext caveat as the rest of Lanchat —
+> trusted network only.
 
 ## How it works
 

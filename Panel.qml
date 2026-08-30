@@ -7,7 +7,8 @@ import "shared"
 
 // Lanchat chat panel: a peer list on the left, the selected peer's thread and
 // a compose box on the right. Hosted in a KeyboardPanel window anchored to the
-// bar widget; all state comes from the shared Lanchat singleton.
+// bar widget; all state comes from the shared Lanchat singleton. The left
+// column's footer holds the HTTP API toggle (enable/disable from the UI).
 Panel {
   id: root
   moduleName: "KelpME.lanchat"
@@ -81,90 +82,100 @@ Panel {
     owner: root.hostWidget || root
     open: root.opened
     centerOnBar: true
-    contentWidth: win.fittedContentWidth(Style.space(560))
-    contentHeight: win.fittedContentHeight(Style.space(440))
+    contentWidth: win.fittedContentWidth(Style.space(580))
+    contentHeight: win.fittedContentHeight(Style.space(460))
 
     Rectangle {
       width: parent.width
       height: parent.height
       color: Color.popups.background
 
-      Column {
-        anchors.fill: parent
-
-        // ---- header ------------------------------------------------------
+      // ---- header ------------------------------------------------------
+      Rectangle {
+        width: parent.width
+        height: Style.space(46)
+        color: "transparent"
         Rectangle {
-          width: parent.width
-          height: Style.space(40)
-          color: "transparent"
-          Rectangle {
-            anchors.bottom: parent.bottom
+          anchors.bottom: parent.bottom
+          anchors.left: parent.left
+          anchors.right: parent.right
+          height: 1
+          color: Color.popups.border
+        }
+
+        Item {
+          anchors.fill: parent
+          anchors.leftMargin: Style.spacing.panelPadding
+          anchors.rightMargin: Style.spacing.panelPadding
+
+          Row {
             anchors.left: parent.left
-            anchors.right: parent.right
-            height: 1
-            color: Color.popups.border
-          }
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.spacing.md
 
-          Item {
-            anchors.fill: parent
-            anchors.leftMargin: Style.spacing.panelPadding
-            anchors.rightMargin: Style.spacing.panelPadding
-
-            Row {
-              anchors.left: parent.left
+            Rectangle {
+              width: Style.space(10)
+              height: Style.space(10)
+              radius: Style.space(3)
               anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.spacing.sm
-
-              Text {
-                text: "Lanchat"
-                color: Color.popups.text
-                font.family: Style.font.family
-                font.pixelSize: Style.font.subtitle
-                font.weight: Font.Bold
-              }
-
-              Text {
-                text: root.selectedPeer ? root.selectedPeer.name : ""
-                color: Color.muted
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
-                elide: Text.ElideRight
-              }
+              color: Color.accent
             }
 
             Text {
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              text: (Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online"
-              color: Lanchat.onlineCount > 0 ? Color.accent : Color.muted
+              text: "Lanchat"
+              color: Color.popups.text
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.subtitle
+              font.weight: Font.Bold
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.selectedPeer ? root.selectedPeer.name : ""
+              color: Color.muted
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              elide: Text.ElideRight
             }
           }
+
+          Text {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: (Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online"
+            color: Lanchat.onlineCount > 0 ? Color.accent : Color.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
         }
+      }
 
-        // ---- body: peer list + thread -------------------------------------
-        Rectangle {
-          width: parent.width
-          height: parent.height - Style.space(40)
-          color: "transparent"
+      // ---- body: peer list + thread -----------------------------------
+      Rectangle {
+        width: parent.width
+        height: parent.height - Style.space(46)
+        color: "transparent"
 
-          Row {
-            anchors.fill: parent
+        Row {
+          anchors.fill: parent
 
-            // Left: peer list
-            Rectangle {
-              width: Style.space(190)
-              height: parent.height
-              color: "transparent"
+          // Left: peer list
+          Rectangle {
+            width: Style.space(196)
+            height: parent.height
+            color: Util.alpha(Color.foreground, 0.04)
+
+            Column {
+              anchors.fill: parent
 
               ListView {
                 id: peerList
-                anchors.fill: parent
-                anchors.margins: Style.spacing.sm
+                width: parent.width
+                height: parent.height - apiFooter.height
                 clip: true
                 model: Lanchat.peers
                 spacing: Style.spacing.xs
+                anchors.margins: Style.spacing.sm
 
                 delegate: Rectangle {
                   required property var modelData
@@ -179,6 +190,17 @@ Panel {
                     onClicked: root.selectPeer(modelData.id)
                   }
 
+                  // Accent bar on the selected row.
+                  Rectangle {
+                    visible: modelData.id === root.selectedPeerId
+                    width: 3
+                    height: parent.height * 0.5
+                    radius: 1.5
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    color: Color.accent
+                  }
+
                   Rectangle {
                     width: Style.space(8)
                     height: Style.space(8)
@@ -186,7 +208,9 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: Style.spacing.sm
-                    color: Color.accent
+                    color: modelData.id === root.selectedPeerId
+                      ? Color.background
+                      : Color.accent
                   }
 
                   Text {
@@ -196,7 +220,9 @@ Panel {
                     anchors.right: parent.right
                     anchors.rightMargin: Style.spacing.sm
                     text: modelData.name
-                    color: Color.popups.text
+                    color: modelData.id === root.selectedPeerId
+                      ? Color.accent
+                      : Color.popups.text
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     elide: Text.ElideRight
@@ -213,82 +239,12 @@ Panel {
                   horizontalAlignment: Text.AlignHCenter
                 }
               }
-            }
 
-            Rectangle {
-              width: 1
-              height: parent.height
-              color: Color.popups.border
-            }
-
-            // Right: thread + compose
-            Column {
-              width: parent.width - Style.space(190) - 1
-              height: parent.height
-
-              ListView {
-                id: list
-                width: parent.width
-                height: parent.height - composeBox.height
-                clip: true
-                spacing: Style.spacing.xs
-                model: root.thread
-
-                onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
-
-                delegate: Column {
-                  required property var modelData
-                  width: list.width
-                  spacing: Style.spacing.xs
-
-                  // Meta row: who + when
-                  Text {
-                    text: (modelData.outgoing ? "You · " : modelData.fromName + " · ") + root.timeLabel(modelData.ts)
-                    color: Color.muted
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                  }
-
-                  Rectangle {
-                    width: Math.min(list.width * 0.78, messageText.implicitWidth + Style.space(24))
-                    height: messageText.implicitHeight + Style.space(12)
-                    radius: Style.cornerRadius
-                    anchors.left: modelData.outgoing ? undefined : parent.left
-                    anchors.right: modelData.outgoing ? parent.right : undefined
-                    color: modelData.outgoing
-                      ? Style.selectedAccentFill
-                      : Style.normalFill
-
-                    Text {
-                      id: messageText
-                      anchors.centerIn: parent
-                      width: list.width * 0.78 - Style.space(24)
-                      text: modelData.text
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                      wrapMode: Text.Wrap
-                    }
-                  }
-                }
-
-                Text {
-                  visible: root.selectedPeer && !root.hasThread
-                  anchors.centerIn: parent
-                  text: root.selectedPeer
-                    ? "No messages with " + root.selectedPeer.name + " yet."
-                    : ""
-                  color: Color.muted
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-              }
-
-              // ---- compose box -------------------------------------------
+              // ---- HTTP API footer -----------------------------------
               Rectangle {
-                id: composeBox
+                id: apiFooter
                 width: parent.width
-                height: Style.space(52)
+                height: Style.space(36)
                 color: "transparent"
                 Rectangle {
                   anchors.top: parent.top
@@ -298,35 +254,166 @@ Panel {
                   color: Color.popups.border
                 }
 
-                TextField {
-                  id: input
+                Item {
                   anchors.fill: parent
-                  anchors.topMargin: Style.spacing.sm
-                  anchors.bottomMargin: Style.spacing.sm
-                  anchors.leftMargin: Style.spacing.panelPadding
-                  anchors.rightMargin: Style.spacing.panelPadding
-                  placeholderText: root.selectedPeer
-                    ? "Message " + root.selectedPeer.name + "…"
-                    : "Select a peer to chat"
-                  enabled: root.selectedPeer !== null
-                  onAccepted: root.send()
+                  anchors.leftMargin: Style.spacing.sm
+                  anchors.rightMargin: Style.spacing.sm
+
+                  Row {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.spacing.xs
+
+                    Text {
+                      text: "API"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Text {
+                      text: Lanchat.httpEnabled ? ":" + Lanchat.httpPort : "off"
+                      color: Lanchat.httpEnabled ? Color.accent : Color.muted
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+
+                  ToggleSwitch {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    checked: Lanchat.httpEnabled
+                    onToggled: Lanchat.setHttpEnabled(!Lanchat.httpEnabled)
+                  }
                 }
+              }
+            }
+          }
+
+          Rectangle {
+            width: 1
+            height: parent.height
+            color: Color.popups.border
+          }
+
+          // Right: thread + compose
+          Column {
+            width: parent.width - Style.space(196) - 1
+            height: parent.height
+
+            ListView {
+              id: list
+              width: parent.width
+              height: parent.height - composeBox.height
+              clip: true
+              spacing: Style.spacing.sm
+              model: root.thread
+
+              header: Item { width: parent.width; height: Style.spacing.md }
+              footer: Item { width: parent.width; height: Style.spacing.lg }
+
+              onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
+
+              delegate: Column {
+                required property var modelData
+                width: list.width
+                spacing: Style.spacing.xs
+
+                // Meta row: who + when
+                Text {
+                  anchors.left: modelData.outgoing ? undefined : parent.left
+                  anchors.right: modelData.outgoing ? parent.right : undefined
+                  text: (modelData.outgoing ? "You · " : modelData.fromName + " · ") + root.timeLabel(modelData.ts)
+                  color: Color.muted
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+
+                Rectangle {
+                  width: Math.min(list.width * 0.8, messageText.implicitWidth + Style.space(28))
+                  height: messageText.implicitHeight + Style.space(16)
+                  radius: Math.max(Style.cornerRadius, Style.space(6))
+                  anchors.left: modelData.outgoing ? undefined : parent.left
+                  anchors.right: modelData.outgoing ? parent.right : undefined
+                  border.width: modelData.outgoing ? 0 : 1
+                  border.color: Style.normalBorderColor
+                  color: modelData.outgoing
+                    ? Style.selectedAccentFill
+                    : Style.normalFill
+
+                  Text {
+                    id: messageText
+                    anchors.centerIn: parent
+                    width: list.width * 0.8 - Style.space(28)
+                    text: modelData.text
+                    color: Color.popups.text
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                    wrapMode: Text.Wrap
+                  }
+                }
+              }
+
+              Text {
+                visible: root.selectedPeer && !root.hasThread
+                anchors.centerIn: parent
+                text: root.selectedPeer
+                  ? "No messages with " + root.selectedPeer.name + " yet."
+                  : ""
+                color: Color.muted
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            // ---- compose box -----------------------------------------
+            Rectangle {
+              id: composeBox
+              width: parent.width
+              height: Style.space(54)
+              color: "transparent"
+              Rectangle {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 1
+                color: Color.popups.border
+              }
+
+              TextField {
+                id: input
+                anchors.fill: parent
+                anchors.topMargin: Style.spacing.sm
+                anchors.bottomMargin: Style.spacing.sm
+                anchors.leftMargin: Style.spacing.panelPadding
+                anchors.rightMargin: Style.spacing.panelPadding
+                placeholderText: root.selectedPeer
+                  ? "Message " + root.selectedPeer.name + "…"
+                  : "Select a peer to chat"
+                enabled: root.selectedPeer !== null
+                onAccepted: root.send()
               }
             }
           }
         }
       }
 
-      // ---- status line -------------------------------------------------------
+      // ---- transient status banner (top, so it never hides the input) --
       Rectangle {
         visible: Lanchat.statusMessage !== ""
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: Style.space(24)
+        anchors.top: parent.top
+        anchors.topMargin: Style.space(46)
+        height: Style.space(26)
         color: Style.pressedFill
         Text {
-          anchors.centerIn: parent
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.leftMargin: Style.spacing.panelPadding
+          anchors.rightMargin: Style.spacing.panelPadding
           text: Lanchat.statusMessage
           color: Color.popups.text
           font.family: Style.font.family

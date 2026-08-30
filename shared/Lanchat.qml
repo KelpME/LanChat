@@ -21,6 +21,9 @@ QtObject {
   property string statusMessage: ""
   property bool panelOpen: false
 
+  property bool httpEnabled: false
+  property int httpPort: 4814
+
   property var peers: []          // [{id,name,address,port,lastSeen}]
   property var messages: []       // [{from,fromName,text,ts,outgoing}]
   property int unreadCount: 0
@@ -61,6 +64,12 @@ QtObject {
     unreadCount = 0
   }
 
+  // Toggle the optional HTTP API (start/stop the daemon's HTTP server).
+  function setHttpEnabled(enabled) {
+    httpEnabled = enabled
+    daemon.write(JSON.stringify({ cmd: "setHttp", enabled: enabled }) + "\n")
+  }
+
   // ---- events from the daemon -------------------------------------------
 
   function onDaemonLine(raw) {
@@ -73,8 +82,15 @@ QtObject {
       lanchat.myName = obj.name
       lanchat.myPort = obj.port
       lanchat.daemonReady = true
+      if (obj.httpEnabled !== undefined) lanchat.httpEnabled = obj.httpEnabled
+      if (obj.httpPort !== undefined) lanchat.httpPort = obj.httpPort
       lanchat.refreshHistory()
       lanchat.refreshPeers()
+      break
+
+    case "http":
+      lanchat.httpEnabled = obj.enabled === true
+      if (obj.port) lanchat.httpPort = obj.port
       break
 
     case "peer": {
@@ -117,10 +133,12 @@ QtObject {
 
     case "error":
       lanchat.statusMessage = obj.message || "Lanchat error"
+      lanchat.statusTimer.restart()
       break
 
     case "notice":
       lanchat.statusMessage = obj.message || ""
+      lanchat.statusTimer.restart()
       break
     }
   }
@@ -128,6 +146,14 @@ QtObject {
   function onDaemonExit(code) {
     lanchat.daemonReady = false
     lanchat.statusMessage = "Lanchat daemon stopped (exit " + code + ")"
+    lanchat.statusTimer.restart()
+  }
+
+  // Transient status (errors/notices) clears itself after a few seconds so it
+  // never sticks around and hides UI.
+  property Timer statusTimer: Timer {
+    interval: 6000
+    onTriggered: lanchat.statusMessage = ""
   }
 
   property Process daemon: Process {

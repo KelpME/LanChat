@@ -30,7 +30,7 @@ def make_home(name, port, display):
     cfg_dir = os.path.join(d, ".config", "omarchy")
     os.makedirs(cfg_dir, exist_ok=True)
     with open(os.path.join(cfg_dir, "lanchat.json"), "w") as f:
-        json.dump({"token": TOKEN, "port": port, "displayName": display}, f)
+        json.dump({"token": TOKEN, "port": port, "displayName": display, "httpPort": port + 10}, f)
     return d
 
 
@@ -102,10 +102,10 @@ def wait_until(fn, timeout=5.0):
 
 
 def main():
-    home_a = make_home("alpha", 4811, "Alpha-machine")
-    home_b = make_home("beta", 4812, "Beta-machine")
-    a = Daemon(home_a, 4811, "Alpha-machine")
-    b = Daemon(home_b, 4812, "Beta-machine")
+    home_a = make_home("alpha", 4911, "Alpha-machine")
+    home_b = make_home("beta", 4912, "Beta-machine")
+    a = Daemon(home_a, 4911, "Alpha-machine")
+    b = Daemon(home_b, 4912, "Beta-machine")
 
     try:
         assert a.wait_event("ready"), "A did not become ready"
@@ -148,6 +148,68 @@ def main():
         hev = b.wait_event("history")
         assert hev and any(m.get("text") == "hello from alpha" for m in hev["messages"])
         print("OK  history command replays persisted messages")
+
+        # ---- HTTP API ----------------------------------------------------
+        import urllib.request
+        import urllib.error
+
+        # Disabled by default: the API should be refused (connection refused).
+        a.cmd(cmd="setHttp", enabled=True)
+        aev = a.wait_event("http")
+        assert aev and aev["enabled"] is True, "http enable event not emitted"
+        http_port = int(aev.get("port", 0))
+        assert http_port > 0, "http port missing from event"
+        print("OK  HTTP API enabled via stdin on port %d" % http_port)
+
+        def http(method, path, body=None, token=None):
+            url = "http://127.0.0.1:%d%s" % (http_port, path)
+            data = None
+            headers = {}
+            if body is not None:
+                payload = dict(body)
+                if token is not None:
+                    payload["token"] = token
+                data = json.dumps(payload).encode()
+                headers["Content-Type"] = "application/json"
+            elif token is not None:
+                sep = "&" if "?" in url else "?"
+                url += sep + "token=" + token
+            req = urllib.request.Request(url, data=data, method=method, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    return resp.status, json.loads(resp.read().decode())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read().decode())
+
+        # /health works without auth.
+        code, _ = http("GET", "/health")
+        assert code == 200
+        print("OK  /health responds")
+
+        # /send via HTTP (authenticated) delivers to B.
+        code, res = http("POST", "/send", {"to": "beta", "text": "via http"}, token=TOKEN)
+        assert code == 200 and res.get("ok"), "http send failed: %s" % res
+        m2 = b.wait_event("message")
+        assert m2 and m2["message"]["text"] == "via http", "http message not delivered"
+        print("OK  HTTP POST /send delivered authenticated message")
+
+        # /peers with token.
+        code, res = http("GET", "/peers", token=TOKEN)
+        assert code == 200 and any(p["id"] == "beta" for p in res["peers"])
+        print("OK  HTTP GET /peers lists peers")
+
+        # Wrong token rejected.
+        code, res = http("POST", "/send", {"to": "beta", "text": "nope"}, token="WRONG")
+        assert code == 401
+        code, res = http("GET", "/peers", token="WRONG")
+        assert code == 401
+        print("OK  HTTP API rejects wrong token")
+
+        # Disable again.
+        a.cmd(cmd="setHttp", enabled=False)
+        aev = a.wait_event("http")
+        assert aev and aev["enabled"] is False, "http disable event not emitted"
+        print("OK  HTTP API disabled via stdin")
 
         print("\nALL TESTS PASSED")
         return 0
