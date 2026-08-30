@@ -278,19 +278,27 @@ Panel {
     Lanchat.send(selectedPeerId, "", { name: path.split("/").pop(), path: path })
   }
 
-  // Panel dimensions by size setting. "full" fills the available screen area
-  // exactly (what the KeyboardPanel allows), so the card border aligns with
-  // the screen edge consistently.
-  readonly property int panelW: Lanchat.panelSize === "small" ? Style.space(440)
-    : Lanchat.panelSize === "large" ? Style.space(720)
-    : Lanchat.panelSize === "xl" ? Style.space(900)
-    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.width : 1440) - Style.space(10))
-    : Style.space(580)
-  readonly property int panelH: Lanchat.panelSize === "small" ? Style.space(360)
-    : Lanchat.panelSize === "large" ? Style.space(560)
-    : Lanchat.panelSize === "xl" ? Style.space(700)
-    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.height : 900) - Style.space(10) - Style.space(35))
-    : Style.space(460)
+  // Panel dimensions by size setting, as INDEPENDENT fractions of each screen
+  // axis. Width is a fraction of screen width, height a fraction of screen
+  // height; X and Y grow incrementally from small to XL. "full" fills the
+  // available screen area exactly (what the KeyboardPanel allows), so the card
+  // border aligns with the screen edge consistently.
+  readonly property real screenW: win.screen ? win.screen.width : 1440
+  readonly property real screenH: win.screen ? win.screen.height : 900
+  readonly property real wFrac: Lanchat.panelSize === "small" ? 1/2
+    : Lanchat.panelSize === "large" ? 4/5
+    : Lanchat.panelSize === "xl" ? 9/10
+    : 2/3  // medium (also the default)
+  readonly property real hFrac: Lanchat.panelSize === "small" ? 0.45
+    : Lanchat.panelSize === "large" ? 3/4
+    : Lanchat.panelSize === "xl" ? 0.85
+    : 3/5  // medium (also the default)
+  readonly property int panelW: Lanchat.panelSize === "full"
+    ? Math.round(screenW - Style.space(10))
+    : Math.round(screenW * wFrac)
+  readonly property int panelH: Lanchat.panelSize === "full"
+    ? Math.round(screenH - Style.space(10) - Style.space(35))
+    : Math.round(screenH * hFrac)
 
   KeyboardPanel {
     id: win

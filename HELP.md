@@ -75,7 +75,10 @@ white = Available, red = Do Not Disturb, orange = Away, yellow = Be Right Back.
   send.
 - **Save to** — the folder accepted files go to (default `~/Downloads`).
 - **Panel size** — choose **S**, **M**, **L**, **XL**, or **F** (full-screen)
-  for the panel window size.
+  for the panel window size. S/M/L/XL scale as independent fractions of each
+  screen axis — width vs height grow separately (e.g. **S** = 1/3 of screen
+  width × 1/4 of screen height, **XL** = 5/6 × 3/4), widening and growing
+  incrementally. **F** fills the whole screen.
 - **Version** — the installed version.
 
 ## The API (for scripts / agents)
