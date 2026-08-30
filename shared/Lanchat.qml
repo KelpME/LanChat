@@ -29,7 +29,9 @@ QtObject {
   property string status: "available"
   property bool soundEnabled: true
   property bool typingEnabled: true
+  property bool showTyping: true
   property bool readReceiptsEnabled: true
+  property bool showReadReceipts: true
 
   property bool online: true
   property var friends: []        // [{id,address,name,confirmed}]
@@ -229,9 +231,17 @@ QtObject {
     typingEnabled = on
     daemon.write(JSON.stringify({ cmd: "setTypingEnabled", enabled: on }) + "\n")
   }
+  function setShowTyping(on) {
+    showTyping = on
+    daemon.write(JSON.stringify({ cmd: "setShowTyping", enabled: on }) + "\n")
+  }
   function setReadReceiptsEnabled(on) {
     readReceiptsEnabled = on
     daemon.write(JSON.stringify({ cmd: "setReadReceiptsEnabled", enabled: on }) + "\n")
+  }
+  function setShowReadReceipts(on) {
+    showReadReceipts = on
+    daemon.write(JSON.stringify({ cmd: "setShowReadReceipts", enabled: on }) + "\n")
   }
 
   // Toggle full API access to chat data (read history/peers) vs send-only.
@@ -292,9 +302,21 @@ QtObject {
       if (obj.status !== undefined) lanchat.status = obj.status
       if (obj.soundEnabled !== undefined) lanchat.soundEnabled = obj.soundEnabled
       if (obj.typingEnabled !== undefined) lanchat.typingEnabled = obj.typingEnabled
+      if (obj.showTyping !== undefined) lanchat.showTyping = obj.showTyping
       if (obj.readReceiptsEnabled !== undefined) lanchat.readReceiptsEnabled = obj.readReceiptsEnabled
+      if (obj.showReadReceipts !== undefined) lanchat.showReadReceipts = obj.showReadReceipts
       lanchat.refreshHistory()
       lanchat.refreshPeers()
+      break
+
+    case "show-typing":
+      lanchat.showTyping = obj.enabled === true
+      if (!lanchat.showTyping) lanchat.typing = {}
+      break
+
+    case "show-read-receipts":
+      lanchat.showReadReceipts = obj.enabled === true
+      if (!lanchat.showReadReceipts) lanchat.readReceipts = {}
       break
 
     case "typing-enabled":
@@ -387,7 +409,8 @@ QtObject {
     case "typing": {
       var nt = {}
       for (var tk in lanchat.typing) nt[tk] = lanchat.typing[tk]
-      nt[obj.from] = obj.fromName || obj.from
+      if (lanchat.showTyping) nt[obj.from] = obj.fromName || obj.from
+      else delete nt[obj.from]
       lanchat.typing = nt
       break
     }
@@ -402,7 +425,8 @@ QtObject {
     case "read-receipt": {
       var nr = {}
       for (var rk in lanchat.readReceipts) nr[rk] = lanchat.readReceipts[rk]
-      nr[obj.mid] = true
+      if (lanchat.showReadReceipts) nr[obj.mid] = true
+      else delete nr[obj.mid]
       lanchat.readReceipts = nr
       break
     }

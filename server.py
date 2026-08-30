@@ -141,9 +141,11 @@ def load_config() -> None:
     CONFIG.setdefault("status", "available")
     # Play a sound on incoming messages.
     CONFIG.setdefault("soundEnabled", True)
-    # Presence indicators: typing + read receipts (toggleable).
-    CONFIG.setdefault("typingEnabled", True)
-    CONFIG.setdefault("readReceiptsEnabled", True)
+    # Presence indicators (each direction independently toggleable).
+    CONFIG.setdefault("typingEnabled", True)        # send my typing to peers
+    CONFIG.setdefault("showTyping", True)           # show peers' typing in my UI
+    CONFIG.setdefault("readReceiptsEnabled", True)  # send my read receipts to peers
+    CONFIG.setdefault("showReadReceipts", True)     # show read receipts in my UI
     # Online presence + friend list (persisted).
     CONFIG.setdefault("online", True)
     CONFIG.setdefault("friends", [])
@@ -285,8 +287,16 @@ def typing_enabled() -> bool:
     return bool(CONFIG.get("typingEnabled", True))
 
 
+def show_typing() -> bool:
+    return bool(CONFIG.get("showTyping", True))
+
+
 def read_receipts_enabled() -> bool:
     return bool(CONFIG.get("readReceiptsEnabled", True))
+
+
+def show_read_receipts() -> bool:
+    return bool(CONFIG.get("showReadReceipts", True))
 
 
 def http_port() -> int:
@@ -1157,10 +1167,18 @@ def stdin_loop() -> None:
             CONFIG["typingEnabled"] = bool(cmd.get("enabled"))
             _save_config()
             _emit({"event": "typing-enabled", "enabled": bool(cmd.get("enabled"))})
+        elif kind == "setShowTyping":
+            CONFIG["showTyping"] = bool(cmd.get("enabled"))
+            _save_config()
+            _emit({"event": "show-typing", "enabled": bool(cmd.get("enabled"))})
         elif kind == "setReadReceiptsEnabled":
             CONFIG["readReceiptsEnabled"] = bool(cmd.get("enabled"))
             _save_config()
             _emit({"event": "read-receipts-enabled", "enabled": bool(cmd.get("enabled"))})
+        elif kind == "setShowReadReceipts":
+            CONFIG["showReadReceipts"] = bool(cmd.get("enabled"))
+            _save_config()
+            _emit({"event": "show-read-receipts", "enabled": bool(cmd.get("enabled"))})
         elif kind == "setName":
             name = str(cmd.get("name", "")).strip()[:NAME_MAX]
             if name:
@@ -1233,7 +1251,9 @@ def _ready_event() -> dict:
         "status": status(),
         "soundEnabled": sound_enabled(),
         "typingEnabled": typing_enabled(),
+        "showTyping": show_typing(),
         "readReceiptsEnabled": read_receipts_enabled(),
+        "showReadReceipts": show_read_receipts(),
     }
 
 

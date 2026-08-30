@@ -650,33 +650,25 @@ Panel {
                     }
                   }
 
-                  // Typing indicator row.
+                  // Send typing indicator.
                   Item {
                     width: parent.width
                     height: Style.space(28)
-
-                    MouseArea {
-                      id: typingTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
+                    MouseArea { id: sendTypingTip; anchors.fill: parent; hoverEnabled: true }
                     Text {
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "Typing indicator"
+                      text: "Let friends see me typing"
                       color: Color.popups.text
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
                     }
-
                     PanelToolTip {
-                      visible: typingTipHover.containsMouse
-                      text: "Show when a friend is typing, and let them see you type."
+                      visible: sendTypingTip.containsMouse
+                      text: "When on, your friends see \u201Ctyping\u2026\u201D while you type."
                     }
-
                     ToggleSwitch {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
@@ -686,39 +678,87 @@ Panel {
                     }
                   }
 
-                  // Read receipts row.
+                  // Show typing indicator.
                   Item {
                     width: parent.width
                     height: Style.space(28)
-
-                    MouseArea {
-                      id: readTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
+                    MouseArea { id: showTypingTip; anchors.fill: parent; hoverEnabled: true }
                     Text {
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "Read receipts"
+                      text: "Show when friends are typing"
                       color: Color.popups.text
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
                     }
-
                     PanelToolTip {
-                      visible: readTipHover.containsMouse
-                      text: "Show a check when the recipient has read your message."
+                      visible: showTypingTip.containsMouse
+                      text: "When on, you see \u201C[friend] is typing\u2026\u201D in the chat."
                     }
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.showTyping
+                      onToggled: Lanchat.setShowTyping(!Lanchat.showTyping)
+                    }
+                  }
 
+                  // Send read receipts.
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+                    MouseArea { id: sendReadTip; anchors.fill: parent; hoverEnabled: true }
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Let friends see when I've read"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                    PanelToolTip {
+                      visible: sendReadTip.containsMouse
+                      text: "When on, your friends see a \u2713 on messages you've read."
+                    }
                     ToggleSwitch {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
                       checked: Lanchat.readReceiptsEnabled
                       onToggled: Lanchat.setReadReceiptsEnabled(!Lanchat.readReceiptsEnabled)
+                    }
+                  }
+
+                  // Show read receipts.
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+                    MouseArea { id: showReadTip; anchors.fill: parent; hoverEnabled: true }
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Show when friends have read"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                    PanelToolTip {
+                      visible: showReadTip.containsMouse
+                      text: "When on, you see a \u2713 on messages your friends have read."
+                    }
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.showReadReceipts
+                      onToggled: Lanchat.setShowReadReceipts(!Lanchat.showReadReceipts)
                     }
                   }
 
