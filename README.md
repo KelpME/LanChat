@@ -26,6 +26,10 @@ and they find each other automatically — no IP addresses, no accounts, no clou
   (default `~/Downloads`).
 - **Lazy-loaded conversations** — long threads page in as you scroll, keeping
   the panel fluid.
+- **Unfriend** — remove a friend from the thread header.
+- **Edit a message** — revise a sent message with an "(edited)" marker.
+- **Typing indicators** — see when a friend is typing (toggleable).
+- **Read receipts** — see when a friend has read your message (toggleable).
 - **Per-machine history** — each machine keeps its own copy of its threads in
   `~/.local/state/lanchat/history.json`, so messages survive reboots.
 - **A native bar UI** — one chat icon in the bar, an online-peer + unread
@@ -102,6 +106,8 @@ agents) — it is not needed for peer messaging.
 | `panelSize`   | `medium`           | Panel size: `small`, `medium`, `large`, `xl`, `full` |
 | `status`      | `available`        | Your status: `available`, `dnd`, `away`, `brb`       |
 | `soundEnabled`| `true`             | Play a chime when a new message arrives              |
+| `typingEnabled`| `true`            | Show/send typing indicators                          |
+| `readReceiptsEnabled` | `true`      | Show/send read receipts                              |
 
 ## Using the app
 
@@ -118,7 +124,10 @@ agents) — it is not needed for peer messaging.
    message is cancelled.
 5. **Go offline** — toggle **Online** in Settings to stop receiving.
 6. **Clear a chat / delete a message** — via the thread controls (local-only).
-7. **Help** — the **?** button in the Settings header opens the built-in help
+7. **Edit a message** — hover an outgoing message and click the **pencil** to
+   revise it; it's marked "(edited)".
+8. **Unfriend** — click **Unfriend** in the thread header to remove a friend.
+9. **Help** — the **?** button in the Settings header opens the built-in help
    document (`HELP.md`). Hover any setting for a short explanation.
 
 ## HTTP API (optional)

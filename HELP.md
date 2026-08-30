@@ -48,6 +48,11 @@ white = Available, red = Do Not Disturb, orange = Away, yellow = Be Right Back.
   file** bar with a **Save** button; accepting saves it to your download
   folder.
 - **Copy button** (hover a message) — copies that message to the clipboard.
+- **Edit a message** (hover an outgoing message) — click the pencil to revise
+  it; it's marked "(edited)".
+- **Unfriend** — the **Unfriend** button in the thread header removes a friend.
+- **Typing / read state** — see "… is typing" and a ✓ when a message is read
+  (both toggleable).
 - **Lazy-load** — long conversations load older messages as you scroll, so the
   panel stays fluid.
 
@@ -59,6 +64,8 @@ white = Available, red = Do Not Disturb, orange = Away, yellow = Be Right Back.
 - **Status** — set your status: **Available**, **DND**, **Away**, or **BRB**.
   Shown to friends on their peer list and via the bar icon color.
 - **Message sound** — play a soft chime when a new message arrives.
+- **Typing indicator** — show when a friend is typing (and let them see you).
+- **Read receipts** — show a ✓ when the recipient has read your message.
 - **API** — the HTTP API for scripts/agents (see below).
 - **Agent full access** — when the API is on, whether the agent can *read* your
   chat data or only *send*.
