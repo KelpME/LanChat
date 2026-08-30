@@ -106,8 +106,10 @@ agents) — it is not needed for peer messaging.
 | `panelSize`   | `medium`           | Panel size: `small`, `medium`, `large`, `xl`, `full` |
 | `status`      | `available`        | Your status: `available`, `dnd`, `away`, `brb`       |
 | `soundEnabled`| `true`             | Play a chime when a new message arrives              |
-| `typingEnabled`| `true`            | Show/send typing indicators                          |
-| `readReceiptsEnabled` | `true`      | Show/send read receipts                              |
+| `typingEnabled`| `true`            | Send my typing indicator to friends                  |
+| `showTyping`  | `true`             | Show friends' typing indicators                       |
+| `readReceiptsEnabled` | `true`      | Send read receipts to friends                        |
+| `showReadReceipts` | `true`         | Show friends' read receipts                          |
 
 ## Using the app
 

@@ -64,8 +64,10 @@ white = Available, red = Do Not Disturb, orange = Away, yellow = Be Right Back.
 - **Status** — set your status: **Available**, **DND**, **Away**, or **BRB**.
   Shown to friends on their peer list and via the bar icon color.
 - **Message sound** — play a soft chime when a new message arrives.
-- **Typing indicator** — show when a friend is typing (and let them see you).
-- **Read receipts** — show a ✓ when the recipient has read your message.
+- **Let friends see me typing** — when on, your friends see "typing…" while you type.
+- **Show when friends are typing** — when on, you see "[friend] is typing…".
+- **Let friends see when I've read** — when on, friends see a ✓ on read messages.
+- **Show when friends have read** — when on, you see a ✓ on read messages.
 - **API** — the HTTP API for scripts/agents (see below).
 - **Agent full access** — when the API is on, whether the agent can *read* your
   chat data or only *send*.
