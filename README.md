@@ -1,4 +1,4 @@
-# KelpME.lanchat
+# Lanchat
 
 Private messaging between your own machines on your local network, as an
 [Omarchy Quattro](https://github.com/omacom/omarchy/tree/quattro) shell plugin.
