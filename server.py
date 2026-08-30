@@ -556,8 +556,11 @@ def _udp_listener(sock: socket.socket) -> None:
                 int(pkt.get("httpPort", 0)) or None,
                 str(pkt.get("status") or "available"),
             )
-            # Reply so the caller learns about us immediately.
-            _udp_send(sock, {"t": "pong"})
+            # Reply so the caller learns about us immediately. Send a UNICAST
+            # pong back to the sender's address — broadcast replies get lost
+            # on networks where broadcasts are filtered, leaving discovery
+            # one-way (they see us, we don't see them).
+            _udp_send(sock, {"t": "pong"}, target=addr[0])
 
 
 def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
