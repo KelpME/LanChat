@@ -42,7 +42,7 @@ and they find each other automatically — no IP addresses, no accounts, no clou
 On every machine:
 
 ```bash
-omarchy plugin add https://github.com/<you>/KelpME.lanchat.git --enable --yes
+omarchy plugin add https://github.com/KelpME/LanChat.git --enable --yes
 ```
 
 Or by hand:
