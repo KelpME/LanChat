@@ -57,6 +57,7 @@ and how many peers are online.
 - **Undo delay** — hold messages for N seconds so you can undo them before they
   send.
 - **Save to** — the folder accepted files go to (default `~/Downloads`).
+- **Panel size** — choose **S**, **M**, or **L** for the panel window size.
 - **Version** — the installed version.
 
 ## The API (for scripts / agents)

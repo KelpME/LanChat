@@ -25,6 +25,7 @@ QtObject {
   property bool httpEnabled: false
   property int httpPort: 4814
   property bool apiFullAccess: false
+  property string panelSize: "medium"
 
   property bool online: true
   property var friends: []        // [{id,address,name,confirmed}]
@@ -166,6 +167,12 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setApiFullAccess", enabled: on }) + "\n")
   }
 
+  // Set the panel size: "small" | "medium" | "large".
+  function setPanelSize(size) {
+    panelSize = size
+    daemon.write(JSON.stringify({ cmd: "setPanelSize", size: size }) + "\n")
+  }
+
   // ---- events from the daemon -------------------------------------------
 
   function onDaemonLine(raw) {
@@ -186,8 +193,13 @@ QtObject {
       if (obj.downloadDir !== undefined) lanchat.downloadDir = obj.downloadDir
       if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
       if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
+      if (obj.panelSize !== undefined) lanchat.panelSize = obj.panelSize
       lanchat.refreshHistory()
       lanchat.refreshPeers()
+      break
+
+    case "panel-size":
+      lanchat.panelSize = obj.size || "medium"
       break
 
     case "api-full-access":

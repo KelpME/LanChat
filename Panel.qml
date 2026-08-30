@@ -188,6 +188,14 @@ Panel {
     Lanchat.send(selectedPeerId, "", { name: path.split("/").pop(), path: path })
   }
 
+  // Panel dimensions by size setting.
+  readonly property int panelW: Lanchat.panelSize === "small" ? Style.space(440)
+    : Lanchat.panelSize === "large" ? Style.space(720)
+    : Style.space(580)
+  readonly property int panelH: Lanchat.panelSize === "small" ? Style.space(360)
+    : Lanchat.panelSize === "large" ? Style.space(560)
+    : Style.space(460)
+
   KeyboardPanel {
     id: win
     anchorItem: root.anchorItem
@@ -195,8 +203,8 @@ Panel {
     owner: root.hostWidget || root
     open: root.opened
     centerOnBar: true
-    contentWidth: win.fittedContentWidth(Style.space(580))
-    contentHeight: win.fittedContentHeight(Style.space(460))
+    contentWidth: win.fittedContentWidth(root.panelW)
+    contentHeight: win.fittedContentHeight(root.panelH)
 
     Rectangle {
       width: parent.width
@@ -582,6 +590,52 @@ Panel {
                       anchors.verticalCenter: parent.verticalCenter
                       text: "\u2026"
                       onClicked: root.pickDownloadDir()
+                    }
+                  }
+
+                  // Size row (small/medium/large panel).
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Panel size"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Row {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.spacing.xs
+
+                      Button {
+                        width: Style.space(24)
+                        height: Style.space(18)
+                        text: "S"
+                        fontSize: Style.font.caption
+                        onClicked: Lanchat.setPanelSize("small")
+                      }
+                      Button {
+                        width: Style.space(24)
+                        height: Style.space(18)
+                        text: "M"
+                        fontSize: Style.font.caption
+                        onClicked: Lanchat.setPanelSize("medium")
+                      }
+                      Button {
+                        width: Style.space(24)
+                        height: Style.space(18)
+                        text: "L"
+                        fontSize: Style.font.caption
+                        onClicked: Lanchat.setPanelSize("large")
+                      }
                     }
                   }
 

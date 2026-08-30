@@ -193,6 +193,8 @@ def load_config() -> None:
     # When False, the agent can send messages to friends but cannot read
     # history, list peers, or download attachments.
     CONFIG.setdefault("apiFullAccess", False)
+    # Panel size: "small" | "medium" | "large".
+    CONFIG.setdefault("panelSize", "medium")
     # Online presence + friend list (persisted).
     CONFIG.setdefault("online", True)
     CONFIG.setdefault("friends", [])
@@ -310,6 +312,11 @@ def http_enabled() -> bool:
 def api_full_access() -> bool:
     """Whether the API can read chat data (history/peers/attachments) or is send-only."""
     return bool(CONFIG.get("apiFullAccess", False))
+
+
+def panel_size() -> str:
+    size = str(CONFIG.get("panelSize", "medium"))
+    return size if size in ("small", "medium", "large") else "medium"
 
 
 def http_port() -> int:
@@ -1115,6 +1122,12 @@ def stdin_loop() -> None:
             CONFIG["apiFullAccess"] = bool(cmd.get("enabled"))
             _save_config()
             _emit({"event": "api-full-access", "enabled": bool(cmd.get("enabled"))})
+        elif kind == "setPanelSize":
+            size = str(cmd.get("size", "medium"))
+            if size in ("small", "medium", "large"):
+                CONFIG["panelSize"] = size
+                _save_config()
+                _emit({"event": "panel-size", "size": size})
         elif kind == "setName":
             name = str(cmd.get("name", "")).strip()[:NAME_MAX]
             if name:
@@ -1173,6 +1186,7 @@ def _ready_event() -> dict:
         "downloadDir": CONFIG.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),
         "sendDelay": CONFIG.get("sendDelay", 0),
         "apiFullAccess": api_full_access(),
+        "panelSize": panel_size(),
     }
 
 
