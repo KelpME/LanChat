@@ -752,14 +752,6 @@ def tcp_loop() -> None:
 
 def _handle_client(conn: socket.socket, addr) -> None:
     conn.settimeout(30)
-
-    def _reply(data: str) -> None:
-        """Write a reply back to the caller on the SAME socket (no reverse dial)."""
-        try:
-            conn.sendall(data.encode("utf-8") + b"\n")
-        except OSError:
-            pass
-
     try:
         buf = b""
         while b"\n" not in buf:
@@ -774,18 +766,18 @@ def _handle_client(conn: socket.socket, addr) -> None:
         conn.sendall(b"ok\n")
         # The first line is the first message (no token preamble anymore).
         if line.strip():
-            _handle_incoming(line, addr, reply=_reply)
+            _handle_incoming(line, addr)
         lines = rest.split(b"\n") if rest else []
         for line in lines:
             if line.strip():
-                _handle_incoming(line, addr, reply=_reply)
+                _handle_incoming(line, addr)
         while True:
             chunk = conn.recv(4096)
             if not chunk:
                 break
             for line in chunk.split(b"\n"):
                 if line.strip():
-                    _handle_incoming(line, addr, reply=_reply)
+                    _handle_incoming(line, addr)
     except OSError:
         pass
     finally:
@@ -812,19 +804,10 @@ def _reveal(held, outgoing: bool = False) -> None:
         _emit({"event": "message", "message": m})
 
 
-def _handle_incoming(line: bytes, addr, reply=None) -> None:
+def _handle_incoming(line: bytes, addr) -> None:
     try:
         msg = json.loads(line.decode("utf-8"))
     except ValueError:
-        return
-    # acceptPoll: the requester (a peer we've sent a friend request to) asks us
-    # whether the handshake is complete, so they can finish without a reverse
-    # dial. We reply on the SAME connection — no need for them to reach us.
-    if msg.get("t") == "acceptPoll":
-        pid = str(msg.get("from", ""))
-        accepted = is_friend(pid)
-        if reply:
-            reply(json.dumps({"t": "acceptPollReply", "accepted": accepted, "fromName": display_name()}))
         return
     if msg.get("t") == "friendAccept":
         pid = str(msg.get("from", ""))
@@ -1047,9 +1030,6 @@ def send_message(peer_id: str, text: str, friend_request: bool = False, attachme
             _emit({"event": "friend-request", "outgoing": True, "to": peer_id, "toName": peer["name"],
                    "text": text, "ts": msg["ts"], "mid": msg["mid"]})
             _diag("outbound-friend-request", to=peer_id[:12], name=peer["name"], text=text[:40])
-            # The sender completes the handshake by polling the peer (over the
-            # working PC1->PC2 direction) for the accept — no reverse dial.
-            threading.Thread(target=_poll_accept, args=(peer_id, peer["name"]), daemon=True).start()
         else:
             msg["to"] = peer_id
             msg["outgoing"] = True
@@ -1095,70 +1075,28 @@ def send_control(peer_id: str, ctype: str, mid: str = "") -> bool:
         return False
 
 
-def _query_accept(peer_id: str, timeout: float = 5.0) -> bool:
-    """Ask a peer (over the WORKING PC1->PC2 direction) whether we're friends yet.
+def _notify_accept(peer_id: str) -> bool:
+    """Send the friendAccept notification back to the sender.
 
-    Returns True if the peer confirms the friend link is complete. The reply
-    rides back on the SAME connection, so this never requires a reverse dial.
+    If the peer is momentarily unreachable (vanishing peer), retry in the
+    background every few seconds until it lands, so the handshake completes on
+    the sender's side too. Returns True if the first attempt succeeded.
     """
+    if send_control(peer_id, "friendAccept"):
+        return True
     peer = find_peer(peer_id)
-    if peer is None:
-        return False
-    s = _tls_connect(peer, expected_fingerprint=peer_id)
-    if s is None:
-        return False
-    try:
-        s.settimeout(timeout)
-        s.sendall(json.dumps({"t": "acceptPoll", "from": host_id()}).encode("utf-8") + b"\n")
-        # Read until we get the acceptPollReply JSON (skip the "ok" ack).
-        buf = b""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                chunk = s.recv(4096)
-            except (OSError, ssl.SSLError):
-                break
-            if not chunk:
-                break
-            buf += chunk
-            for line in buf.split(b"\n"):
-                if not line.strip():
-                    continue
-                try:
-                    obj = json.loads(line)
-                except ValueError:
-                    continue
-                if obj.get("t") == "acceptPollReply":
-                    return bool(obj.get("accepted"))
-        return False
-    except OSError:
-        return False
-    finally:
-        try:
-            s.close()
-        except OSError:
-            pass
+    name = peer["name"] if peer else friendly_name(peer_id)
 
+    def _retry():
+        for _ in range(60):  # try for up to ~5 minutes
+            time.sleep(5)
+            if send_control(peer_id, "friendAccept"):
+                _diag("accept-notify-delivered", peer=peer_id[:12], name=name)
+                return
+        _diag("accept-notify-gave-up", peer=peer_id[:12], name=name)
 
-def _poll_accept(peer_id: str, name: str) -> None:
-    """Background: repeatedly ask the peer if they've accepted our request.
-
-    Runs until the handshake completes (peer confirms) or we give up. Used by
-    the SENDER so the accept confirmation travels over the known-good direction
-    instead of a fragile reverse dial.
-    """
-    for _ in range(150):  # try for up to ~5 minutes
-        time.sleep(2)
-        if _query_accept(peer_id):
-            _diag("accept-poll-completed", peer=peer_id[:12], name=name)
-            peer = find_peer(peer_id)
-            add_friend(peer_id, peer["address"] if peer else "", name, confirmed=True)
-            _emit({"event": "friend-accepted", "id": peer_id, "name": name})
-            with _pending_lock:
-                held = _pending_sent.pop(peer_id, [])
-            _reveal(held)
-            return
-    _diag("accept-poll-gave-up", peer=peer_id[:12], name=name)
+    threading.Thread(target=_retry, daemon=True).start()
+    return False
 
 
 # --------------------------------------------------------------------------
@@ -1444,15 +1382,18 @@ def stdin_loop() -> None:
             peer = find_peer(pid)
             pname = peer["name"] if peer else friendly_name(pid)
             # Accept is LOCAL and unconditional: confirm the friend and reveal
-            # the held messages right away. We do NOT dial the sender back —
-            # the sender polls us over its own working connection to learn the
-            # handshake is complete (LocalSend-style, no fragile reverse dial).
+            # the held messages right away. The notify-back to the sender is
+            # just a courtesy — if they're momentarily unreachable (vanishing
+            # peer), retry in the background until it lands so the handshake
+            # completes on both sides.
             add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
             _emit({"event": "friend-accepted", "id": pid, "name": pname})
             with _pending_lock:
                 held = _pending_first.pop(pid, [])
             _diag("accepted-friend-request", peer=pid[:12], name=pname, revealed=len(held))
             _reveal(held)
+            if not _notify_accept(pid):
+                _diag("accept-notify-failed", peer=pid[:12], name=pname, retrying=True)
         elif kind == "rejectFriend":
             pid = str(cmd.get("id", ""))
             send_control(pid, "friendReject")
