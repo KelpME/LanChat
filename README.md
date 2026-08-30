@@ -73,7 +73,7 @@ token, update it everywhere.
 |---------------|--------------------|----------------------------------------------|
 | `token`       | *(random)*         | Shared secret — must match on every machine  |
 | `port`        | `4812`             | TCP + UDP port (same value on every machine) |
-| `displayName` | hostname           | Name shown to other machines                 |
+| `displayName` | friendly name     | Name shown to other machines. Defaults to a deterministic friendly name (e.g. `MegaBoardslide`); set it in the UI if you want a custom one |
 | `httpEnabled` | `false`            | On/off for the HTTP API (toggle in the UI)   |
 | `httpPort`    | `4814`             | Port the HTTP API listens on                 |
 

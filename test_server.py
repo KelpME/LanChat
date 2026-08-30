@@ -23,6 +23,8 @@ import time
 TOKEN = "test-shared-secret-token"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRV = os.path.join(HERE, "server.py")
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
 
 
 def make_home(name, port, display):
@@ -148,6 +150,15 @@ def main():
         hev = b.wait_event("history")
         assert hev and any(m.get("text") == "hello from alpha" for m in hev["messages"])
         print("OK  history command replays persisted messages")
+
+        # ---- friendly naming --------------------------------------------
+        import server as _srv
+        n1 = _srv.friendly_name("laptop")
+        n2 = _srv.friendly_name("laptop")
+        n3 = _srv.friendly_name("desktop")
+        assert n1 == n2 and n1 != n3, "friendly_name not deterministic/per-id"
+        assert n1 == _srv.friendly_name("laptop"), "friendly_name not pure"
+        print("OK  friendly_name deterministic per peer id:", n1, "|", n3)
 
         # ---- HTTP API ----------------------------------------------------
         import urllib.request
