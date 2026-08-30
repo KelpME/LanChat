@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Offline test harness for server.py.
+
+Runs two isolated daemon instances on different ports (separate $HOME dirs,
+same token), injects synthetic discovery packets to simulate two machines on a
+LAN, then exercises the full path: authenticated TCP send -> receive -> persist.
+
+Not part of the plugin runtime — developer-only. Run from the repo root:
+
+    python3 test_server.py
+"""
+
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+TOKEN = "test-shared-secret-token"
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRV = os.path.join(HERE, "server.py")
+
+
+def make_home(name, port, display):
+    d = tempfile.mkdtemp(prefix="lanchat-test-" + name)
+    cfg_dir = os.path.join(d, ".config", "omarchy")
+    os.makedirs(cfg_dir, exist_ok=True)
+    with open(os.path.join(cfg_dir, "lanchat.json"), "w") as f:
+        json.dump({"token": TOKEN, "port": port, "displayName": display}, f)
+    return d
+
+
+class Daemon:
+    def __init__(self, home, port, display):
+        self.home = home
+        self.port = port
+        self.display = display
+        self.events = []
+        self._lock = threading.Lock()
+        self.proc = subprocess.Popen(
+            [sys.executable, SRV],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=dict(os.environ, HOME=home),
+            bufsize=1,
+            text=True,
+        )
+        self._reader = threading.Thread(target=self._read, daemon=True)
+        self._reader.start()
+
+    def _read(self):
+        for line in self.proc.stdout:
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            with self._lock:
+                self.events.append(ev)
+
+    def wait_event(self, kind, timeout=5.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self._lock:
+                for ev in self.events:
+                    if ev.get("event") == kind:
+                        self.events.remove(ev)
+                        return ev
+            time.sleep(0.02)
+        return None
+
+    def cmd(self, **kwargs):
+        self.proc.stdin.write(json.dumps(kwargs) + "\n")
+        self.proc.stdin.flush()
+
+    def stop(self):
+        try:
+            self.proc.stdin.close()
+        except OSError:
+            pass
+        self.proc.wait(timeout=5)
+
+
+def udp_broadcast(target_port, pkt):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(1)
+    s.sendto(json.dumps(pkt).encode(), ("127.0.0.1", target_port))
+    s.close()
+
+
+def wait_until(fn, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if fn():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def main():
+    home_a = make_home("alpha", 4811, "Alpha-machine")
+    home_b = make_home("beta", 4812, "Beta-machine")
+    a = Daemon(home_a, 4811, "Alpha-machine")
+    b = Daemon(home_b, 4812, "Beta-machine")
+
+    try:
+        assert a.wait_event("ready"), "A did not become ready"
+        assert b.wait_event("ready"), "B did not become ready"
+        print("OK  both daemons ready")
+
+        # Simulate discovery: each learns the other via a synthetic hello.
+        udp_broadcast(a.port, {"t": "hello", "id": "beta", "name": "Beta-machine", "port": b.port, "token": TOKEN})
+        udp_broadcast(b.port, {"t": "hello", "id": "alpha", "name": "Alpha-machine", "port": a.port, "token": TOKEN})
+        assert wait_until(lambda: _has_peer(a, "beta")), "A did not learn beta"
+        assert wait_until(lambda: _has_peer(b, "alpha")), "B did not learn alpha"
+        print("OK  discovery populated peer lists")
+
+        # Send from A -> B over real TCP, authenticated.
+        a.cmd(cmd="send", to="beta", text="hello from alpha")
+        msg = b.wait_event("message")
+        assert msg and msg["message"]["text"] == "hello from alpha", "B did not receive the message"
+        assert msg["message"]["fromName"] == "Alpha-machine"
+        assert msg["message"]["outgoing"] is False
+        print("OK  message delivered A -> B over TCP")
+
+        # Wrong token must be rejected (no message event, history stays clean).
+        bad = socket.create_connection(("127.0.0.1", b.port), timeout=3)
+        bad.sendall(b'{"token":"WRONG"}\n')
+        bad.sendall(b'{"t":"msg","from":"x","fromName":"x","text":"should never land"}\n')
+        time.sleep(0.5)
+        bad.close()
+        assert not wait_until(lambda: _has_message(b, "should never land"), timeout=1.0), "bad-token message leaked through"
+        print("OK  wrong-token client rejected")
+
+        # Persistence: B's history file contains the delivered message.
+        hist_path = os.path.join(home_b, ".local", "state", "lanchat", "history.json")
+        with open(hist_path) as f:
+            hist = json.load(f)
+        assert any(m.get("text") == "hello from alpha" for m in hist), "history not persisted"
+        print("OK  history persisted to disk")
+
+        # History reload command returns what's on disk.
+        b.cmd(cmd="history")
+        hev = b.wait_event("history")
+        assert hev and any(m.get("text") == "hello from alpha" for m in hev["messages"])
+        print("OK  history command replays persisted messages")
+
+        print("\nALL TESTS PASSED")
+        return 0
+    finally:
+        a.stop()
+        b.stop()
+        shutil.rmtree(home_a, ignore_errors=True)
+        shutil.rmtree(home_b, ignore_errors=True)
+
+
+def _has_peer(d, pid):
+    with d._lock:
+        return any(p.get("id") == pid for p in [e.get("peer") for e in d.events if e.get("event") == "peer"])
+
+
+def _has_message(d, text):
+    with d._lock:
+        return any(m.get("text") == text for e in d.events if e.get("event") == "message" for m in [e["message"]])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
