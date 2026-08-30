@@ -130,8 +130,8 @@ def main():
         # Simulate discovery: each learns the other via a synthetic hello using
         # the cert-fingerprint id.
         ida = _cert_fp(home_a); idb = _cert_fp(home_b)
-        udp_broadcast(a.port, {"t": "hello", "id": idb, "name": "Beta-machine", "port": b.port, "token": TOKEN})
-        udp_broadcast(b.port, {"t": "hello", "id": ida, "name": "Alpha-machine", "port": a.port, "token": TOKEN})
+        udp_broadcast(a.port, {"t": "hello", "id": idb, "name": "Beta-machine", "port": b.port})
+        udp_broadcast(b.port, {"t": "hello", "id": ida, "name": "Alpha-machine", "port": a.port})
         assert wait_until(lambda: _has_peer(a, idb)), "A did not learn beta"
         assert wait_until(lambda: _has_peer(b, ida)), "B did not learn alpha"
         print("OK  discovery populated peer lists")
@@ -150,17 +150,16 @@ def main():
         assert msg["message"]["outgoing"] is False
         print("OK  message delivered A -> B over TLS")
 
-        # Wrong token must be rejected (no message event, history stays clean).
+        # Friend gate: a stranger (non-friend, non-request) plain message is dropped.
         import ssl as _ssl
         _ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_CLIENT); _ctx.check_hostname=False; _ctx.verify_mode=_ssl.CERT_NONE
         bad_raw = socket.create_connection(("127.0.0.1", b.port), timeout=3)
         bad = _ctx.wrap_socket(bad_raw)
-        bad.sendall(b'{"token":"WRONG"}\n')
         bad.sendall(b'{"t":"msg","from":"x","fromName":"x","text":"should never land"}\n')
         time.sleep(0.5)
         bad.close()
-        assert not wait_until(lambda: _has_message(b, "should never land"), timeout=1.0), "bad-token message leaked through"
-        print("OK  wrong-token client rejected")
+        assert not wait_until(lambda: _has_message(b, "should never land"), timeout=1.0), "stranger message leaked through"
+        print("OK  non-friend message dropped (friend gate)");
 
         # Persistence: B's history file contains the delivered message.
         hist_path = os.path.join(home_b, ".local", "state", "lanchat", "history.json")

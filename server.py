@@ -513,8 +513,8 @@ def _udp_listener(sock: socket.socket) -> None:
             pkt = json.loads(data.decode("utf-8"))
         except ValueError:
             continue
-        if pkt.get("token") != CONFIG.get("token"):
-            continue  # wrong network / wrong key: ignore silently
+        # No token on discovery — any machine on the LAN can be seen, and the
+        # friend handshake is the gate that decides who can actually message us.
         t = pkt.get("t")
         if t == "hello":
             pid = str(pkt.get("id", addr[0]))
@@ -540,7 +540,6 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
     pkt["name"] = display_name()
     pkt["port"] = port()
     pkt["httpPort"] = http_port()
-    pkt["token"] = CONFIG.get("token")
     dest = target or "255.255.255.255"
     try:
         sock.sendto(json.dumps(pkt).encode("utf-8"), (dest, port()))
@@ -667,17 +666,12 @@ def _handle_client(conn: socket.socket, addr) -> None:
                 return
             buf += chunk
         line, rest = buf.split(b"\n", 1)
-        try:
-            auth = json.loads(line.decode("utf-8"))
-        except ValueError:
-            conn.close()
-            return
-        if auth.get("token") != CONFIG.get("token"):
-            conn.close()
-            return
-
-        # Remaining buffered bytes may already hold the first message.
+        # No token handshake — the friend/handshake gate (is_trusted) decides
+        # what actually gets processed in _handle_incoming.
         conn.sendall(b"ok\n")
+        # The first line is the first message (no token preamble anymore).
+        if line.strip():
+            _handle_incoming(line, addr)
         lines = rest.split(b"\n") if rest else []
         for line in lines:
             if line.strip():
@@ -838,10 +832,7 @@ def send_message(peer_id: str, text: str, friend_request: bool = False, attachme
         _emit({"event": "error", "message": "could not establish secure connection to %s" % peer["name"]})
         return False
     try:
-        s.sendall(json.dumps({"token": CONFIG.get("token")}).encode("utf-8") + b"\n")
-        # Wait for auth ok (drops the client if wrong key).
         s.settimeout(5)
-        ack = s.recv(64)
         msg = {
             "from": host_id(),
             "fromName": display_name(),
@@ -856,7 +847,12 @@ def send_message(peer_id: str, text: str, friend_request: bool = False, attachme
             # become trusted (can reply/accept) and show as a friend request.
             if not is_pending(peer_id) and not is_friend(peer_id):
                 add_friend(peer_id, peer["address"], peer["name"], confirmed=False)
+        # Send the message first; the receiver replies with "ok" after reading it.
         s.sendall(json.dumps({"t": "msg", **msg}).encode("utf-8") + b"\n")
+        try:
+            s.recv(64)  # consume the "ok" ack
+        except Exception:
+            pass
         s.close()
         msg["to"] = peer_id
         msg["outgoing"] = True
@@ -877,14 +873,17 @@ def send_control(peer_id: str, ctype: str) -> bool:
     if s is None:
         return False
     try:
-        s.sendall(json.dumps({"token": CONFIG.get("token")}).encode("utf-8") + b"\n")
         s.settimeout(5)
-        ack = s.recv(64)
+        # Send the control message first; the receiver replies with "ok" after reading it.
         s.sendall(json.dumps({
             "t": ctype,  # friendAccept / friendReject
             "from": host_id(),
             "fromName": display_name(),
         }).encode("utf-8") + b"\n")
+        try:
+            s.recv(64)  # consume the "ok" ack
+        except Exception:
+            pass
         s.close()
         return True
     except OSError:

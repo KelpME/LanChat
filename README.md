@@ -13,7 +13,7 @@ and they find each other automatically — no IP addresses, no accounts, no clou
   with a per-install self-signed certificate. Your device's identity is its
   cert's SHA-256 fingerprint, and peers verify each other's fingerprint when
   connecting — an imposter can't impersonate a friend.
-- **Friend/handshake gate** — a stranger with the token can't message you.
+- **Friend/handshake gate** — a stranger on the LAN can't message you.
   Starting a conversation sends a friend request; the other side accepts or
   rejects it in the chat. Only confirmed friends (or peers you've requested)
   can reach you.
@@ -55,9 +55,10 @@ omarchy plugin enable KelpME.lanchat
 
 To update, `omarchy plugin update` (fast-forward pulls the git checkout).
 
-## First-run setup: the shared secret
+## First-run setup
 
-On first run the daemon generates its config and TLS certificate:
+On first run the daemon generates its config and TLS certificate automatically —
+nothing to configure:
 
 - Config: `~/.config/omarchy/lanchat.json`
 - Certificate: `~/.config/omarchy/lanchat-certs/{cert.pem,key.pem}`
@@ -76,25 +77,21 @@ On first run the daemon generates its config and TLS certificate:
 }
 ```
 
-Do this **once**, on every machine:
+Install Lanchat on each machine, enable it, and the daemons start themselves.
+**There's no shared secret to copy.** Discovery is open on your LAN — any
+machine running Lanchat sees the others automatically. To actually chat, send
+a message and the other side **accepts your friend request** — that handshake
+is the gate that lets you talk.
 
-1. Start Lanchat on your first machine, then **copy the `token` value** from
-   that machine's `~/.config/omarchy/lanchat.json`.
-2. On every other machine, paste the **same token** into the same field. Set
-   `displayName` to whatever you want that machine called (or leave it — it
-   gets a friendly skate-trick name you can re-roll in the UI).
-3. Restart the shell (`omarchy-restart-shell`) or rescan plugins.
-
-Machines only see peers that share the same token. Change it anywhere and you
-must update it everywhere. The TLS cert and identity are separate from the
-token — those stay per-machine and are what friends actually trust.
+The `token` in the config is now **only** for the optional HTTPS API (scripts,
+agents) — it is not needed for peer messaging.
 
 ### Config options
 
 | Key           | Default            | Meaning                                      |
 |---------------|--------------------|----------------------------------------------|
-| `token`       | *(random)*         | Shared secret — must match on every machine  |
-| `port`        | `4812`             | TCP + UDP port (same on every machine)       |
+| `token`       | *(random)*         | Only for the HTTPS API (not needed for chat) |
+| `port`        | `4812`             | TCP + UDP port                               |
 | `displayName` | friendly name      | Cosmetic name shown to peers (re-rollable)   |
 | `httpEnabled` | `false`            | On/off for the HTTP API (toggle in the UI)   |
 | `httpPort`    | `4814`             | Port the HTTPS API listens on                |
@@ -159,13 +156,16 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
   decoupled from the cosmetic display name. Renaming never breaks a friend link.
 - **Peer verification** — when connecting, the peer's cert fingerprint is
   checked against the one you friended, preventing impersonation.
-- **Access** — the shared token gates discovery; the friend/handshake gates
-  messaging. Only confirmed friends (or peers you've requested) can reach you.
+- **Access** — discovery is open (any LAN machine is visible); the
+  friend/handshake gates messaging. Only confirmed friends (or peers you've
+  requested) can reach you.
 - **Presence** — the online toggle stops broadcasts and drops inbound while off.
 
 > The cert is self-signed (no CA), which is appropriate for LAN peer-to-peer.
-> The token is a shared secret — treat it carefully; a machine holding it can
-> see you in discovery.
+> Because discovery is open, any machine on your LAN can see you and send a
+> friend request — but they can't message you until you accept, and their cert
+> fingerprint identifies them. The `token` in config only protects the optional
+> HTTPS API.
 
 ## How it works
 

@@ -61,16 +61,19 @@ class Daemon:
 
 
 def tls_send(port, payload):
-    """Send a TCP line over TLS with correct token; return the ack text."""
+    """Send a TCP line over TLS; return the ack text. (No token — friend-gated.)"""
     import ssl as _ssl
     raw = socket.create_connection(("127.0.0.1", port), timeout=3)
     ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = _ssl.CERT_NONE
     s = ctx.wrap_socket(raw)
-    s.sendall(json.dumps({"token": TOKEN}).encode() + b"\n")
-    ack = s.recv(64)
+    s.settimeout(3)
     s.sendall(json.dumps(payload).encode() + b"\n")
+    try:
+        ack = s.recv(64)
+    except Exception:
+        ack = b""
     s.close()
     return ack
 
@@ -97,11 +100,11 @@ def main():
         ida = _cert_fp(ha); idb = _cert_fp(hb)
         def disco(port, pid, name, pport):
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.sendto(json.dumps({"t": "hello", "id": pid, "name": name, "port": pport, "token": TOKEN}).encode(), ("127.0.0.1", port))
+            s.sendto(json.dumps({"t": "hello", "id": pid, "name": name, "port": pport}).encode(), ("127.0.0.1", port))
             s.close()
         disco(a.port, idb, "Beta", 4952)
         disco(b.port, ida, "Alpha", 4951)
-        time.sleep(1.0)
+        time.sleep(1.5)  # let the UDP listener register the peer
 
         # 1) Unknown host (stranger) plain message to A is dropped.
         a.cmd(cmd="history")
@@ -118,7 +121,7 @@ def main():
         print("OK  2. friend request from stranger gets through")
 
         # 3) A sends B a normal message while not friends -> B drops it (not trusted).
-        a.cmd(cmd="send", to="beta", text="hello without friend req")
+        a.cmd(cmd="send", to=idb, text="hello without friend req")
         time.sleep(0.8)
         # B may have seen nothing; ensure B did NOT record it as a message.
         assert not [e for e in b.events_of("message") if e["message"].get("text") == "hello without friend req"]
@@ -143,9 +146,11 @@ def main():
         ae = a.wait_event("friend-accepted")
         # A emits friend-accepted with the *sender's* id (the peer who accepted = B/idb).
         assert ae and ae["id"] == idb, "A should see accept from B(idb), got %s" % (ae or {}).get("id")
-        # B confirms alpha as friend.
+        # B confirms alpha as friend (give B's friend event a moment to land).
+        time.sleep(0.5)
         fb = b.events_of("friends")
-        assert any(f["id"] == ida and f["confirmed"] for f in fb[-1]["friends"])
+        assert any(f["id"] == ida and f["confirmed"] for f in fb[-1]["friends"]), \
+            "B friends=%s" % [f["id"][:8] for e in fb for f in e["friends"]]
         print("OK  5. B accepts -> A friend-accepted; B confirmed alpha")
 
         # 6) Confirmed friends exchange messages freely.
