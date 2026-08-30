@@ -70,6 +70,14 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setHttp", enabled: enabled }) + "\n")
   }
 
+  // Set this machine's display name (persisted by the daemon).
+  function setMyName(name) {
+    var clean = String(name || "").trim()
+    if (!clean) return
+    myName = clean
+    daemon.write(JSON.stringify({ cmd: "setName", name: clean }) + "\n")
+  }
+
   // ---- events from the daemon -------------------------------------------
 
   function onDaemonLine(raw) {

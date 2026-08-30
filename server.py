@@ -538,6 +538,19 @@ def stdin_loop() -> None:
                 _stop_http()
             CONFIG["httpEnabled"] = enabled
             _save_config()
+        elif kind == "setName":
+            name = str(cmd.get("name", "")).strip()[:12]
+            if name:
+                CONFIG["displayName"] = name
+                _save_config()
+                _emit({
+                    "event": "ready",
+                    "id": host_id(),
+                    "name": display_name(),
+                    "port": port(),
+                    "httpEnabled": http_enabled(),
+                    "httpPort": http_port(),
+                })
 
 
 # --------------------------------------------------------------------------
