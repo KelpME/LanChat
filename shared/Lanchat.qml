@@ -62,6 +62,12 @@ QtObject {
     return decodeURIComponent(url)
   }
 
+  // Path to the daemon's diagnostic log (set from the daemon's ready event).
+  property string logPathValue: ""
+  function logPath() {
+    return lanchat.logPathValue
+  }
+
   function startDaemon() {
     if (daemon.running) return
     daemon.command = ["python3", lanchat.serverPath()]
@@ -334,6 +340,7 @@ QtObject {
       if (obj.showTyping !== undefined) lanchat.showTyping = obj.showTyping
       if (obj.readReceiptsEnabled !== undefined) lanchat.readReceiptsEnabled = obj.readReceiptsEnabled
       if (obj.showReadReceipts !== undefined) lanchat.showReadReceipts = obj.showReadReceipts
+      if (obj.logPath) lanchat.logPathValue = obj.logPath
       lanchat.refreshHistory()
       lanchat.refreshPeers()
       break

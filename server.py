@@ -100,6 +100,38 @@ def _emit(event: dict) -> None:
             os._exit(0)
 
 
+# --------------------------------------------------------------------------
+# Diagnostics
+# --------------------------------------------------------------------------
+# A timestamped diagnostic log (in addition to the stdout event stream) so a
+# failing handshake / vanishing peer / one-way delivery can be traced after
+# the fact. Written best-effort; never raises.
+
+_LOG_PATH = os.path.join(STATE_DIR, "daemon.log")
+_log_lock = threading.Lock()
+
+
+def _log(msg: str) -> None:
+    """Append one timestamped line to the diagnostic log (thread-safe, best-effort)."""
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        with _log_lock:
+            with open(_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write("%s  %s\n" % (ts, msg))
+    except OSError:
+        pass
+
+
+def _diag(msg: str, **fields) -> None:
+    """Log a diagnostic line AND surface it to the UI as a diagnostic event."""
+    extra = ("  " + " ".join("%s=%s" % (k, v) for k, v in fields.items())) if fields else ""
+    _log(msg + extra)
+    ev = {"event": "diagnostic", "message": msg}
+    ev.update(fields)
+    _emit(ev)
+
+
 def _save_config() -> None:
     try:
         atomic_write(CONFIG_PATH, json.dumps(CONFIG, indent=2) + "\n")
@@ -426,6 +458,7 @@ def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = N
             "lastSeen": int(now * 1000),
         }
     if not existed:
+        _diag("peer-discovered", id=pid[:12], name=name, address=address, port=pport)
         _emit({"event": "peer", "peer": _peers[pid]})
     else:
         _emit({"event": "peer", "peer": _peers[pid]})
@@ -436,10 +469,12 @@ def expire_peers() -> None:
     gone = []
     with _peers_lock:
         for pid in list(_peers.keys()):
-            if now - _peers[pid]["lastSeen"] / 1000.0 > PEER_TIMEOUT_S:
-                gone.append(pid)
+            age = now - _peers[pid]["lastSeen"] / 1000.0
+            if age > PEER_TIMEOUT_S:
+                gone.append((pid, age))
                 del _peers[pid]
-    for pid in gone:
+    for pid, age in gone:
+        _diag("peer-expired", id=pid[:12], age_s=round(age, 1), timeout_s=PEER_TIMEOUT_S)
         _emit({"event": "peer-gone", "id": pid})
 
 
@@ -572,8 +607,14 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
     dest = target or "255.255.255.255"
     try:
         sock.sendto(json.dumps(pkt).encode("utf-8"), (dest, port()))
-    except OSError:
-        pass
+    except OSError as e:
+        # A full send buffer (ENOBUFS / EAGAIN) means we're flooding faster than
+        # the socket drains — the classic symptom is peers "vanishing" because
+        # their hellos never make it out. Surface it so it's diagnosable.
+        errno = getattr(e, "errno", None)
+        _log("udp-send-failed target=%s errno=%s" % (dest, errno))
+        if errno in (105, 11, 90):  # ENOBUFS, EAGAIN, EMSGSIZE
+            _diag("udp-send-failed", target=dest[:32], errno=errno)
 
 
 def _local_subnet_hosts(max_hosts: int = 512) -> list:
@@ -801,9 +842,18 @@ def _handle_incoming(line: bytes, addr) -> None:
     # Friend requests are the entry point: a stranger may ask to be friends.
     # Everything else must come from a trusted peer.
     if not is_req and not is_trusted(pid, addr[0]):
+        # The classic one-way-delivery failure: the sender thinks they're
+        # friends, but we drop their message because we don't consider them
+        # trusted. Record whether they're a friend, pending, or unknown so the
+        # asymmetry is visible.
+        _diag("inbound-dropped",
+              from_id=pid[:12], address=addr[0],
+              reason="untrusted",
+              friend=is_friend(pid), pending=is_pending(pid))
         return
     text = str(msg.get("text", ""))
     if not text.strip():
+        _log("inbound-dropped from=%s reason=empty" % pid[:12])
         return
     # Use the sender's broadcast name if present; otherwise fall back to a
     # deterministic friendly name for their id.
@@ -915,19 +965,23 @@ def _tls_connect(peer: dict, expected_fingerprint: str = ""):
                 s.close()
                 return None
         return s
-    except OSError:
+    except OSError as e:
+        _log("tls-connect-failed peer=%s err=%s" % (peer.get("name"), e))
         return None
-    except Exception:
+    except Exception as e:
+        _log("tls-connect-failed peer=%s err=%s" % (peer.get("name"), e))
         return None
 
 
 def send_message(peer_id: str, text: str, friend_request: bool = False, attachment: dict = None) -> bool:
     peer = find_peer(peer_id)
     if peer is None:
+        _diag("send-peer-offline", to=peer_id[:12], text=text[:40])
         _emit({"event": "error", "message": "peer '%s' is not online yet" % peer_id})
         return False
     s = _tls_connect(peer, expected_fingerprint=peer_id)
     if s is None:
+        _diag("send-tls-failed", to=peer_id[:12], name=peer["name"])
         _emit({"event": "error", "message": "could not establish secure connection to %s" % peer["name"]})
         return False
     try:
@@ -1339,6 +1393,7 @@ def _ready_event() -> dict:
         "showTyping": show_typing(),
         "readReceiptsEnabled": read_receipts_enabled(),
         "showReadReceipts": show_read_receipts(),
+        "logPath": _LOG_PATH,
     }
 
 

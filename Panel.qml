@@ -181,6 +181,11 @@ Panel {
     Quickshell.execDetached(["xdg-open", root.helpPath()])
   }
 
+  // Open the daemon diagnostic log (surfaces why peers vanish / messages drop).
+  function openLog() {
+    Quickshell.execDetached(["xdg-open", Lanchat.logPath()])
+  }
+
   // Last component of a path (folder name).
   function pathBasename(path) {
     var p = String(path || "")
@@ -462,6 +467,19 @@ Panel {
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
                     font.weight: Font.Bold
+                  }
+
+                  // Diagnostics button — opens the daemon.log (why peers
+                  // vanish, why messages drop). A bug icon.
+                  Button {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(28)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(24)
+                    height: Style.space(18)
+                    text: "\uF188"  // nf-fa-bug
+                    fontSize: Style.font.bodySmall
+                    onClicked: root.openLog()
                   }
 
                   // Help button — opens HELP.md in the default viewer.
