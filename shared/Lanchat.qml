@@ -28,6 +28,8 @@ QtObject {
   property string panelSize: "medium"
   property string status: "available"
   property bool soundEnabled: true
+  property bool typingEnabled: true
+  property bool readReceiptsEnabled: true
 
   property bool online: true
   property var friends: []        // [{id,address,name,confirmed}]
@@ -36,6 +38,8 @@ QtObject {
   property int sendDelay: 0
   property var pendingSends: []  // [{mid, to, text, remaining, total}] undo-window
   property var heldQueue: []     // [{mid, to, text, attachment}] held for DND/offline peer
+  property var typing: ({})      // peerId -> name currently typing
+  property var readReceipts: {}  // mid -> true (peer confirmed reading)
 
   property var peers: []          // [{id,name,address,port,lastSeen}]
   property var messages: []       // [{from,fromName,text,ts,outgoing}]
@@ -207,6 +211,29 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "unfriend", id: id }) + "\n")
   }
 
+  // Broadcast typing / stopped-typing / read to a peer (gated by toggles).
+  function sendTyping(to) {
+    if (!typingEnabled) return
+    daemon.write(JSON.stringify({ cmd: "typing", to: to }) + "\n")
+  }
+  function sendTypingStopped(to) {
+    if (!typingEnabled) return
+    daemon.write(JSON.stringify({ cmd: "typingStopped", to: to }) + "\n")
+  }
+  function sendReadReceipt(to, mid) {
+    if (!readReceiptsEnabled) return
+    daemon.write(JSON.stringify({ cmd: "readReceipt", to: to, mid: mid }) + "\n")
+  }
+
+  function setTypingEnabled(on) {
+    typingEnabled = on
+    daemon.write(JSON.stringify({ cmd: "setTypingEnabled", enabled: on }) + "\n")
+  }
+  function setReadReceiptsEnabled(on) {
+    readReceiptsEnabled = on
+    daemon.write(JSON.stringify({ cmd: "setReadReceiptsEnabled", enabled: on }) + "\n")
+  }
+
   // Toggle full API access to chat data (read history/peers) vs send-only.
   function setApiFullAccess(on) {
     apiFullAccess = on
@@ -264,8 +291,18 @@ QtObject {
       if (obj.panelSize !== undefined) lanchat.panelSize = obj.panelSize
       if (obj.status !== undefined) lanchat.status = obj.status
       if (obj.soundEnabled !== undefined) lanchat.soundEnabled = obj.soundEnabled
+      if (obj.typingEnabled !== undefined) lanchat.typingEnabled = obj.typingEnabled
+      if (obj.readReceiptsEnabled !== undefined) lanchat.readReceiptsEnabled = obj.readReceiptsEnabled
       lanchat.refreshHistory()
       lanchat.refreshPeers()
+      break
+
+    case "typing-enabled":
+      lanchat.typingEnabled = obj.enabled === true
+      break
+
+    case "read-receipts-enabled":
+      lanchat.readReceiptsEnabled = obj.enabled === true
       break
 
     case "sound-enabled":
@@ -347,6 +384,29 @@ QtObject {
       lanchat.statusTimer.restart()
       break
 
+    case "typing": {
+      var nt = {}
+      for (var tk in lanchat.typing) nt[tk] = lanchat.typing[tk]
+      nt[obj.from] = obj.fromName || obj.from
+      lanchat.typing = nt
+      break
+    }
+
+    case "typing-stopped": {
+      var ns = {}
+      for (var sk in lanchat.typing) if (sk !== obj.from) ns[sk] = lanchat.typing[sk]
+      lanchat.typing = ns
+      break
+    }
+
+    case "read-receipt": {
+      var nr = {}
+      for (var rk in lanchat.readReceipts) nr[rk] = lanchat.readReceipts[rk]
+      nr[obj.mid] = true
+      lanchat.readReceipts = nr
+      break
+    }
+
     case "peer": {
       var peer = obj.peer
       var prev = null
@@ -389,6 +449,10 @@ QtObject {
       if (!lanchat.panelOpen && !obj.message.outgoing) {
         lanchat.unreadCount++
         lanchat.playMessageSound()
+      }
+      // If the panel is open for this peer, send a read receipt back.
+      if (lanchat.panelOpen && !obj.message.outgoing && obj.message.from) {
+        lanchat.sendReadReceipt(obj.message.from, obj.message.mid)
       }
       break
     }

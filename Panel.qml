@@ -67,6 +67,12 @@ Panel {
 
   readonly property bool hasThread: thread.length > 0
 
+  // Name of the selected peer if they are currently typing, else "".
+  readonly property string typingForPeer: {
+    var t = Lanchat.typing[selectedPeerId]
+    return t ? String(t) : ""
+  }
+
   // Held (un-sent) messages for the selected peer, for the undo bar.
   readonly property var pendingForPeer: {
     var out = []
@@ -222,6 +228,14 @@ Panel {
       if (selectedPeerId === "" && Lanchat.peers.length > 0)
         selectedPeerId = Lanchat.peers[0].id
       Qt.callLater(function() { list.positionViewAtEnd() })
+    }
+  }
+
+  // Stops the typing indicator on the peer side after idle.
+  property Timer typingTimer: Timer {
+    interval: 2000
+    onTriggered: {
+      if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
     }
   }
 
@@ -636,6 +650,78 @@ Panel {
                     }
                   }
 
+                  // Typing indicator row.
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: typingTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Typing indicator"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: typingTipHover.containsMouse
+                      text: "Show when a friend is typing, and let them see you type."
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.typingEnabled
+                      onToggled: Lanchat.setTypingEnabled(!Lanchat.typingEnabled)
+                    }
+                  }
+
+                  // Read receipts row.
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: readTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Read receipts"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: readTipHover.containsMouse
+                      text: "Show a check when the recipient has read your message."
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.readReceiptsEnabled
+                      onToggled: Lanchat.setReadReceiptsEnabled(!Lanchat.readReceiptsEnabled)
+                    }
+                  }
+
                   // API row
                   Item {
                     width: parent.width
@@ -936,6 +1022,18 @@ Panel {
                 height: root.selectedPeerId ? Style.space(26) : Style.spacing.md
                 visible: root.selectedPeerId !== ""
 
+                Text {
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: root.typingForPeer !== ""
+                  text: root.typingForPeer + " is typing…"
+                  color: Color.muted
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                  font.italic: true
+                }
+
                 Button {
                   anchors.right: parent.right
                   anchors.rightMargin: Style.spacing.sm
@@ -965,11 +1063,13 @@ Panel {
                 width: list.width
                 spacing: Style.spacing.xs
 
-                // Meta row: who + when (+ edited marker)
+                // Meta row: who + when (+ edited marker + read state)
                 Text {
                   anchors.left: modelData.outgoing ? undefined : parent.left
                   anchors.right: modelData.outgoing ? parent.right : undefined
-                  text: (modelData.outgoing ? "You · " : modelData.fromName + " · ") + root.timeLabel(modelData.ts) + (modelData.edited ? " (edited)" : "")
+                  text: (modelData.outgoing ? "You · " : modelData.fromName + " · ") + root.timeLabel(modelData.ts)
+                    + (modelData.edited ? " (edited)" : "")
+                    + (modelData.outgoing && modelData.mid && Lanchat.readReceipts[modelData.mid] ? " · ✓" : "")
                   color: Color.muted
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
@@ -1291,6 +1391,19 @@ Panel {
                     : "Select a peer to chat"
                   enabled: root.selectedPeer !== null
                   onAccepted: root.send()
+                  onTextChanged: {
+                    if (root.selectedPeerId && text.length > 0) {
+                      Lanchat.sendTyping(root.selectedPeerId)
+                      typingTimer.restart()
+                    } else {
+                      if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
+                      typingTimer.stop()
+                    }
+                  }
+                  onEditingFinished: {
+                    if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
+                    typingTimer.stop()
+                  }
                 }
               }
             }

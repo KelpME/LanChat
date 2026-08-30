@@ -141,6 +141,9 @@ def load_config() -> None:
     CONFIG.setdefault("status", "available")
     # Play a sound on incoming messages.
     CONFIG.setdefault("soundEnabled", True)
+    # Presence indicators: typing + read receipts (toggleable).
+    CONFIG.setdefault("typingEnabled", True)
+    CONFIG.setdefault("readReceiptsEnabled", True)
     # Online presence + friend list (persisted).
     CONFIG.setdefault("online", True)
     CONFIG.setdefault("friends", [])
@@ -276,6 +279,14 @@ def status() -> str:
 
 def sound_enabled() -> bool:
     return bool(CONFIG.get("soundEnabled", True))
+
+
+def typing_enabled() -> bool:
+    return bool(CONFIG.get("typingEnabled", True))
+
+
+def read_receipts_enabled() -> bool:
+    return bool(CONFIG.get("readReceiptsEnabled", True))
 
 
 def http_port() -> int:
@@ -713,6 +724,15 @@ def _handle_incoming(line: bytes, addr) -> None:
         pid = str(msg.get("from", ""))
         _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
         return
+    if msg.get("t") == "typing":
+        _emit({"event": "typing", "from": str(msg.get("from", "")), "fromName": str(msg.get("fromName") or friendly_name(msg.get("from", "")))})
+        return
+    if msg.get("t") == "typingStopped":
+        _emit({"event": "typing-stopped", "from": str(msg.get("from", ""))})
+        return
+    if msg.get("t") == "read":
+        _emit({"event": "read-receipt", "from": str(msg.get("from", "")), "mid": str(msg.get("mid", ""))})
+        return
     if msg.get("t") != "msg":
         return
     pid = str(msg.get("from", ""))
@@ -869,8 +889,8 @@ def send_message(peer_id: str, text: str, friend_request: bool = False, attachme
         return False
 
 
-def send_control(peer_id: str, ctype: str) -> bool:
-    """Send a friend accept/reject control message to a peer."""
+def send_control(peer_id: str, ctype: str, mid: str = "") -> bool:
+    """Send a friend accept/reject / typing / read control message to a peer."""
     peer = find_peer(peer_id)
     if peer is None:
         return False
@@ -880,11 +900,14 @@ def send_control(peer_id: str, ctype: str) -> bool:
     try:
         s.settimeout(5)
         # Send the control message first; the receiver replies with "ok" after reading it.
-        s.sendall(json.dumps({
-            "t": ctype,  # friendAccept / friendReject
+        payload = {
+            "t": ctype,  # friendAccept / friendReject / typing / typingStopped / read
             "from": host_id(),
             "fromName": display_name(),
-        }).encode("utf-8") + b"\n")
+        }
+        if mid:
+            payload["mid"] = mid
+        s.sendall(json.dumps(payload).encode("utf-8") + b"\n")
         try:
             s.recv(64)  # consume the "ok" ack
         except Exception:
@@ -1130,6 +1153,14 @@ def stdin_loop() -> None:
             CONFIG["soundEnabled"] = bool(cmd.get("enabled"))
             _save_config()
             _emit({"event": "sound-enabled", "enabled": bool(cmd.get("enabled"))})
+        elif kind == "setTypingEnabled":
+            CONFIG["typingEnabled"] = bool(cmd.get("enabled"))
+            _save_config()
+            _emit({"event": "typing-enabled", "enabled": bool(cmd.get("enabled"))})
+        elif kind == "setReadReceiptsEnabled":
+            CONFIG["readReceiptsEnabled"] = bool(cmd.get("enabled"))
+            _save_config()
+            _emit({"event": "read-receipts-enabled", "enabled": bool(cmd.get("enabled"))})
         elif kind == "setName":
             name = str(cmd.get("name", "")).strip()[:NAME_MAX]
             if name:
@@ -1172,6 +1203,12 @@ def stdin_loop() -> None:
             pid = str(cmd.get("id", ""))
             if unfriend(pid):
                 _emit({"event": "friend-removed", "id": pid})
+        elif kind == "typing":
+            send_control(str(cmd.get("to", "")), "typing")
+        elif kind == "typingStopped":
+            send_control(str(cmd.get("to", "")), "typingStopped")
+        elif kind == "readReceipt":
+            send_control(str(cmd.get("to", "")), "read", str(cmd.get("mid", "")))
 
 
 # --------------------------------------------------------------------------
@@ -1195,6 +1232,8 @@ def _ready_event() -> dict:
         "panelSize": panel_size(),
         "status": status(),
         "soundEnabled": sound_enabled(),
+        "typingEnabled": typing_enabled(),
+        "readReceiptsEnabled": read_receipts_enabled(),
     }
 
 
