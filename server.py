@@ -1041,9 +1041,12 @@ def send_control(peer_id: str, ctype: str, mid: str = "") -> bool:
     """Send a friend accept/reject / typing / read control message to a peer."""
     peer = find_peer(peer_id)
     if peer is None:
+        _diag("send-control-peer-offline", peer=peer_id[:12], ctype=ctype)
         return False
     s = _tls_connect(peer, expected_fingerprint=peer_id)
     if s is None:
+        _diag("send-control-tls-failed", peer=peer_id[:12], ctype=ctype,
+              addr=peer.get("address"), port=peer.get("port"))
         return False
     try:
         s.settimeout(5)
@@ -1062,8 +1065,33 @@ def send_control(peer_id: str, ctype: str, mid: str = "") -> bool:
             pass
         s.close()
         return True
-    except OSError:
+    except OSError as e:
+        _diag("send-control-io-failed", peer=peer_id[:12], ctype=ctype, err=str(e))
         return False
+
+
+def _notify_accept(peer_id: str) -> bool:
+    """Send the friendAccept notification back to the sender.
+
+    If the peer is momentarily unreachable (vanishing peer), retry in the
+    background every few seconds until it lands, so the handshake completes on
+    the sender's side too. Returns True if the first attempt succeeded.
+    """
+    if send_control(peer_id, "friendAccept"):
+        return True
+    peer = find_peer(peer_id)
+    name = peer["name"] if peer else friendly_name(peer_id)
+
+    def _retry():
+        for _ in range(60):  # try for up to ~5 minutes
+            time.sleep(5)
+            if send_control(peer_id, "friendAccept"):
+                _diag("accept-notify-delivered", peer=peer_id[:12], name=name)
+                return
+        _diag("accept-notify-gave-up", peer=peer_id[:12], name=name)
+
+    threading.Thread(target=_retry, daemon=True).start()
+    return False
 
 
 # --------------------------------------------------------------------------
@@ -1348,16 +1376,19 @@ def stdin_loop() -> None:
             pid = str(cmd.get("id", ""))
             peer = find_peer(pid)
             pname = peer["name"] if peer else friendly_name(pid)
-            if send_control(pid, "friendAccept"):
-                add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
-                _emit({"event": "friend-accepted", "id": pid, "name": pname})
-                # Reveal the messages we held from them until acceptance.
-                with _pending_lock:
-                    held = _pending_first.pop(pid, [])
-                _diag("accepted-friend-request", peer=pid[:12], name=pname, revealed=len(held))
-                _reveal(held)
-            else:
-                _diag("accept-friend-failed", peer=pid[:12], name=pname)
+            # Accept is LOCAL and unconditional: confirm the friend and reveal
+            # the held messages right away. The notify-back to the sender is
+            # just a courtesy — if they're momentarily unreachable (vanishing
+            # peer), retry in the background until it lands so the handshake
+            # completes on both sides.
+            add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
+            _emit({"event": "friend-accepted", "id": pid, "name": pname})
+            with _pending_lock:
+                held = _pending_first.pop(pid, [])
+            _diag("accepted-friend-request", peer=pid[:12], name=pname, revealed=len(held))
+            _reveal(held)
+            if not _notify_accept(pid):
+                _diag("accept-notify-failed", peer=pid[:12], name=pname, retrying=True)
         elif kind == "rejectFriend":
             pid = str(cmd.get("id", ""))
             send_control(pid, "friendReject")
