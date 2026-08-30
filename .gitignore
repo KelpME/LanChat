@@ -1,2 +1,25 @@
+# Python build cruft
 __pycache__/
 *.pyc
+
+# ---- Lanchat private data (messages, config, identity) ----
+# Message history / per-machine state. These contain your actual chat
+# messages and MUST never be committed.
+lanchat-history.json
+history.json
+*.history.json
+
+# Daemon state dir (if it ever lands under a repo root).
+.local/state/lanchat/
+.local/state/**/lanchat/
+
+# Runtime config — contains the shared secret token + friend list.
+lanchat.json
+.config/omarchy/lanchat.json
+
+# TLS identity — the private key and certificate define who this install is.
+# Committing the key would let anyone impersonate you.
+lanchat-certs/
+.config/omarchy/lanchat-certs/
+*.pem
+!shared/**/*.pem
