@@ -198,6 +198,11 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "rejectFriend", id: id }) + "\n")
   }
 
+  // Remove a peer from your friends list (unfriend).
+  function unfriend(id) {
+    daemon.write(JSON.stringify({ cmd: "unfriend", id: id }) + "\n")
+  }
+
   // Toggle full API access to chat data (read history/peers) vs send-only.
   function setApiFullAccess(on) {
     apiFullAccess = on

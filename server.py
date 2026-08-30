@@ -457,6 +457,17 @@ def add_friend(pid: str, address: str, name: str, confirmed: bool) -> None:
     _emit({"event": "friends", "friends": friends_list()})
 
 
+def unfriend(pid: str) -> bool:
+    """Remove a peer from friends (unfriend). Returns True if they were removed."""
+    friends = CONFIG.get("friends", [])
+    before = len(friends)
+    friends = [f for f in friends if f.get("id") != pid]
+    CONFIG["friends"] = friends
+    _save_config()
+    _emit({"event": "friends", "friends": friends_list()})
+    return len(friends) != before
+
+
 def is_trusted(pid: str, address: str = "") -> bool:
     """Accept traffic only from confirmed friends or pending-request peers.
 
@@ -1138,6 +1149,10 @@ def stdin_loop() -> None:
             pid = str(cmd.get("id", ""))
             send_control(pid, "friendReject")
             _emit({"event": "friend-rejected", "id": pid})
+        elif kind == "unfriend":
+            pid = str(cmd.get("id", ""))
+            if unfriend(pid):
+                _emit({"event": "friend-removed", "id": pid})
 
 
 # --------------------------------------------------------------------------

@@ -108,6 +108,13 @@ Panel {
     if (selectedPeerId) Lanchat.clearChat(selectedPeerId)
   }
 
+  function unfriendSelected() {
+    if (selectedPeerId) {
+      Lanchat.unfriend(selectedPeerId)
+      selectedPeerId = ""
+    }
+  }
+
   function deleteMsg(mid) {
     Lanchat.deleteMessage(mid)
   }
@@ -910,7 +917,21 @@ Panel {
               spacing: Style.spacing.sm
               model: root.thread
 
-              header: Item { width: parent.width; height: Style.spacing.md }
+              header: Item {
+                width: parent.width
+                height: root.selectedPeerId ? Style.space(26) : Style.spacing.md
+                visible: root.selectedPeerId !== ""
+
+                Button {
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "Unfriend"
+                  fontSize: Style.font.caption
+                  visible: root.selectedPeerId !== ""
+                  onClicked: root.unfriendSelected()
+                }
+              }
               footer: Item { width: parent.width; height: Style.spacing.lg }
 
               onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
