@@ -206,17 +206,18 @@ Panel {
     Lanchat.send(selectedPeerId, "", { name: path.split("/").pop(), path: path })
   }
 
-  // Panel dimensions by size setting. "full" fills the screen (minus a small
-  // margin so the top bar stays visible and the card has breathing room).
+  // Panel dimensions by size setting. "full" fills the available screen area
+  // exactly (what the KeyboardPanel allows), so the card border aligns with
+  // the screen edge consistently.
   readonly property int panelW: Lanchat.panelSize === "small" ? Style.space(440)
     : Lanchat.panelSize === "large" ? Style.space(720)
     : Lanchat.panelSize === "xl" ? Style.space(900)
-    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.width : 1440) - Style.space(16) * 2)
+    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.width : 1440) - Style.space(10))
     : Style.space(580)
   readonly property int panelH: Lanchat.panelSize === "small" ? Style.space(360)
     : Lanchat.panelSize === "large" ? Style.space(560)
     : Lanchat.panelSize === "xl" ? Style.space(700)
-    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.height : 900) - Style.space(16) * 2 - Style.space(35))
+    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.height : 900) - Style.space(10) - Style.space(35))
     : Style.space(460)
 
   KeyboardPanel {
