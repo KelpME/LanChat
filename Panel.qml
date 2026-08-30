@@ -468,31 +468,6 @@ Panel {
                     font.pixelSize: Style.font.caption
                     font.weight: Font.Bold
                   }
-
-                  // Diagnostics button — opens the daemon.log (why peers
-                  // vanish, why messages drop). A bug icon.
-                  Button {
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.space(28)
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(24)
-                    height: Style.space(18)
-                    text: "\uF188"  // nf-fa-bug
-                    fontSize: Style.font.bodySmall
-                    onClicked: root.openLog()
-                  }
-
-                  // Help button — opens HELP.md in the default viewer.
-                  Button {
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.spacing.sm
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(24)
-                    height: Style.space(18)
-                    text: "\uF059"  // nf-fa-question-circle
-                    fontSize: Style.font.bodySmall
-                    onClicked: root.openHelp()
-                  }
                 }
 
                 // body (name + online + API + undo + save) — compact rows,
@@ -997,6 +972,47 @@ Panel {
                       Button { width: Style.space(24); height: Style.space(18); text: "L"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("large") }
                       Button { width: Style.space(28); height: Style.space(18); text: "XL"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("xl") }
                       Button { width: Style.space(24); height: Style.space(18); text: "F"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("full") }
+                    }
+                  }
+
+                  // Help & diagnostics row.
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Help"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Row {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.spacing.xs
+
+                      // Help button — opens HELP.md in the default viewer.
+                      Button {
+                        text: "\uF059"  // nf-fa-question-circle
+                        tooltipText: "Open help"
+                        fontSize: Style.font.body
+                        onClicked: root.openHelp()
+                      }
+
+                      // Diagnostics button — opens the daemon.log (why peers
+                      // vanish, why messages drop).
+                      Button {
+                        text: "\uF188"  // nf-fa-bug
+                        tooltipText: "Open diagnostics log"
+                        fontSize: Style.font.body
+                        onClicked: root.openLog()
+                      }
                     }
                   }
 
