@@ -186,14 +186,6 @@ Panel {
                 anchors.right: parent.right
                 anchors.bottom: settings.top
 
-                Rectangle {
-                  anchors.top: parent.top
-                  anchors.left: parent.left
-                  anchors.right: parent.right
-                  height: 1
-                  color: Color.popups.border
-                }
-
                 Text {
                   anchors.left: parent.left
                   anchors.leftMargin: Style.spacing.sm
@@ -256,13 +248,6 @@ Panel {
                   Item {
                     width: parent.width
                     height: Style.space(34)
-                    Rectangle {
-                      anchors.top: parent.top
-                      anchors.left: parent.left
-                      anchors.right: parent.right
-                      height: 1
-                      color: Color.popups.border
-                    }
 
                     Row {
                       anchors.left: parent.left
@@ -299,13 +284,6 @@ Panel {
                   Item {
                     width: parent.width
                     height: Style.space(42)
-                    Rectangle {
-                      anchors.top: parent.top
-                      anchors.left: parent.left
-                      anchors.right: parent.right
-                      height: 1
-                      color: Color.popups.border
-                    }
 
                     Text {
                       id: nameLabel
