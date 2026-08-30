@@ -334,77 +334,17 @@ Panel {
                   }
                 }
 
-                // body (API + online + name)
+                // body (name + online + API + undo + save) — compact rows
                 Column {
                   id: settingsBody
                   width: parent.width
                   visible: settings.expanded
+                  spacing: Style.spacing.xs
 
-                  // Online row
+                  // Name row (top)
                   Item {
                     width: parent.width
-                    height: Style.space(34)
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Online"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.online
-                      onToggled: Lanchat.setOnline(!Lanchat.online)
-                    }
-                  }
-
-                  // API row
-                  Item {
-                    width: parent.width
-                    height: Style.space(34)
-
-                    Row {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      spacing: Style.spacing.xs
-
-                      Text {
-                        text: "API"
-                        color: Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        font.weight: Font.Bold
-                      }
-
-                      Text {
-                        text: Lanchat.httpEnabled ? ":" + Lanchat.httpPort : "off"
-                        color: Lanchat.httpEnabled ? Color.accent : Color.muted
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                      }
-                    }
-
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.httpEnabled
-                      onToggled: Lanchat.setHttpEnabled(!Lanchat.httpEnabled)
-                    }
-                  }
-
-                  // Name row
-                  Item {
-                    width: parent.width
-                    height: Style.space(42)
+                    height: Style.space(30)
 
                     Text {
                       id: nameLabel
@@ -445,10 +385,71 @@ Panel {
                     }
                   }
 
+                  // Online row
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Online"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.online
+                      onToggled: Lanchat.setOnline(!Lanchat.online)
+                    }
+                  }
+
+                  // API row
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    Row {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.spacing.xs
+
+                      Text {
+                        text: "API"
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        font.weight: Font.Bold
+                      }
+
+                      Text {
+                        text: Lanchat.httpEnabled ? ":" + Lanchat.httpPort : "off"
+                        color: Lanchat.httpEnabled ? Color.accent : Color.muted
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.httpEnabled
+                      onToggled: Lanchat.setHttpEnabled(!Lanchat.httpEnabled)
+                    }
+                  }
+
                   // Send-delay row (undo window).
                   Item {
                     width: parent.width
-                    height: Style.space(42)
+                    height: Style.space(28)
 
                     Text {
                       anchors.left: parent.left
@@ -480,7 +481,7 @@ Panel {
                   // Download folder row.
                   Item {
                     width: parent.width
-                    height: Style.space(42)
+                    height: Style.space(28)
 
                     Text {
                       anchors.left: parent.left
@@ -497,7 +498,7 @@ Panel {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "…"
+                      text: "\u2026"
                       onClicked: root.pickDownloadDir()
                     }
                   }
