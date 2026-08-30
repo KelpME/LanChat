@@ -321,6 +321,14 @@ def panel_size() -> str:
     return size if size in ("small", "medium", "large", "xl", "full") else "medium"
 
 
+STATUSES = ("available", "dnd", "away", "brb")
+
+
+def status() -> str:
+    s = str(CONFIG.get("status", "available"))
+    return s if s in STATUSES else "available"
+
+
 def http_port() -> int:
     try:
         return int(CONFIG.get("httpPort", DEFAULT_HTTP_PORT))
@@ -419,7 +427,7 @@ def peer_snapshot() -> list:
         )
 
 
-def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: int = None) -> None:
+def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = None, pstatus: str = "available") -> None:
     now = time.time()
     with _peers_lock:
         existed = pid in _peers
@@ -429,6 +437,7 @@ def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: int = None
             "address": address,
             "port": pport,
             "httpPort": phttp,
+            "status": pstatus if pstatus in STATUSES else "available",
             "lastSeen": int(now * 1000),
         }
     if not existed:
@@ -549,6 +558,7 @@ def _udp_listener(sock: socket.socket) -> None:
                 addr[0],
                 int(pkt.get("port", DEFAULT_PORT)),
                 int(pkt.get("httpPort", 0)) or None,
+                str(pkt.get("status") or "available"),
             )
             # Reply so the caller learns about us immediately.
             _udp_send(sock, {"t": "pong"})
@@ -559,6 +569,7 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
     pkt["name"] = display_name()
     pkt["port"] = port()
     pkt["httpPort"] = http_port()
+    pkt["status"] = status()
     dest = target or "255.255.255.255"
     try:
         sock.sendto(json.dumps(pkt).encode("utf-8"), (dest, port()))
@@ -1130,6 +1141,13 @@ def stdin_loop() -> None:
                 CONFIG["panelSize"] = size
                 _save_config()
                 _emit({"event": "panel-size", "size": size})
+        elif kind == "setStatus":
+            s = str(cmd.get("status", "available"))
+            if s in STATUSES:
+                CONFIG["status"] = s
+                _save_config()
+                broadcast_now()  # peers see the new status right away
+                _emit({"event": "status", "status": s})
         elif kind == "setName":
             name = str(cmd.get("name", "")).strip()[:NAME_MAX]
             if name:
@@ -1189,6 +1207,7 @@ def _ready_event() -> dict:
         "sendDelay": CONFIG.get("sendDelay", 0),
         "apiFullAccess": api_full_access(),
         "panelSize": panel_size(),
+        "status": status(),
     }
 
 
