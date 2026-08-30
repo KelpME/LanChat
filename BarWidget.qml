@@ -106,19 +106,38 @@ BarWidget {
 
       Rectangle { width: parent.width; height: 1; color: Color.popups.border }
 
-      Text {
-        text: "Status"
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        color: Color.popups.text
-        font.bold: true
-        leftPadding: Style.spacing.sm
-        topPadding: Style.spacing.xs
+      MenuItem {
+        text: "Available"
+        background: Rectangle {
+          color: Lanchat.status === "available" ? Style.selectedFill : "transparent"
+          radius: Style.cornerRadius
+        }
+        onClicked: { Lanchat.setStatus("available"); root.menuOpen = false }
       }
-      MenuItem { text: "Available"; onClicked: { Lanchat.setStatus("available"); root.menuOpen = false } }
-      MenuItem { text: "Do Not Disturb"; onClicked: { Lanchat.setStatus("dnd"); root.menuOpen = false } }
-      MenuItem { text: "Away"; onClicked: { Lanchat.setStatus("away"); root.menuOpen = false } }
-      MenuItem { text: "Be Right Back"; onClicked: { Lanchat.setStatus("brb"); root.menuOpen = false } }
+      MenuItem {
+        text: "Do Not Disturb"
+        background: Rectangle {
+          color: Lanchat.status === "dnd" ? Style.selectedFill : "transparent"
+          radius: Style.cornerRadius
+        }
+        onClicked: { Lanchat.setStatus("dnd"); root.menuOpen = false }
+      }
+      MenuItem {
+        text: "Away"
+        background: Rectangle {
+          color: Lanchat.status === "away" ? Style.selectedFill : "transparent"
+          radius: Style.cornerRadius
+        }
+        onClicked: { Lanchat.setStatus("away"); root.menuOpen = false }
+      }
+      MenuItem {
+        text: "Be Right Back"
+        background: Rectangle {
+          color: Lanchat.status === "brb" ? Style.selectedFill : "transparent"
+          radius: Style.cornerRadius
+        }
+        onClicked: { Lanchat.setStatus("brb"); root.menuOpen = false }
+      }
     }
   }
 
