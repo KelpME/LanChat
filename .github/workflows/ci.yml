@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps (cryptography for cert fingerprint)
+        run: pip install cryptography
+
+      - name: Run test suites
+        run: |
+          python3 test_server.py
+          python3 test_friends.py
+          python3 test_features.py
+
+  qml-syntax:
+    name: QML structural check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Full qmllint needs the Omarchy shell modules (qs.Ui, qs.Commons) which
+      # only exist on a real install, so CI can't run it cleanly. Instead we
+      # catch the bug class we actually hit repeatedly — unbalanced braces —
+      # with a deterministic token-balance check that works without those
+      # modules.
+      - name: Run structural QML check
+        run: python3 scripts/check_qml.py
