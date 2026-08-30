@@ -576,12 +576,16 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
         pass
 
 
-def _local_subnet_hosts() -> list:
+def _local_subnet_hosts(max_hosts: int = 512) -> list:
     """Enumerate LAN host addresses from our active interfaces' netmasks.
 
     Uses ioctl (SIOCGIFADDR / SIOCGIFNETMASK) to read the real netmask rather
-    than assuming /24. Interfaces with a /32 netmask (e.g. VPNs) are skipped
-    since they have no usable host range.
+    than assuming /24. Only broadcast-capable, non-point-to-point interfaces
+    with a usable host range are considered — this excludes VPN tunnels
+    (point-to-point, e.g. tailscale) and virtual bridges (docker0, veth, etc.)
+    which are either point-to-point or huge non-LAN networks that would flood
+    the UDP send queue. The total is also capped so a misread interface can
+    never dump thousands of unicast hellos per scan.
     """
     import fcntl
     import ipaddress
@@ -591,17 +595,35 @@ def _local_subnet_hosts() -> list:
     try:
         SIOCGIFADDR = 0x8915
         SIOCGIFNETMASK = 0x891B
+        SIOCGIFFLAGS = 0x8913
+        IFF_POINTOPOINT = 0x10
+        IFF_BROADCAST = 0x2
+        # Virtual/container interface name prefixes to skip: docker bridges and
+        # veth pairs, VM bridges, tun/tap tunnels, wireguard, etc. These are not
+        # the LAN we're scanning and scanning their (often /16) subnets would
+        # flood the UDP send queue.
+        _VIRT_PREFIXES = ("docker", "br-", "veth", "virbr", "vmnet", "vboxnet",
+                          "tun", "tap", "wg", "tailscale", "zt", "docker_gwbridge")
         for idx, name in socket.if_nameindex():
             if name == "lo":
                 continue
+            if name.lower().startswith(_VIRT_PREFIXES):
+                continue
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                flags = struct.unpack("H", fcntl.ioctl(s.fileno(), SIOCGIFFLAGS,
+                    struct.pack("256s", name[:15].encode()))[16:18])[0]
                 addr = socket.inet_ntoa(fcntl.ioctl(s.fileno(), SIOCGIFADDR,
                     struct.pack("256s", name[:15].encode()))[20:24])
                 mask = socket.inet_ntoa(fcntl.ioctl(s.fileno(), SIOCGIFNETMASK,
                     struct.pack("256s", name[:15].encode()))[20:24])
                 s.close()
             except OSError:
+                continue
+            # VPN/tunnel/virtual interfaces are not LAN: they're either
+            # point-to-point (no real subnet) or broadcast-capable virtual
+            # bridges (docker/veth) that aren't the LAN we're scanning for.
+            if not (flags & IFF_BROADCAST) or (flags & IFF_POINTOPOINT):
                 continue
             try:
                 net = ipaddress.ip_network("%s/%s" % (addr, mask), strict=False)
@@ -611,6 +633,8 @@ def _local_subnet_hosts() -> list:
                 continue
             for h in net.hosts():
                 hosts.append(str(h))
+                if len(hosts) >= max_hosts:
+                    return hosts
     except Exception:
         pass
     return hosts
