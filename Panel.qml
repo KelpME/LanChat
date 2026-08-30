@@ -87,7 +87,12 @@ Panel {
   function send() {
     var text = input.text.trim()
     if (!text || !selectedPeerId) return
-    Lanchat.send(selectedPeerId, text)
+    if (editingMid !== "") {
+      Lanchat.editMessage(editingMid, text)
+      editingMid = ""
+    } else {
+      Lanchat.send(selectedPeerId, text)
+    }
     input.text = ""
     list.positionViewAtEnd()
   }
@@ -117,6 +122,15 @@ Panel {
 
   function deleteMsg(mid) {
     Lanchat.deleteMessage(mid)
+  }
+
+  // Begin editing a message: load its text into the compose box and flag the
+  // next send as an edit of that mid.
+  property string editingMid: ""
+  function editMsg(mid, text) {
+    editingMid = mid
+    input.text = text
+    input.forceActiveFocus()
   }
 
   function pickDownloadDir() {
@@ -951,11 +965,11 @@ Panel {
                 width: list.width
                 spacing: Style.spacing.xs
 
-                // Meta row: who + when
+                // Meta row: who + when (+ edited marker)
                 Text {
                   anchors.left: modelData.outgoing ? undefined : parent.left
                   anchors.right: modelData.outgoing ? parent.right : undefined
-                  text: (modelData.outgoing ? "You · " : modelData.fromName + " · ") + root.timeLabel(modelData.ts)
+                  text: (modelData.outgoing ? "You · " : modelData.fromName + " · ") + root.timeLabel(modelData.ts) + (modelData.edited ? " (edited)" : "")
                   color: Color.muted
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
@@ -1026,6 +1040,24 @@ Panel {
                     PanelToolTip {
                       visible: heldTipHover.containsMouse
                       text: "Held — " + (Lanchat.peerStatus(modelData.to) === "dnd" ? "recipient is on Do Not Disturb" : "recipient is offline") + ". Will send when they're available."
+                    }
+                  }
+
+                  // Edit button (outgoing messages only), shown on hover.
+                  Text {
+                    visible: modelData.outgoing && (parent.hovered || root.editingMid === modelData.mid)
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.topMargin: Style.space(5)
+                    anchors.rightMargin: Style.space(22)
+                    text: "\uF040"
+                    color: Color.muted
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    opacity: 0.8
+                    MouseArea {
+                      anchors.fill: parent
+                      onClicked: root.editMsg(modelData.mid, modelData.text)
                     }
                   }
 

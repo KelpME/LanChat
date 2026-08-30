@@ -359,6 +359,22 @@ def delete_message(mid: str) -> bool:
     return removed
 
 
+def edit_message(mid: str, new_text: str) -> bool:
+    """Replace a message's text (by mid). Returns True if found and edited."""
+    global _history
+    new_text = new_text.strip()
+    if not new_text:
+        return False
+    with _hist_lock:
+        for m in _history:
+            if m.get("mid") == mid:
+                m["text"] = new_text
+                m["edited"] = True
+                _save_history_locked()
+                return True
+    return False
+
+
 # --------------------------------------------------------------------------
 # Peers (discovered via UDP)
 # --------------------------------------------------------------------------
@@ -1062,6 +1078,9 @@ def stdin_loop() -> None:
         elif kind == "deleteMessage":
             ok = delete_message(str(cmd.get("mid", "")))
             _emit({"event": "message-deleted", "mid": str(cmd.get("mid", "")), "ok": ok})
+        elif kind == "editMessage":
+            ok = edit_message(str(cmd.get("mid", "")), str(cmd.get("text", "")))
+            _emit({"event": "message-edited", "mid": str(cmd.get("mid", "")), "text": str(cmd.get("text", "")), "ok": ok})
         elif kind == "setDownloadDir":
             CONFIG["downloadDir"] = str(cmd.get("dir", ""))
             _save_config()

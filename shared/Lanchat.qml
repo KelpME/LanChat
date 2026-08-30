@@ -151,6 +151,10 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "deleteMessage", mid: mid }) + "\n")
   }
 
+  function editMessage(mid, text) {
+    daemon.write(JSON.stringify({ cmd: "editMessage", mid: mid, text: text }) + "\n")
+  }
+
   function setDownloadDir(dir) {
     downloadDir = dir
     daemon.write(JSON.stringify({ cmd: "setDownloadDir", dir: dir }) + "\n")
@@ -321,6 +325,20 @@ QtObject {
     case "message-deleted":
       if (obj.ok) {
         lanchat.messages = lanchat.messages.filter(function(m) { return m.mid !== obj.mid })
+      }
+      break
+
+    case "message-edited":
+      if (obj.ok) {
+        var upd = lanchat.messages.slice()
+        for (var ei = 0; ei < upd.length; ei++) {
+          if (upd[ei].mid === obj.mid) {
+            upd[ei].text = obj.text
+            upd[ei].edited = true
+            break
+          }
+        }
+        lanchat.messages = upd
       }
       break
 
