@@ -721,6 +721,9 @@ def _handle_client(conn: socket.socket, addr) -> None:
             pass
 
 
+_pending_first = {}   # pid -> first held message, revealed only after they accept
+
+
 def _handle_incoming(line: bytes, addr) -> None:
     try:
         msg = json.loads(line.decode("utf-8"))
@@ -775,6 +778,11 @@ def _handle_incoming(line: bytes, addr) -> None:
     # replies (accept) are trusted.
     if msg.get("friendRequest") and not is_pending(pid) and not is_friend(pid):
         add_friend(pid, addr[0], from_name, confirmed=False)
+        # Do NOT surface the message content yet — hold it so the receiver
+        # sees only a friend request until they accept.
+        _pending_first[pid] = message
+        _emit({"event": "friend-request", "from": pid, "fromName": from_name, "text": text, "ts": ts})
+        return
     append_history(message)
     _emit({"event": "message", "message": message})
 
