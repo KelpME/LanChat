@@ -63,6 +63,11 @@ Panel {
     return Qt.formatTime(d, "HH:mm")
   }
 
+  function copyToClipboard(text) {
+    if (!text) return
+    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(text) + " | wl-copy"])
+  }
+
   onOpenedChanged: {
     Lanchat.panelOpen = root.opened
     if (root.opened) {
@@ -105,17 +110,22 @@ Panel {
             height: parent.height
             color: Util.alpha(Color.foreground, 0.04)
 
-            Column {
+            Item {
               anchors.fill: parent
 
+              // ---- peers list (scrollable) ---------------------------
               ListView {
                 id: peerList
                 width: parent.width
-                height: parent.height - apiFooter.height
+                anchors.top: parent.top
+                anchors.bottom: peersOnlineBar.top
                 clip: true
                 model: Lanchat.peers
                 spacing: Style.spacing.xs
-                anchors.margins: Style.spacing.sm
+                anchors.topMargin: Style.spacing.sm
+                anchors.bottomMargin: Style.spacing.xs
+                anchors.leftMargin: Style.spacing.sm
+                anchors.rightMargin: Style.spacing.sm
 
                 delegate: Rectangle {
                   required property var modelData
@@ -130,7 +140,6 @@ Panel {
                     onClicked: root.selectPeer(modelData.id)
                   }
 
-                  // Accent bar on the selected row.
                   Rectangle {
                     visible: modelData.id === root.selectedPeerId
                     width: 3
@@ -168,12 +177,15 @@ Panel {
                 }
               }
 
-              // ---- HTTP API footer -----------------------------------
-              Rectangle {
-                id: apiFooter
+              // ---- peers online: pinned above settings ----------------
+              Item {
+                id: peersOnlineBar
                 width: parent.width
-                height: Style.space(36)
-                color: "transparent"
+                height: Style.space(26)
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: settings.top
+
                 Rectangle {
                   anchors.top: parent.top
                   anchors.left: parent.left
@@ -182,51 +194,145 @@ Panel {
                   color: Color.popups.border
                 }
 
-                Item {
-                  anchors.fill: parent
+                Text {
+                  anchors.left: parent.left
                   anchors.leftMargin: Style.spacing.sm
-                  anchors.rightMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: (Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online"
+                  color: Lanchat.onlineCount > 0 ? Color.accent : Color.muted
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+              }
 
-                  Row {
+              // ---- settings: collapsible ------------------------------
+              Column {
+                id: settings
+                property bool expanded: true
+                width: parent.width
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: settingsHeader.height + (settings.expanded ? settingsBody.height : 0)
+
+                // header
+                Item {
+                  id: settingsHeader
+                  width: parent.width
+                  height: Style.space(26)
+
+                  Rectangle {
+                    anchors.top: parent.top
                     anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 1
+                    color: Color.popups.border
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    onClicked: settings.expanded = !settings.expanded
+                  }
+
+                  Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.spacing.sm
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.spacing.xs
+                    text: settings.expanded ? "Settings ▾" : "Settings ▸"
+                    color: Color.popups.text
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.weight: Font.Bold
+                  }
+                }
+
+                // body (API + name)
+                Column {
+                  id: settingsBody
+                  width: parent.width
+                  visible: settings.expanded
+
+                  // API row
+                  Item {
+                    width: parent.width
+                    height: Style.space(34)
+                    Rectangle {
+                      anchors.top: parent.top
+                      anchors.left: parent.left
+                      anchors.right: parent.right
+                      height: 1
+                      color: Color.popups.border
+                    }
+
+                    Row {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.spacing.xs
+
+                      Text {
+                        text: "API"
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        font.weight: Font.Bold
+                      }
+
+                      Text {
+                        text: Lanchat.httpEnabled ? ":" + Lanchat.httpPort : "off"
+                        color: Lanchat.httpEnabled ? Color.accent : Color.muted
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.httpEnabled
+                      onToggled: Lanchat.setHttpEnabled(!Lanchat.httpEnabled)
+                    }
+                  }
+
+                  // Name row
+                  Item {
+                    width: parent.width
+                    height: Style.space(42)
+                    Rectangle {
+                      anchors.top: parent.top
+                      anchors.left: parent.left
+                      anchors.right: parent.right
+                      height: 1
+                      color: Color.popups.border
+                    }
 
                     Text {
-                      text: "API"
-                      color: Color.popups.text
+                      id: nameLabel
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Name"
+                      color: Color.muted
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
                     }
 
-                    Text {
-                      text: Lanchat.httpEnabled ? ":" + Lanchat.httpPort : "off"
-                      color: Lanchat.httpEnabled ? Color.accent : Color.muted
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                    TextField {
+                      id: nameInput
+                      anchors.left: nameLabel.right
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      maximumLength: 12
+                      placeholderText: Lanchat.myName || "your name"
+                      horizontalPadding: Style.space(8)
+                      verticalPadding: Style.space(4)
+                      onAccepted: Lanchat.setMyName(nameInput.text)
+                      onEditingFinished: if (nameInput.text.trim() !== "") Lanchat.setMyName(nameInput.text)
                     }
-
-                    Text {
-                      text: "·"
-                      color: Color.muted
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    Text {
-                      text: (Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online"
-                      color: Lanchat.onlineCount > 0 ? Color.accent : Color.muted
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-                  }
-
-                  ToggleSwitch {
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    checked: Lanchat.httpEnabled
-                    onToggled: Lanchat.setHttpEnabled(!Lanchat.httpEnabled)
                   }
                 }
               }
@@ -276,11 +382,14 @@ Panel {
                 // set padding; the bubble grows with the text (no circular
                 // width dependency that used to clip long messages).
                 Rectangle {
+                  id: bubble
                   readonly property real bubbleMaxWidth: list.width * 0.8
                   readonly property real bubblePaddingX: Style.space(14)
                   readonly property real bubblePaddingY: Style.space(9)
+                  readonly property bool hovered: bubbleMouse.containsMouse
+                  property bool copied: false
 
-                  width: Math.min(bubbleMaxWidth, messageText.implicitWidth + bubblePaddingX * 2)
+                  width: Math.min(bubbleMaxWidth, messageText.implicitWidth + bubblePaddingX * 2 + Style.space(20))
                   height: messageText.implicitHeight + bubblePaddingY * 2
                   radius: Math.max(Style.cornerRadius, Style.space(6))
                   anchors.left: modelData.outgoing ? undefined : parent.left
@@ -291,18 +400,55 @@ Panel {
                     ? Style.selectedAccentFill
                     : Style.normalFill
 
+                  MouseArea {
+                    id: bubbleMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                  }
+
                   Text {
                     id: messageText
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.leftMargin: parent.bubblePaddingX
-                    anchors.rightMargin: parent.bubblePaddingX
+                    anchors.rightMargin: parent.bubblePaddingX + Style.space(12)
                     text: modelData.text
                     color: Color.popups.text
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     wrapMode: Text.Wrap
+                  }
+
+                  // Copy button: small icon in the top-right corner,
+                  // revealed on hover. Flashes a checkmark after copying.
+                  Text {
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.topMargin: Style.space(5)
+                    anchors.rightMargin: Style.space(5)
+                    text: parent.copied ? "\u2713" : "\uF0C5"
+                    color: parent.copied ? Color.accent : Color.muted
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    visible: parent.hovered || parent.copied
+                    opacity: parent.copied ? 1.0 : 0.8
+
+                    MouseArea {
+                      anchors.fill: parent
+                      onClicked: {
+                        root.copyToClipboard(modelData.text)
+                        bubble.copied = true
+                        copyReset.restart()
+                      }
+                    }
+                  }
+
+                  Timer {
+                    id: copyReset
+                    interval: 1500
+                    onTriggered: bubble.copied = false
                   }
                 }
               }
