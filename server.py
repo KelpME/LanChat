@@ -744,7 +744,8 @@ def tcp_loop() -> None:
         try:
             raw_conn, addr = srv.accept()
             conn = tls_ctx.wrap_socket(raw_conn, server_side=True)
-        except (OSError, ssl.SSLError):
+        except (OSError, ssl.SSLError) as e:
+            _log("inbound-tls-failed addr=%s err=%s" % (addr, e))
             continue
         threading.Thread(target=_handle_client, args=(conn, addr), daemon=True).start()
 
