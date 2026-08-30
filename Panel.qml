@@ -162,6 +162,38 @@ Panel {
     return idx >= 0 ? p.slice(idx + 1) : p
   }
 
+  // Wraps a right-side options area. If the options are wider than the row,
+  // they clip and a trailing "…" appears, hinting the user to widen the column.
+  component ClippedOptions: Item {
+    id: coRoot
+    default property alias options: clipRow.data
+    implicitHeight: clipRow.implicitHeight
+    // Fill whatever width the parent row gives us on the right side.
+    anchors.right: parent.right
+    anchors.rightMargin: Style.spacing.sm
+    anchors.left: parent.left
+    anchors.leftMargin: Style.space(70)   // leave room for the label on the left
+    anchors.verticalCenter: parent.verticalCenter
+    clip: true
+
+    Row {
+      id: clipRow
+      anchors.left: parent.left
+      spacing: Style.spacing.xs
+    }
+
+    Text {
+      visible: clipRow.implicitWidth > parent.width
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      text: "\u2026"
+      color: Color.muted
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      z: 2
+    }
+  }
+
   onOpenedChanged: {
     Lanchat.panelOpen = root.opened
     if (root.opened) {
@@ -534,16 +566,14 @@ Panel {
                       text: "Your status is shown to friends."
                     }
 
-                    Row {
+                    ClippedOptions {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      spacing: Style.spacing.xs
 
-                      Button { text: "Available"; fontSize: Style.font.caption; onClicked: Lanchat.setStatus("available") }
-                      Button { text: "DND"; fontSize: Style.font.caption; onClicked: Lanchat.setStatus("dnd") }
-                      Button { text: "Away"; fontSize: Style.font.caption; onClicked: Lanchat.setStatus("away") }
-                      Button { text: "BRB"; fontSize: Style.font.caption; onClicked: Lanchat.setStatus("brb") }
+                      Button { text: "\uF2BD"; tooltipText: "Available"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("available") }
+                      Button { text: "\uF1F6"; tooltipText: "Do Not Disturb"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("dnd") }
+                      Button { text: "\uF017"; tooltipText: "Away"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("away") }
+                      Button { text: "\uF0F4"; tooltipText: "Be Right Back"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("brb") }
                     }
                   }
 
@@ -791,47 +821,15 @@ Panel {
                       text: "S/M/L/XL/F — panel window size. F fills the screen."
                     }
 
-                    Row {
+                    ClippedOptions {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      spacing: Style.spacing.xs
 
-                      Button {
-                        width: Style.space(24)
-                        height: Style.space(18)
-                        text: "S"
-                        fontSize: Style.font.caption
-                        onClicked: Lanchat.setPanelSize("small")
-                      }
-                      Button {
-                        width: Style.space(24)
-                        height: Style.space(18)
-                        text: "M"
-                        fontSize: Style.font.caption
-                        onClicked: Lanchat.setPanelSize("medium")
-                      }
-                      Button {
-                        width: Style.space(24)
-                        height: Style.space(18)
-                        text: "L"
-                        fontSize: Style.font.caption
-                        onClicked: Lanchat.setPanelSize("large")
-                      }
-                      Button {
-                        width: Style.space(28)
-                        height: Style.space(18)
-                        text: "XL"
-                        fontSize: Style.font.caption
-                        onClicked: Lanchat.setPanelSize("xl")
-                      }
-                      Button {
-                        width: Style.space(24)
-                        height: Style.space(18)
-                        text: "F"
-                        fontSize: Style.font.caption
-                        onClicked: Lanchat.setPanelSize("full")
-                      }
+                      Button { width: Style.space(24); height: Style.space(18); text: "S"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("small") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "M"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("medium") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "L"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("large") }
+                      Button { width: Style.space(28); height: Style.space(18); text: "XL"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("xl") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "F"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("full") }
                     }
                   }
 
@@ -891,7 +889,7 @@ Panel {
                 // New width = handle's center X within the panel (parent of the Row).
                 if (dragging) {
                   var px = parent.mapToItem(parent.parent, mouse.x, 0).x
-                  root.peerColW = Math.max(Style.space(260), Math.min(px + Style.space(4), parent.parent.width - Style.space(200)))
+                  root.peerColW = Math.max(Style.space(140), Math.min(px + Style.space(4), parent.parent.width - Style.space(200)))
                 }
               }
             }
