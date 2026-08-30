@@ -58,6 +58,7 @@ white = Available, red = Do Not Disturb, orange = Away, yellow = Be Right Back.
 - **Online** — go offline to stop broadcasting and drop inbound messages.
 - **Status** — set your status: **Available**, **DND**, **Away**, or **BRB**.
   Shown to friends on their peer list and via the bar icon color.
+- **Message sound** — play a soft chime when a new message arrives.
 - **API** — the HTTP API for scripts/agents (see below).
 - **Agent full access** — when the API is on, whether the agent can *read* your
   chat data or only *send*.

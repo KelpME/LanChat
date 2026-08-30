@@ -27,6 +27,7 @@ QtObject {
   property bool apiFullAccess: false
   property string panelSize: "medium"
   property string status: "available"
+  property bool soundEnabled: true
 
   property bool online: true
   property var friends: []        // [{id,address,name,confirmed}]
@@ -215,6 +216,20 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setStatus", status: s }) + "\n")
   }
 
+  // Toggle the new-message sound.
+  function setSoundEnabled(on) {
+    soundEnabled = on
+    daemon.write(JSON.stringify({ cmd: "setSoundEnabled", enabled: on }) + "\n")
+  }
+
+  // Play the bundled message chime via paplay (no deps).
+  function playMessageSound() {
+    if (!soundEnabled) return
+    var url = Qt.resolvedUrl("../sounds/message.ogg").toString()
+    if (url.indexOf("file://") === 0) url = url.slice(7)
+    Quickshell.execDetached(["paplay", decodeURIComponent(url)])
+  }
+
   // ---- events from the daemon -------------------------------------------
 
   function onDaemonLine(raw) {
@@ -237,8 +252,13 @@ QtObject {
       if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
       if (obj.panelSize !== undefined) lanchat.panelSize = obj.panelSize
       if (obj.status !== undefined) lanchat.status = obj.status
+      if (obj.soundEnabled !== undefined) lanchat.soundEnabled = obj.soundEnabled
       lanchat.refreshHistory()
       lanchat.refreshPeers()
+      break
+
+    case "sound-enabled":
+      lanchat.soundEnabled = obj.enabled === true
       break
 
     case "status":
@@ -341,7 +361,10 @@ QtObject {
       var msgs = lanchat.messages.slice()
       msgs.push(obj.message)
       lanchat.messages = msgs
-      if (!lanchat.panelOpen && !obj.message.outgoing) lanchat.unreadCount++
+      if (!lanchat.panelOpen && !obj.message.outgoing) {
+        lanchat.unreadCount++
+        lanchat.playMessageSound()
+      }
       break
     }
 

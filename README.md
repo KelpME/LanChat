@@ -101,6 +101,7 @@ agents) — it is not needed for peer messaging.
 | `sendDelay`   | `0`                | Undo window in seconds (`0` = off)           |
 | `panelSize`   | `medium`           | Panel size: `small`, `medium`, `large`, `xl`, `full` |
 | `status`      | `available`        | Your status: `available`, `dnd`, `away`, `brb`       |
+| `soundEnabled`| `true`             | Play a chime when a new message arrives              |
 
 ## Using the app
 

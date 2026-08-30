@@ -521,6 +521,42 @@ Panel {
                     }
                   }
 
+                  // Message sound row.
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: soundTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Message sound"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: soundTipHover.containsMouse
+                      text: "Play a chime when a new message arrives."
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.soundEnabled
+                      onToggled: Lanchat.setSoundEnabled(!Lanchat.soundEnabled)
+                    }
+                  }
+
                   // API row
                   Item {
                     width: parent.width

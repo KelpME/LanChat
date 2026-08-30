@@ -197,6 +197,8 @@ def load_config() -> None:
     CONFIG.setdefault("panelSize", "medium")
     # User status: "available" | "dnd" | "away" | "brb". Broadcast to friends.
     CONFIG.setdefault("status", "available")
+    # Play a sound on incoming messages.
+    CONFIG.setdefault("soundEnabled", True)
     # Online presence + friend list (persisted).
     CONFIG.setdefault("online", True)
     CONFIG.setdefault("friends", [])
@@ -327,6 +329,10 @@ STATUSES = ("available", "dnd", "away", "brb")
 def status() -> str:
     s = str(CONFIG.get("status", "available"))
     return s if s in STATUSES else "available"
+
+
+def sound_enabled() -> bool:
+    return bool(CONFIG.get("soundEnabled", True))
 
 
 def http_port() -> int:
@@ -1148,6 +1154,10 @@ def stdin_loop() -> None:
                 _save_config()
                 broadcast_now()  # peers see the new status right away
                 _emit({"event": "status", "status": s})
+        elif kind == "setSoundEnabled":
+            CONFIG["soundEnabled"] = bool(cmd.get("enabled"))
+            _save_config()
+            _emit({"event": "sound-enabled", "enabled": bool(cmd.get("enabled"))})
         elif kind == "setName":
             name = str(cmd.get("name", "")).strip()[:NAME_MAX]
             if name:
@@ -1208,6 +1218,7 @@ def _ready_event() -> dict:
         "apiFullAccess": api_full_access(),
         "panelSize": panel_size(),
         "status": status(),
+        "soundEnabled": sound_enabled(),
     }
 
 
