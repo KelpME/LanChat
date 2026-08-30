@@ -141,22 +141,10 @@ Panel {
                     color: Color.accent
                   }
 
-                  Rectangle {
-                    width: Style.space(8)
-                    height: Style.space(8)
-                    radius: width / 2
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: Style.spacing.sm
-                    color: modelData.id === root.selectedPeerId
-                      ? Color.background
-                      : Color.accent
-                  }
-
                   Text {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
-                    anchors.leftMargin: Style.spacing.xl
+                    anchors.leftMargin: Style.spacing.sm
                     anchors.right: parent.right
                     anchors.rightMargin: Style.spacing.sm
                     text: modelData.name
