@@ -99,7 +99,7 @@ agents) — it is not needed for peer messaging.
 | `friends`     | `[]`               | Your confirmed/pending friends               |
 | `downloadDir` | `~/Downloads`      | Where accepted attachments are saved         |
 | `sendDelay`   | `0`                | Undo window in seconds (`0` = off)           |
-| `panelSize`   | `medium`           | Panel size: `small`, `medium`, or `large`    |
+| `panelSize`   | `medium`           | Panel size: `small`, `medium`, `large`, `xl`, `full` |
 
 ## Using the app
 

@@ -193,7 +193,7 @@ def load_config() -> None:
     # When False, the agent can send messages to friends but cannot read
     # history, list peers, or download attachments.
     CONFIG.setdefault("apiFullAccess", False)
-    # Panel size: "small" | "medium" | "large".
+    # Panel size: "small" | "medium" | "large" | "xl" | "full".
     CONFIG.setdefault("panelSize", "medium")
     # Online presence + friend list (persisted).
     CONFIG.setdefault("online", True)
@@ -316,7 +316,7 @@ def api_full_access() -> bool:
 
 def panel_size() -> str:
     size = str(CONFIG.get("panelSize", "medium"))
-    return size if size in ("small", "medium", "large") else "medium"
+    return size if size in ("small", "medium", "large", "xl", "full") else "medium"
 
 
 def http_port() -> int:
@@ -1124,7 +1124,7 @@ def stdin_loop() -> None:
             _emit({"event": "api-full-access", "enabled": bool(cmd.get("enabled"))})
         elif kind == "setPanelSize":
             size = str(cmd.get("size", "medium"))
-            if size in ("small", "medium", "large"):
+            if size in ("small", "medium", "large", "xl", "full"):
                 CONFIG["panelSize"] = size
                 _save_config()
                 _emit({"event": "panel-size", "size": size})

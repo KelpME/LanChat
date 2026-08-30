@@ -188,12 +188,16 @@ Panel {
     Lanchat.send(selectedPeerId, "", { name: path.split("/").pop(), path: path })
   }
 
-  // Panel dimensions by size setting.
+  // Panel dimensions by size setting. "full" uses the screen size.
   readonly property int panelW: Lanchat.panelSize === "small" ? Style.space(440)
     : Lanchat.panelSize === "large" ? Style.space(720)
+    : Lanchat.panelSize === "xl" ? Style.space(900)
+    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.width : 1440) * 0.92)
     : Style.space(580)
   readonly property int panelH: Lanchat.panelSize === "small" ? Style.space(360)
     : Lanchat.panelSize === "large" ? Style.space(560)
+    : Lanchat.panelSize === "xl" ? Style.space(700)
+    : Lanchat.panelSize === "full" ? Math.round((win.screen ? win.screen.height : 900) * 0.88)
     : Style.space(460)
 
   KeyboardPanel {
@@ -635,6 +639,20 @@ Panel {
                         text: "L"
                         fontSize: Style.font.caption
                         onClicked: Lanchat.setPanelSize("large")
+                      }
+                      Button {
+                        width: Style.space(28)
+                        height: Style.space(18)
+                        text: "XL"
+                        fontSize: Style.font.caption
+                        onClicked: Lanchat.setPanelSize("xl")
+                      }
+                      Button {
+                        width: Style.space(24)
+                        height: Style.space(18)
+                        text: "F"
+                        fontSize: Style.font.caption
+                        onClicked: Lanchat.setPanelSize("full")
                       }
                     }
                   }
