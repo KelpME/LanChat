@@ -20,6 +20,7 @@ QtObject {
   property bool daemonReady: false
   property string statusMessage: ""
   property bool panelOpen: false
+  property string version: ""
 
   property bool httpEnabled: false
   property int httpPort: 4814
@@ -170,6 +171,7 @@ QtObject {
       lanchat.myName = obj.name
       lanchat.myPort = obj.port
       lanchat.daemonReady = true
+      if (obj.version) lanchat.version = obj.version
       if (obj.httpEnabled !== undefined) lanchat.httpEnabled = obj.httpEnabled
       if (obj.httpPort !== undefined) lanchat.httpPort = obj.httpPort
       if (obj.online !== undefined) lanchat.online = obj.online

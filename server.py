@@ -133,6 +133,10 @@ PEER_TIMEOUT_S = 15.0      # drop a peer after this long without a hello
 BROADCAST_INTERVAL_S = 5.0
 HISTORY_LIMIT = 500
 
+# Version of the plugin/daemon. Keep in sync with manifest.json "version".
+# Bump when behaviour changes; breaking changes should bump the major number.
+VERSION = "1.0.0"
+
 CONFIG = {}
 _out_lock = threading.Lock()
 _stdout = sys.stdout
@@ -514,6 +518,9 @@ def _udp_listener(sock: socket.socket) -> None:
         t = pkt.get("t")
         if t == "hello":
             pid = str(pkt.get("id", addr[0]))
+            # Skip ourselves — our own broadcast/scan echoes back on loopback.
+            if pid == host_id():
+                continue
             # Prefer the peer's broadcast display name; fall back to a
             # deterministic friendly name derived from its id.
             name = str(pkt.get("name") or friendly_name(pid))
@@ -1138,6 +1145,7 @@ def _ready_event() -> dict:
         "event": "ready",
         "id": host_id(),
         "name": display_name(),
+        "version": VERSION,
         "port": port(),
         "httpEnabled": http_enabled(),
         "httpPort": http_port(),

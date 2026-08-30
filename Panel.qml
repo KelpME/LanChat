@@ -266,7 +266,7 @@ Panel {
                   visible: Lanchat.peers.length === 0
                   anchors.centerIn: parent
                   text: "No peers online.\nThey'll appear here automatically."
-                  color: Color.muted
+                  color: Qt.lighter(Color.muted, 1.6)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                   horizontalAlignment: Text.AlignHCenter
@@ -352,7 +352,7 @@ Panel {
                       anchors.leftMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
                       text: "Name"
-                      color: Color.muted
+                      color: Color.popups.text
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
@@ -500,6 +500,33 @@ Panel {
                       anchors.verticalCenter: parent.verticalCenter
                       text: "\u2026"
                       onClicked: root.pickDownloadDir()
+                    }
+                  }
+
+                  // Version row.
+                  Item {
+                    width: parent.width
+                    height: Style.space(26)
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Version"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Text {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "v" + Lanchat.version
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
                     }
                   }
                 }
