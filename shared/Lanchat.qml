@@ -33,7 +33,8 @@ QtObject {
 
   property string downloadDir: ""
   property int sendDelay: 0
-  property var pendingSends: []  // [{mid, to, text, remaining, total}]
+  property var pendingSends: []  // [{mid, to, text, remaining, total}] undo-window
+  property var heldQueue: []     // [{mid, to, text, attachment}] held for DND/offline peer
 
   property var peers: []          // [{id,name,address,port,lastSeen}]
   property var messages: []       // [{from,fromName,text,ts,outgoing}]
@@ -62,19 +63,53 @@ QtObject {
 
   // ---- commands to the daemon -------------------------------------------
 
-  // Send a message, honoring the undo/send-delay window. When sendDelay>0 the
-  // message is held in pendingSends and auto-released after the delay, so the
-  // user can undo it.
+  // Current status of a peer ("" if not discovered / offline).
+  function peerStatus(id) {
+    var list = lanchat.peers
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) return list[i].status || "available"
+    }
+    return ""  // not online
+  }
+
+  // Is a peer currently available to receive messages? False if offline or DND.
+  function canDeliver(id) {
+    var s = peerStatus(id)
+    return s !== "" && s !== "dnd"
+  }
+
+  // Send a message. If the peer is DND or offline, hold it in the queue with a
+  // "!" indicator until they're available again. Otherwise send normally
+  // (honoring the undo/send-delay window).
   function send(to, text, attachment) {
     if (!text && !attachment) return
     if (!to) return
     var mid = "m" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)
+    if (!canDeliver(to)) {
+      // Peer is offline or DND: hold the message.
+      heldQueue = heldQueue.concat([{ mid: mid, to: to, text: text || "", attachment: attachment || null, held: true }])
+      return
+    }
     if (sendDelay > 0) {
       pendingSends = pendingSends.concat([{ mid: mid, to: to, text: text, attachment: attachment, total: sendDelay, remaining: sendDelay }])
       undoTimer.restart()
     } else {
       daemon.write(JSON.stringify({ cmd: "send", to: to, text: text || "", attachment: attachment || null }) + "\n")
     }
+  }
+
+  // Send all held messages for a peer (called when they become available).
+  function flushHeld(peer) {
+    var still = []
+    for (var i = 0; i < lanchat.heldQueue.length; i++) {
+      var h = lanchat.heldQueue[i]
+      if (h.to === peer) {
+        daemon.write(JSON.stringify({ cmd: "send", to: h.to, text: h.text || "", attachment: h.attachment || null }) + "\n")
+      } else {
+        still.push(h)
+      }
+    }
+    lanchat.heldQueue = still
   }
 
   // Cancel a held (undelivered) message.
@@ -269,6 +304,10 @@ QtObject {
 
     case "peer": {
       var peer = obj.peer
+      var prev = null
+      for (var k = 0; k < lanchat.peers.length; k++) {
+        if (lanchat.peers[k].id === peer.id) { prev = lanchat.peers[k]; break }
+      }
       var next = lanchat.peers.slice()
       var found = -1
       for (var i = 0; i < next.length; i++) {
@@ -278,6 +317,16 @@ QtObject {
       else next.push(peer)
       lanchat.peers = next
       lanchat.onlineCount = next.length
+
+      // If the peer just became deliverable (was DND/offline, now available),
+      // flush any held messages to them.
+      var nowStatus = peer.status || "available"
+      var wasStatus = prev ? (prev.status || "available") : ""
+      var wasUndeliverable = wasStatus === "" || wasStatus === "dnd"
+      var nowDeliverable = nowStatus !== "" && nowStatus !== "dnd"
+      if (wasUndeliverable && nowDeliverable) {
+        lanchat.flushHeld(peer.id)
+      }
       break
     }
 

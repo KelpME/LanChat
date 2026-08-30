@@ -44,8 +44,8 @@ Panel {
     return null
   }
 
-  // Live-filtered thread for the selected peer, re-evaluated whenever the
-  // shared message list is reassigned by the singleton.
+  // Live-filtered thread for the selected peer: delivered messages plus any
+  // held (DND/offline-queued) outgoing messages.
   readonly property var thread: {
     var out = []
     var all = Lanchat.messages
@@ -54,6 +54,13 @@ Panel {
       var mine = m.outgoing && m.to === selectedPeerId
       var theirs = !m.outgoing && m.from === selectedPeerId
       if (mine || theirs) out.push(m)
+    }
+    // Append held messages (queued because the peer was DND/offline).
+    var held = Lanchat.heldQueue
+    for (var j = 0; j < held.length; j++) {
+      if (held[j].to === selectedPeerId) {
+        out.push({ to: selectedPeerId, from: "", fromName: "You", text: held[j].text || "", held: true, outgoing: true, ts: Date.now() })
+      }
     }
     return out
   }
@@ -892,6 +899,31 @@ Panel {
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     wrapMode: Text.Wrap
+                  }
+
+                  // Held indicator: "!" shown while the message is queued for a
+                  // DND/offline peer, with a hover tooltip.
+                  Text {
+                    visible: modelData.held
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.topMargin: Style.space(3)
+                    anchors.leftMargin: Style.space(3)
+                    text: "!"
+                    color: Color.urgent
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                    font.weight: Font.Bold
+
+                    MouseArea {
+                      id: heldTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+                    PanelToolTip {
+                      visible: heldTipHover.containsMouse
+                      text: "Held — " + (Lanchat.peerStatus(modelData.to) === "dnd" ? "recipient is on Do Not Disturb" : "recipient is offline") + ". Will send when they're available."
+                    }
                   }
 
                   // Copy button: small icon in the top-right corner,
