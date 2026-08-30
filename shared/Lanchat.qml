@@ -419,8 +419,11 @@ QtObject {
 
   function onDaemonExit(code) {
     lanchat.daemonReady = false
-    lanchat.statusMessage = "Lanchat daemon stopped (exit " + code + ")"
+    lanchat.statusMessage = "Lanchat daemon stopped (exit " + code + ") — restarting…"
     lanchat.statusTimer.restart()
+    // Auto-restart after a short delay so a crash doesn't leave the app dead,
+    // but with a gap to avoid a tight loop if it keeps failing.
+    lanchat.restartTimer.restart()
   }
 
   // Transient status (errors/notices) clears itself after a few seconds so it
@@ -428,6 +431,12 @@ QtObject {
   property Timer statusTimer: Timer {
     interval: 6000
     onTriggered: lanchat.statusMessage = ""
+  }
+
+  // Restarts the daemon after a crash. 2s gap avoids a tight restart loop.
+  property Timer restartTimer: Timer {
+    interval: 2000
+    onTriggered: lanchat.startDaemon()
   }
 
   // Drives the send-delay countdown; releases held messages when their time
