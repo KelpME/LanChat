@@ -355,10 +355,12 @@ Panel {
                 Text {
                   visible: Lanchat.peers.length === 0
                   anchors.centerIn: parent
-                  text: "No peers online.\nThey'll appear here automatically."
+                  width: parent.width - Style.space(24)
+                  text: "No peers online. They'll appear here automatically."
                   color: Qt.lighter(Color.muted, 1.6)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
+                  wrapMode: Text.Wrap
                   horizontalAlignment: Text.AlignHCenter
                 }
               }
@@ -1073,12 +1075,15 @@ Panel {
               Text {
                 visible: root.selectedPeer && !root.hasThread
                 anchors.centerIn: parent
+                width: parent.width - Style.space(24)
                 text: root.selectedPeer
                   ? "No messages with " + root.selectedPeer.name + " yet."
                   : ""
                 color: Color.muted
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
+                wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignHCenter
               }
             }
 
