@@ -528,16 +528,64 @@ def _udp_listener(sock: socket.socket) -> None:
             _udp_send(sock, {"t": "pong"})
 
 
-def _udp_send(sock: socket.socket, pkt: dict) -> None:
+def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
     pkt["id"] = host_id()
     pkt["name"] = display_name()
     pkt["port"] = port()
     pkt["httpPort"] = http_port()
     pkt["token"] = CONFIG.get("token")
+    dest = target or "255.255.255.255"
     try:
-        sock.sendto(json.dumps(pkt).encode("utf-8"), ("255.255.255.255", port()))
+        sock.sendto(json.dumps(pkt).encode("utf-8"), (dest, port()))
     except OSError:
         pass
+
+
+def _local_subnet_hosts() -> list:
+    """Enumerate LAN host addresses from our active interfaces' netmasks.
+
+    Uses ioctl (SIOCGIFADDR / SIOCGIFNETMASK) to read the real netmask rather
+    than assuming /24. Interfaces with a /32 netmask (e.g. VPNs) are skipped
+    since they have no usable host range.
+    """
+    import ipaddress
+    import fcntl
+    import struct
+
+    hosts = []
+    try:
+        SIOCGIFADDR = 0x8915
+        SIOCGIFNETMASK = 0x891B
+        for idx, name in socket.if_nameindex():
+            if name == "lo":
+                continue
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                addr = socket.inet_ntoa(fcntl.ioctl(s.fileno(), SIOCGIFADDR,
+                    struct.pack("256s", name[:15].encode()))[20:24])
+                mask = socket.inet_ntoa(fcntl.ioctl(s.fileno(), SIOCGIFNETMASK,
+                    struct.pack("256s", name[:15].encode()))[20:24])
+                s.close()
+            except OSError:
+                continue
+            try:
+                net = ipaddress.ip_network("%s/%s" % (addr, mask), strict=False)
+            except ValueError:
+                continue
+            if net.num_addresses < 4:  # /32 or /31 — no usable host range
+                continue
+            for h in net.hosts():
+                hosts.append(str(h))
+    except Exception:
+        pass
+    return hosts
+
+
+def _scan_subnet(sock: socket.socket) -> None:
+    """Unicast hello to every host on the local subnet — LocalSend-style
+    fallback for when UDP broadcast is filtered/blocked by the network."""
+    for host in _local_subnet_hosts():
+        _udp_send(sock, {"t": "hello"}, target=host)
 
 
 def udp_loop() -> None:
@@ -554,12 +602,17 @@ def udp_loop() -> None:
     threading.Thread(target=_udp_listener, args=(sock,), daemon=True).start()
 
     last_broadcast = 0.0
+    last_scan = 0.0
     while True:
         now = time.time()
         # Only announce ourselves while online (appear offline otherwise).
         if is_online() and now - last_broadcast >= BROADCAST_INTERVAL_S:
             _udp_send(sock, {"t": "hello"})
             last_broadcast = now
+        # Subnet scan every ~15s as a broadcast fallback.
+        if is_online() and now - last_scan >= 15.0:
+            _scan_subnet(sock)
+            last_scan = now
         expire_peers()
         time.sleep(0.5)
 
