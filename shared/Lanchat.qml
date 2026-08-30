@@ -24,6 +24,9 @@ QtObject {
   property bool httpEnabled: false
   property int httpPort: 4814
 
+  property bool online: true
+  property var friends: []        // [{id,address,name,confirmed}]
+
   property var peers: []          // [{id,name,address,port,lastSeen}]
   property var messages: []       // [{from,fromName,text,ts,outgoing}]
   property int unreadCount: 0
@@ -83,6 +86,20 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "regenerateName" }) + "\n")
   }
 
+  // Online/offline presence toggle.
+  function setOnline(on) {
+    online = on
+    daemon.write(JSON.stringify({ cmd: "setOnline", online: on }) + "\n")
+  }
+
+  // Accept/reject an incoming friend request.
+  function acceptFriend(id) {
+    daemon.write(JSON.stringify({ cmd: "acceptFriend", id: id }) + "\n")
+  }
+  function rejectFriend(id) {
+    daemon.write(JSON.stringify({ cmd: "rejectFriend", id: id }) + "\n")
+  }
+
   // ---- events from the daemon -------------------------------------------
 
   function onDaemonLine(raw) {
@@ -97,6 +114,8 @@ QtObject {
       lanchat.daemonReady = true
       if (obj.httpEnabled !== undefined) lanchat.httpEnabled = obj.httpEnabled
       if (obj.httpPort !== undefined) lanchat.httpPort = obj.httpPort
+      if (obj.online !== undefined) lanchat.online = obj.online
+      if (obj.friends !== undefined) lanchat.friends = obj.friends
       lanchat.refreshHistory()
       lanchat.refreshPeers()
       break
@@ -104,6 +123,24 @@ QtObject {
     case "http":
       lanchat.httpEnabled = obj.enabled === true
       if (obj.port) lanchat.httpPort = obj.port
+      break
+
+    case "online":
+      lanchat.online = obj.online === true
+      break
+
+    case "friends":
+      lanchat.friends = obj.friends || []
+      break
+
+    case "friend-accepted":
+      lanchat.statusMessage = (obj.name || "Peer") + " is now a friend"
+      lanchat.statusTimer.restart()
+      break
+
+    case "friend-rejected":
+      lanchat.statusMessage = (obj.name || "Peer") + " declined your request"
+      lanchat.statusTimer.restart()
       break
 
     case "peer": {

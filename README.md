@@ -97,20 +97,23 @@ token from `~/.config/omarchy/lanchat.json`.
 Send a message (JSON body carries the token):
 
 ```bash
-curl -X POST http://localhost:4814/send \
+curl -k -X POST https://localhost:4814/send \
   -H 'Content-Type: application/json' \
-  -d '{"token":"<TOKEN>","to":"laptop","text":"hello from the shell"}'
+  -d '{"token":"<TOKEN>","to":"<peer-id>","text":"hello from the shell"}'
 ```
 
 List peers:
 
 ```bash
-curl 'http://localhost:4814/peers?token=<TOKEN>'
+curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 ```
 
-> The API listens on all interfaces, so it is reachable by any machine on your
-> LAN that has the token. Same plaintext caveat as the rest of Lanchat —
-> trusted network only.
+> The API now serves **HTTPS** with a per-install self-signed certificate. `-k`
+> skips verification for the self-signed cert — good for local scripting; for
+> real trust, verify the cert fingerprint against the device's `lanchat-certs/`.
+> The peer id is the peer's cert fingerprint (not its hostname), so `to` must
+> be a fingerprint. The API listens on all interfaces, reachable by any machine
+> with the token.
 
 ## How it works
 

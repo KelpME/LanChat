@@ -19,12 +19,25 @@ import sys
 import tempfile
 import threading
 import time
+import ssl as _ssl
 
 TOKEN = "test-shared-secret-token"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRV = os.path.join(HERE, "server.py")
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+
+
+def _cert_fp(home_dir: str) -> str:
+    """Read the SHA-256 cert fingerprint from a daemon's cert dir."""
+    import hashlib as _h
+    cert = os.path.join(home_dir, ".config", "omarchy", "lanchat-certs", "cert.pem")
+    with open(cert, "rb") as f:
+        data = f.read()
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+    c = x509.load_pem_x509_certificate(data)
+    return _h.sha256(c.public_bytes(serialization.Encoding.DER)).hexdigest()
 
 
 def make_home(name, port, display):
@@ -114,23 +127,34 @@ def main():
         assert b.wait_event("ready"), "B did not become ready"
         print("OK  both daemons ready")
 
-        # Simulate discovery: each learns the other via a synthetic hello.
-        udp_broadcast(a.port, {"t": "hello", "id": "beta", "name": "Beta-machine", "port": b.port, "token": TOKEN})
-        udp_broadcast(b.port, {"t": "hello", "id": "alpha", "name": "Alpha-machine", "port": a.port, "token": TOKEN})
-        assert wait_until(lambda: _has_peer(a, "beta")), "A did not learn beta"
-        assert wait_until(lambda: _has_peer(b, "alpha")), "B did not learn alpha"
+        # Simulate discovery: each learns the other via a synthetic hello using
+        # the cert-fingerprint id.
+        ida = _cert_fp(home_a); idb = _cert_fp(home_b)
+        udp_broadcast(a.port, {"t": "hello", "id": idb, "name": "Beta-machine", "port": b.port, "token": TOKEN})
+        udp_broadcast(b.port, {"t": "hello", "id": ida, "name": "Alpha-machine", "port": a.port, "token": TOKEN})
+        assert wait_until(lambda: _has_peer(a, idb)), "A did not learn beta"
+        assert wait_until(lambda: _has_peer(b, ida)), "B did not learn alpha"
         print("OK  discovery populated peer lists")
 
-        # Send from A -> B over real TCP, authenticated.
-        a.cmd(cmd="send", to="beta", text="hello from alpha")
+        # Become friends first (friend request + accept) so messages flow.
+        a.cmd(cmd="send", to=idb, text="friend me", friend_request=True)
+        b.wait_event("message")
+        b.cmd(cmd="acceptFriend", id=ida)
+        a.wait_event("friend-accepted")
+
+        # Send from A -> B over real TLS, authenticated.
+        a.cmd(cmd="send", to=idb, text="hello from alpha")
         msg = b.wait_event("message")
         assert msg and msg["message"]["text"] == "hello from alpha", "B did not receive the message"
         assert msg["message"]["fromName"] == "Alpha-machine"
         assert msg["message"]["outgoing"] is False
-        print("OK  message delivered A -> B over TCP")
+        print("OK  message delivered A -> B over TLS")
 
         # Wrong token must be rejected (no message event, history stays clean).
-        bad = socket.create_connection(("127.0.0.1", b.port), timeout=3)
+        import ssl as _ssl
+        _ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_CLIENT); _ctx.check_hostname=False; _ctx.verify_mode=_ssl.CERT_NONE
+        bad_raw = socket.create_connection(("127.0.0.1", b.port), timeout=3)
+        bad = _ctx.wrap_socket(bad_raw)
         bad.sendall(b'{"token":"WRONG"}\n')
         bad.sendall(b'{"t":"msg","from":"x","fromName":"x","text":"should never land"}\n')
         time.sleep(0.5)
@@ -173,7 +197,7 @@ def main():
         print("OK  HTTP API enabled via stdin on port %d" % http_port)
 
         def http(method, path, body=None, token=None):
-            url = "http://127.0.0.1:%d%s" % (http_port, path)
+            url = "https://127.0.0.1:%d%s" % (http_port, path)
             data = None
             headers = {}
             if body is not None:
@@ -186,8 +210,12 @@ def main():
                 sep = "&" if "?" in url else "?"
                 url += sep + "token=" + token
             req = urllib.request.Request(url, data=data, method=method, headers=headers)
+            # self-signed cert: disable verification for the test
+            ssl_ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_CLIENT)
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = _ssl.CERT_NONE
             try:
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with urllib.request.urlopen(req, timeout=5, context=ssl_ctx) as resp:
                     return resp.status, json.loads(resp.read().decode())
             except urllib.error.HTTPError as e:
                 return e.code, json.loads(e.read().decode())
@@ -198,7 +226,7 @@ def main():
         print("OK  /health responds")
 
         # /send via HTTP (authenticated) delivers to B.
-        code, res = http("POST", "/send", {"to": "beta", "text": "via http"}, token=TOKEN)
+        code, res = http("POST", "/send", {"to": idb, "text": "via http"}, token=TOKEN)
         assert code == 200 and res.get("ok"), "http send failed: %s" % res
         m2 = b.wait_event("message")
         assert m2 and m2["message"]["text"] == "via http", "http message not delivered"
@@ -206,7 +234,7 @@ def main():
 
         # /peers with token.
         code, res = http("GET", "/peers", token=TOKEN)
-        assert code == 200 and any(p["id"] == "beta" for p in res["peers"])
+        assert code == 200 and any(p["id"] == idb for p in res["peers"])
         print("OK  HTTP GET /peers lists peers")
 
         # Wrong token rejected.

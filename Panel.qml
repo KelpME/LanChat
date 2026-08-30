@@ -68,6 +68,21 @@ Panel {
     Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(text) + " | wl-copy"])
   }
 
+  function isConfirmedFriend(id) {
+    var list = Lanchat.friends
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id && list[i].confirmed) return true
+    }
+    return false
+  }
+
+  function acceptFriend(id) {
+    Lanchat.acceptFriend(id)
+  }
+  function rejectFriend(id) {
+    Lanchat.rejectFriend(id)
+  }
+
   onOpenedChanged: {
     Lanchat.panelOpen = root.opened
     if (root.opened) {
@@ -238,11 +253,36 @@ Panel {
                   }
                 }
 
-                // body (API + name)
+                // body (API + online + name)
                 Column {
                   id: settingsBody
                   width: parent.width
                   visible: settings.expanded
+
+                  // Online row
+                  Item {
+                    width: parent.width
+                    height: Style.space(34)
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Online"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.online
+                      onToggled: Lanchat.setOnline(!Lanchat.online)
+                    }
+                  }
 
                   // API row
                   Item {
@@ -438,6 +478,38 @@ Panel {
                     id: copyReset
                     interval: 1500
                     onTriggered: bubble.copied = false
+                  }
+                }
+
+                // Friend request banner (incoming, not yet a friend).
+                Rectangle {
+                  visible: !modelData.outgoing && modelData.friendRequest && !root.isConfirmedFriend(modelData.from)
+                  anchors.left: parent.left
+                  width: list.width * 0.8
+                  height: Style.space(38)
+                  radius: Style.cornerRadius
+                  color: Style.selectedAccentFill
+
+                  Row {
+                    anchors.centerIn: parent
+                    spacing: Style.spacing.sm
+
+                    Text {
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Friend request from " + modelData.fromName
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    Button {
+                      text: "Accept"
+                      onClicked: root.acceptFriend(modelData.from)
+                    }
+                    Button {
+                      text: "Reject"
+                      onClicked: root.rejectFriend(modelData.from)
+                    }
                   }
                 }
               }

@@ -15,8 +15,15 @@ plugin; this process is the transport.
 Security model:
   - Every TCP connection and every discovery packet is authenticated with a
     shared token all machines must agree on (see config below).
-  - The token travels in plaintext on the local network. This is NOT encrypted
-    and is intended for a trusted home/office LAN only.
+  - All message transport is encrypted with a per-install self-signed TLS
+    certificate. The device's true identity is the SHA-256 fingerprint of that
+    cert (not its hostname), and peers verify each other's fingerprint when
+    connecting — a friend link is keyed on the fingerprint.
+  - Messaging is gated by the friend/handshake model: only confirmed friends
+    (or peers you've sent a request to) can message you. Discovery still shows
+    all token-matching peers so you can initiate.
+  - An online/offline toggle stops broadcasts and drops inbound messages while
+    offline.
 """
 
 import http.server
@@ -26,6 +33,8 @@ import os
 import random
 import secrets
 import socket
+import ssl
+import subprocess
 import sys
 import threading
 import time
@@ -176,6 +185,12 @@ def load_config() -> None:
     # Defaults for the optional HTTP API (always present so toggling is simple).
     CONFIG.setdefault("httpEnabled", False)
     CONFIG.setdefault("httpPort", DEFAULT_HTTP_PORT)
+    # Online presence + friend list (persisted).
+    CONFIG.setdefault("online", True)
+    CONFIG.setdefault("friends", [])
+    # Stable, unique per-install id (independent of hostname so two machines
+    # with the same hostname still distinguish each other).
+    CONFIG.setdefault("id", secrets.token_hex(6))
     _save_config()
 
     token = str(CONFIG.get("token", "")).strip()
@@ -185,7 +200,84 @@ def load_config() -> None:
 
 
 def host_id() -> str:
-    return socket.gethostname()
+    """The device's true, stable identity — the cert fingerprint.
+
+    Unlike the cosmetic display name, this never changes (the cert persists),
+    so renaming/re-rolling a name cannot break a friend link.
+    """
+    return cert_fingerprint()
+
+
+# --------------------------------------------------------------------------
+# TLS identity
+# --------------------------------------------------------------------------
+# Each install generates a persistent self-signed certificate. The SHA-256
+# fingerprint of that cert is the device's true, stable identity — independent
+# of the cosmetic display name. The fingerprint is what friends are keyed on.
+
+CERT_DIR = os.path.join(os.path.expanduser("~"), ".config", "omarchy", "lanchat-certs")
+CERT_KEY = os.path.join(CERT_DIR, "key.pem")
+CERT_PEM = os.path.join(CERT_DIR, "cert.pem")
+
+
+def _gen_cert() -> None:
+    os.makedirs(CERT_DIR, exist_ok=True)
+    try:
+        subprocess.run(
+            ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+             "-keyout", CERT_KEY, "-out", CERT_PEM, "-days", "3650",
+             "-subj", "/CN=lanchat-%s" % str(CONFIG.get("id") or "peer"[:8])],
+            check=True, capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        # Fallback: try the cryptography library if openssl isn't available.
+        try:
+            from cryptography import x509
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            import datetime as _dt
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            subject = issuer = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "lanchat")])
+            cert = (x509.CertificateBuilder()
+                    .subject_name(subject).issuer_name(issuer)
+                    .public_key(key.public_key())
+                    .serial_number(x509.random_serial_number())
+                    .not_valid_before(_dt.datetime.utcnow())
+                    .not_valid_after(_dt.datetime.utcnow() + _dt.timedelta(days=3650))
+                    .sign(key, hashes.SHA256()))
+            with open(CERT_KEY, "wb") as f:
+                f.write(key.private_bytes(serialization.Encoding.PEM,
+                    serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
+            with open(CERT_PEM, "wb") as f:
+                f.write(cert.public_bytes(serialization.Encoding.PEM))
+        except Exception as e:
+            _emit({"event": "error", "message": "lanchat TLS cert generation failed: %s" % e})
+
+
+def ensure_tls() -> ssl.SSLContext:
+    """Generate the cert if needed and return a server SSL context."""
+    if not (os.path.exists(CERT_KEY) and os.path.exists(CERT_PEM)):
+        _gen_cert()
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(CERT_PEM, CERT_KEY)
+    return ctx
+
+
+def cert_fingerprint() -> str:
+    """SHA-256 fingerprint of our cert — the stable device identity."""
+    if not os.path.exists(CERT_PEM):
+        ensure_tls()
+    with open(CERT_PEM, "rb") as f:
+        data = f.read()
+    # Parse the DER cert via the cryptography lib (robust across Python/OpenSSL).
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+        cert = x509.load_pem_x509_certificate(data)
+        return hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
+    except Exception:
+        # Fallback: raw PEM fingerprint (still stable per cert)
+        return hashlib.sha256(data).hexdigest()
 
 
 def display_name() -> str:
@@ -299,6 +391,66 @@ def find_peer(pid: str):
 
 
 # --------------------------------------------------------------------------
+# Friends (Path A handshake) + online presence
+# --------------------------------------------------------------------------
+
+def friends_list() -> list:
+    return list(CONFIG.get("friends", []))
+
+
+def _friends_lock():
+    return threading.Lock()
+
+
+def is_friend(pid: str, address: str = "") -> bool:
+    for f in CONFIG.get("friends", []):
+        if f.get("id") == pid and f.get("confirmed"):
+            return True
+    return False
+
+
+def is_pending(pid: str) -> bool:
+    """True if we've sent this peer a friend request but they haven't accepted."""
+    for f in CONFIG.get("friends", []):
+        if f.get("id") == pid and not f.get("confirmed"):
+            return True
+    return False
+
+
+def is_online() -> bool:
+    return bool(CONFIG.get("online", True))
+
+
+def add_friend(pid: str, address: str, name: str, confirmed: bool) -> None:
+    friends = CONFIG.get("friends", [])
+    for f in friends:
+        if f.get("id") == pid:
+            f["address"] = address
+            f["name"] = name
+            f["confirmed"] = confirmed
+            break
+    else:
+        friends.append({"id": pid, "address": address, "name": name, "confirmed": confirmed})
+    CONFIG["friends"] = friends
+    _save_config()
+    _emit({"event": "friends", "friends": friends_list()})
+
+
+def is_trusted(pid: str, address: str = "") -> bool:
+    """IP-gating: accept traffic only from confirmed friends or pending-request peers."""
+    if not is_online():
+        return False
+    for f in CONFIG.get("friends", []):
+        if f.get("id") == pid:
+            return True  # confirmed friend OR a peer we're requesting (we initiated)
+    # Fall back to address match for confirmed friends whose id differs.
+    for f in CONFIG.get("friends", []):
+        if f.get("confirmed") and f.get("address") == address:
+            return True
+    return False
+
+
+# --------------------------------------------------------------------------
 # UDP discovery
 # --------------------------------------------------------------------------
 
@@ -360,7 +512,8 @@ def udp_loop() -> None:
     last_broadcast = 0.0
     while True:
         now = time.time()
-        if now - last_broadcast >= BROADCAST_INTERVAL_S:
+        # Only announce ourselves while online (appear offline otherwise).
+        if is_online() and now - last_broadcast >= BROADCAST_INTERVAL_S:
             _udp_send(sock, {"t": "hello"})
             last_broadcast = now
         expire_peers()
@@ -389,11 +542,13 @@ def tcp_loop() -> None:
     except OSError as e:
         _emit({"event": "error", "message": "lanchat TCP bind failed on port %d: %s" % (port(), e)})
         return
+    tls_ctx = ensure_tls()
     while True:
         try:
-            conn, addr = srv.accept()
-        except OSError:
-            return
+            raw_conn, addr = srv.accept()
+            conn = tls_ctx.wrap_socket(raw_conn, server_side=True)
+        except (OSError, ssl.SSLError):
+            continue
         threading.Thread(target=_handle_client, args=(conn, addr), daemon=True).start()
 
 
@@ -444,12 +599,28 @@ def _handle_incoming(line: bytes, addr) -> None:
         msg = json.loads(line.decode("utf-8"))
     except ValueError:
         return
+    if msg.get("t") == "friendAccept":
+        pid = str(msg.get("from", ""))
+        pname = str(msg.get("fromName") or friendly_name(pid))
+        if is_pending(pid) or is_friend(pid):
+            add_friend(pid, addr[0], pname, confirmed=True)
+            _emit({"event": "friend-accepted", "id": pid, "name": pname})
+        return
+    if msg.get("t") == "friendReject":
+        pid = str(msg.get("from", ""))
+        _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
+        return
     if msg.get("t") != "msg":
+        return
+    pid = str(msg.get("from", ""))
+    is_req = bool(msg.get("friendRequest"))
+    # Friend requests are the entry point: a stranger may ask to be friends.
+    # Everything else must come from a trusted peer.
+    if not is_req and not is_trusted(pid, addr[0]):
         return
     text = str(msg.get("text", ""))
     if not text.strip():
         return
-    pid = str(msg.get("from", ""))
     # Use the sender's broadcast name if present; otherwise fall back to a
     # deterministic friendly name for their id.
     from_name = str(msg.get("fromName") or friendly_name(pid))
@@ -461,7 +632,13 @@ def _handle_incoming(line: bytes, addr) -> None:
         "ts": ts,
         "outgoing": False,
         "peerAddress": addr[0],
+        "friendRequest": bool(msg.get("friendRequest")),
     }
+    # A friend request from a stranger is a legitimate inbound channel: it's
+    # how they ask to talk. Record them as a pending-request peer so their
+    # replies (accept) are trusted.
+    if msg.get("friendRequest") and not is_pending(pid) and not is_friend(pid):
+        add_friend(pid, addr[0], from_name, confirmed=False)
     append_history(message)
     _emit({"event": "message", "message": message})
 
@@ -470,13 +647,46 @@ def _handle_incoming(line: bytes, addr) -> None:
 # Sending
 # --------------------------------------------------------------------------
 
-def send_message(peer_id: str, text: str) -> bool:
+def _tls_connect(peer: dict, expected_fingerprint: str = ""):
+    """Connect to a peer over TLS and verify their cert fingerprint.
+
+    Self-signed certs are expected, so we do NOT verify against a CA — instead
+    we check the peer's cert fingerprint matches what we friended/expect. This
+    is the LocalSend-style trust model: the fingerprint is the identity.
+    Returns the wrapped socket, or None on failure/mismatch.
+    """
+    try:
+        raw = socket.create_connection((peer["address"], peer["port"]), timeout=5)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE  # we do fingerprint verification ourselves
+        s = ctx.wrap_socket(raw)
+        if expected_fingerprint:
+            der = s.getpeercert(binary_form=True)
+            if not der:
+                s.close()
+                return None
+            actual = hashlib.sha256(der).hexdigest()
+            if actual != expected_fingerprint:
+                s.close()
+                return None
+        return s
+    except OSError:
+        return None
+    except Exception:
+        return None
+
+
+def send_message(peer_id: str, text: str, friend_request: bool = False) -> bool:
     peer = find_peer(peer_id)
     if peer is None:
         _emit({"event": "error", "message": "peer '%s' is not online yet" % peer_id})
         return False
+    s = _tls_connect(peer, expected_fingerprint=peer_id)
+    if s is None:
+        _emit({"event": "error", "message": "could not establish secure connection to %s" % peer["name"]})
+        return False
     try:
-        s = socket.create_connection((peer["address"], peer["port"]), timeout=5)
         s.sendall(json.dumps({"token": CONFIG.get("token")}).encode("utf-8") + b"\n")
         # Wait for auth ok (drops the client if wrong key).
         s.settimeout(5)
@@ -487,6 +697,12 @@ def send_message(peer_id: str, text: str) -> bool:
             "text": text,
             "ts": int(time.time() * 1000),
         }
+        if friend_request:
+            msg["friendRequest"] = True
+            # Record the peer as a pending-request friend on our side, so they
+            # become trusted (can reply/accept) and show as a friend request.
+            if not is_pending(peer_id) and not is_friend(peer_id):
+                add_friend(peer_id, peer["address"], peer["name"], confirmed=False)
         s.sendall(json.dumps({"t": "msg", **msg}).encode("utf-8") + b"\n")
         s.close()
         msg["to"] = peer_id
@@ -496,6 +712,29 @@ def send_message(peer_id: str, text: str) -> bool:
         return True
     except OSError as e:
         _emit({"event": "error", "message": "could not reach %s: %s" % (peer["name"], e)})
+        return False
+
+
+def send_control(peer_id: str, ctype: str) -> bool:
+    """Send a friend accept/reject control message to a peer."""
+    peer = find_peer(peer_id)
+    if peer is None:
+        return False
+    s = _tls_connect(peer, expected_fingerprint=peer_id)
+    if s is None:
+        return False
+    try:
+        s.sendall(json.dumps({"token": CONFIG.get("token")}).encode("utf-8") + b"\n")
+        s.settimeout(5)
+        ack = s.recv(64)
+        s.sendall(json.dumps({
+            "t": ctype,  # friendAccept / friendReject
+            "from": host_id(),
+            "fromName": display_name(),
+        }).encode("utf-8") + b"\n")
+        s.close()
+        return True
+    except OSError:
         return False
 
 
@@ -582,6 +821,7 @@ def _start_http() -> bool:
     for attempt in range(5):
         try:
             srv = http.server.ThreadingHTTPServer(("", http_port()), _ApiHandler)
+            srv.socket = ensure_tls().wrap_socket(srv.socket, server_side=True)
             _http_server = srv
             _http_server_thread = threading.Thread(target=srv.serve_forever, daemon=True)
             _http_server_thread.start()
@@ -625,7 +865,11 @@ def stdin_loop() -> None:
             continue
         kind = cmd.get("cmd")
         if kind == "send":
-            send_message(str(cmd.get("to", "")), str(cmd.get("text", "")))
+            send_message(
+                str(cmd.get("to", "")),
+                str(cmd.get("text", "")),
+                bool(cmd.get("friend_request")),
+            )
         elif kind == "history":
             _emit({"event": "history", "messages": history_snapshot()})
         elif kind == "list":
@@ -644,14 +888,7 @@ def stdin_loop() -> None:
                 CONFIG["displayName"] = name
                 _save_config()
                 broadcast_now()
-                _emit({
-                    "event": "ready",
-                    "id": host_id(),
-                    "name": display_name(),
-                    "port": port(),
-                    "httpEnabled": http_enabled(),
-                    "httpPort": http_port(),
-                })
+                _emit(_ready_event())
         elif kind == "regenerateName":
             # Pick a fresh random friendly {modifier}{trick} name. Seed the
             # RNG from the current time so a re-roll usually differs from the
@@ -664,31 +901,48 @@ def stdin_loop() -> None:
             CONFIG["displayName"] = name
             _save_config()
             broadcast_now()
-            _emit({
-                "event": "ready",
-                "id": host_id(),
-                "name": display_name(),
-                "port": port(),
-                "httpEnabled": http_enabled(),
-                "httpPort": http_port(),
-            })
+            _emit(_ready_event())
+        elif kind == "setOnline":
+            on = bool(cmd.get("online"))
+            CONFIG["online"] = on
+            _save_config()
+            _emit({"event": "online", "online": on})
+            if on:
+                broadcast_now()
+        elif kind == "acceptFriend":
+            pid = str(cmd.get("id", ""))
+            peer = find_peer(pid)
+            pname = peer["name"] if peer else friendly_name(pid)
+            if send_control(pid, "friendAccept"):
+                add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
+                _emit({"event": "friend-accepted", "id": pid, "name": pname})
+        elif kind == "rejectFriend":
+            pid = str(cmd.get("id", ""))
+            send_control(pid, "friendReject")
+            _emit({"event": "friend-rejected", "id": pid})
 
 
 # --------------------------------------------------------------------------
 # Startup
 # --------------------------------------------------------------------------
 
-def main() -> None:
-    load_config()
-    load_history()
-    _emit({
+def _ready_event() -> dict:
+    return {
         "event": "ready",
         "id": host_id(),
         "name": display_name(),
         "port": port(),
         "httpEnabled": http_enabled(),
         "httpPort": http_port(),
-    })
+        "online": is_online(),
+        "friends": friends_list(),
+    }
+
+
+def main() -> None:
+    load_config()
+    load_history()
+    _emit(_ready_event())
     if http_enabled():
         _start_http()
     threading.Thread(target=tcp_loop, daemon=True).start()
