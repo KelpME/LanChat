@@ -645,7 +645,7 @@ def udp_loop() -> None:
             _udp_send(sock, {"t": "hello"})
             last_broadcast = now
         # Subnet scan every ~15s as a broadcast fallback.
-        if is_online() and now - last_scan >= 15.0:
+        if is_online() and now - last_scan >= 8.0:
             _scan_subnet(sock)
             last_scan = now
         expire_peers()
