@@ -281,7 +281,7 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: Style.spacing.sm
-                    color: modelData.status === "dnd" ? Color.urgent
+                    color: modelData.status === "dnd" ? "#e33"
                       : modelData.status === "away" ? Qt.rgba(0.9,0.7,0.2,1)
                       : modelData.status === "brb" ? Qt.rgba(0.9,0.5,0.3,1)
                       : Color.accent  // available

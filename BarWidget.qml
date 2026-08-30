@@ -38,7 +38,7 @@ BarWidget {
   }
 
   // Icon color reflects status: red=DND, white=Available, yellow=BRB, orange=Away.
-  readonly property color statusColor: Lanchat.status === "dnd" ? Color.urgent
+  readonly property color statusColor: Lanchat.status === "dnd" ? "#e33"
     : Lanchat.status === "brb" ? Qt.rgba(0.95, 0.8, 0.2, 1)
     : Lanchat.status === "away" ? Qt.rgba(0.95, 0.55, 0.2, 1)
     : Color.foreground  // available
@@ -140,7 +140,7 @@ BarWidget {
     width: Math.max(badgeText.implicitWidth + Style.space(7), Style.space(15))
     height: Style.space(15)
     radius: height / 2
-    color: Color.accent
+    color: Color.urgent
     border.color: Color.background
     border.width: 1
 
