@@ -223,8 +223,10 @@ QtObject {
   }
 
   // Play the bundled message chime via paplay (no deps).
+  // Silenced when DND — don't disturb means no audio either.
   function playMessageSound() {
     if (!soundEnabled) return
+    if (lanchat.status === "dnd") return
     var url = Qt.resolvedUrl("../sounds/message.ogg").toString()
     if (url.indexOf("file://") === 0) url = url.slice(7)
     Quickshell.execDetached(["paplay", decodeURIComponent(url)])
