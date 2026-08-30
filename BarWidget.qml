@@ -110,7 +110,8 @@ BarWidget {
         text: "Status"
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
-        color: Color.muted
+        color: Color.popups.text
+        font.bold: true
         leftPadding: Style.spacing.sm
         topPadding: Style.spacing.xs
       }
