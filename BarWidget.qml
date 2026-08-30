@@ -78,31 +78,30 @@ BarWidget {
       (Lanchat.onlineCount > 0 ? " · " + Lanchat.onlineCount + " online" : "")
     onPressed: function(b) {
       if (b === Qt.LeftButton) root.togglePanel()
-      else if (b === Qt.RightButton) statusMenu.open()
+      else if (b === Qt.RightButton) root.menuOpen = !root.menuOpen
     }
   }
 
   // Right-click menu: online/offline toggle + status presets.
-  Popup {
+  property bool menuOpen: false
+
+  PopupCard {
     id: statusMenu
-    x: button.width / 2
-    y: button.height + 4
-    width: 180
-    padding: 0
-    background: Rectangle {
-      color: Color.popups.background
-      radius: Style.cornerRadius
-      border.color: Color.popups.border
-      border.width: 1
-    }
+    anchorItem: button
+    owner: root
+    bar: root.bar
+    open: root.menuOpen
+    contentWidth: statusMenu.fittedContentWidth(Style.space(200))
+    contentHeight: statusMenu.fittedContentHeight(menuCol.implicitHeight)
 
     Column {
-      width: parent.width
-      spacing: 1
+      id: menuCol
+      anchors.fill: parent
+      spacing: Style.space(2)
 
       MenuItem {
         text: Lanchat.online ? "Go offline" : "Go online"
-        onClicked: Lanchat.setOnline(!Lanchat.online)
+        onClicked: { Lanchat.setOnline(!Lanchat.online); root.menuOpen = false }
       }
 
       Rectangle { width: parent.width; height: 1; color: Color.popups.border }
@@ -112,13 +111,13 @@ BarWidget {
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         color: Color.muted
-        leftPadding: 10
-        topPadding: 4
+        leftPadding: Style.spacing.sm
+        topPadding: Style.spacing.xs
       }
-      MenuItem { text: "Available"; onClicked: Lanchat.setStatus("available") }
-      MenuItem { text: "Do Not Disturb"; onClicked: Lanchat.setStatus("dnd") }
-      MenuItem { text: "Away"; onClicked: Lanchat.setStatus("away") }
-      MenuItem { text: "Be Right Back"; onClicked: Lanchat.setStatus("brb") }
+      MenuItem { text: "Available"; onClicked: { Lanchat.setStatus("available"); root.menuOpen = false } }
+      MenuItem { text: "Do Not Disturb"; onClicked: { Lanchat.setStatus("dnd"); root.menuOpen = false } }
+      MenuItem { text: "Away"; onClicked: { Lanchat.setStatus("away"); root.menuOpen = false } }
+      MenuItem { text: "Be Right Back"; onClicked: { Lanchat.setStatus("brb"); root.menuOpen = false } }
     }
   }
 
