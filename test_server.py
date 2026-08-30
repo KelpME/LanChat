@@ -19,7 +19,6 @@ import sys
 import tempfile
 import threading
 import time
-import ssl as _ssl
 
 TOKEN = "test-shared-secret-token"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -159,7 +158,7 @@ def main():
         time.sleep(0.5)
         bad.close()
         assert not wait_until(lambda: _has_message(b, "should never land"), timeout=1.0), "stranger message leaked through"
-        print("OK  non-friend message dropped (friend gate)");
+        print("OK  non-friend message dropped (friend gate)")
 
         # Persistence: B's history file contains the delivered message.
         hist_path = os.path.join(home_b, ".local", "state", "lanchat", "history.json")
@@ -184,8 +183,8 @@ def main():
         print("OK  friendly_name deterministic per peer id:", n1, "|", n3)
 
         # ---- HTTP API ----------------------------------------------------
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         # Disabled by default: the API should be refused (connection refused).
         a.cmd(cmd="setHttp", enabled=True)

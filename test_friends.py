@@ -11,7 +11,15 @@ Two isolated daemons (A, B) sharing a token on distinct ports. Verifies:
 
 Run from repo root:  python3 test_friends.py
 """
-import json, os, shutil, socket, subprocess, sys, tempfile, threading, time
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
 
 TOKEN = "test-shared-secret-token"
 HERE = os.path.dirname(os.path.abspath(__file__))

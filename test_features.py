@@ -5,7 +5,14 @@ Covers: per-peer lazy-load, clear chat, delete message, attachment register
 + HTTPS download, download-dir + send-delay config.
 Run: python3 test_features.py
 """
-import json, os, shutil, socket, subprocess, sys, tempfile, threading, time
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
 
 TOKEN = "test-shared-secret-token"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -107,7 +114,7 @@ def main():
         _s.CONFIG["token"] = TOKEN
         _s.register_attachment(file_id, test_file, "test.txt")
         # Serve requires the daemon's HTTP process; easier: fetch via urllib https.
-        import urllib.request, ssl as _ssl
+        import ssl as _ssl
         ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_CLIENT); ctx.check_hostname=False; ctx.verify_mode=_ssl.CERT_NONE
         # A's HTTP port is 4971 (4961+10). Need A's daemon to serve the registered file —
         # but _s is a separate module; A's daemon process won't see _s's registry.

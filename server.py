@@ -26,8 +26,8 @@ Security model:
     offline.
 """
 
-import http.server
 import hashlib
+import http.server
 import json
 import os
 import random
@@ -40,7 +40,7 @@ import threading
 import time
 import urllib.parse
 
-from naming import friendly_name, _SKATE_TRICKS, _TRICK_MODIFIERS  # noqa: E402
+from naming import _SKATE_TRICKS, _TRICK_MODIFIERS, friendly_name  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Paths & config
@@ -192,10 +192,11 @@ def _gen_cert() -> None:
     except (OSError, subprocess.CalledProcessError):
         # Fallback: try the cryptography library if openssl isn't available.
         try:
+            import datetime as _dt
+
             from cryptography import x509
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import rsa
-            import datetime as _dt
             key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
             subject = issuer = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "lanchat")])
             cert = (x509.CertificateBuilder()
@@ -531,8 +532,8 @@ def _local_subnet_hosts() -> list:
     than assuming /24. Interfaces with a /32 netmask (e.g. VPNs) are skipped
     since they have no usable host range.
     """
-    import ipaddress
     import fcntl
+    import ipaddress
     import struct
 
     hosts = []
@@ -752,8 +753,8 @@ def get_attachment(file_id: str):
 
 def _download_attachment(peer: dict, file_id: str, save_to: str) -> bool:
     """Receiver fetches a file from a peer's HTTPS server and saves it."""
-    import urllib.request
     import urllib.error
+    import urllib.request
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE  # fingerprint-verified peer already
