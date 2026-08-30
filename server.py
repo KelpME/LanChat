@@ -721,7 +721,21 @@ def _handle_client(conn: socket.socket, addr) -> None:
             pass
 
 
-_pending_first = {}   # pid -> first held message, revealed only after they accept
+# Handshake hold: pid -> list of held messages awaiting the recipient's accept.
+# _pending_first = inbound requests we received and are holding (revealed on accept).
+# _pending_sent  = outbound requests we sent and are holding (revealed on accept).
+_pending_first = {}
+_pending_sent = {}
+_pending_lock = threading.Lock()
+
+
+def _reveal(held, outgoing: bool = False) -> None:
+    """Surface held handshake messages as normal messages (clears the hold)."""
+    for m in held:
+        m.pop("held", None)
+        m.pop("friendRequest", None)
+        append_history(m)
+        _emit({"event": "message", "message": m})
 
 
 def _handle_incoming(line: bytes, addr) -> None:
@@ -735,9 +749,16 @@ def _handle_incoming(line: bytes, addr) -> None:
         if is_pending(pid) or is_friend(pid):
             add_friend(pid, addr[0], pname, confirmed=True)
             _emit({"event": "friend-accepted", "id": pid, "name": pname})
+            # They accepted: reveal the messages we held until then.
+            with _pending_lock:
+                held = _pending_sent.pop(pid, [])
+            _reveal(held)
         return
     if msg.get("t") == "friendReject":
         pid = str(msg.get("from", ""))
+        # They declined: drop our held-outgoing messages for them.
+        with _pending_lock:
+            _pending_sent.pop(pid, None)
         _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
         return
     if msg.get("t") == "typing":
@@ -775,13 +796,21 @@ def _handle_incoming(line: bytes, addr) -> None:
     }
     # A friend request from a stranger is a legitimate inbound channel: it's
     # how they ask to talk. Record them as a pending-request peer so their
-    # replies (accept) are trusted.
-    if msg.get("friendRequest") and not is_pending(pid) and not is_friend(pid):
-        add_friend(pid, addr[0], from_name, confirmed=False)
+    # replies (accept) are trusted. Hold EVERY friend request from a
+    # non-confirmed peer (not just the first) so content never surfaces until
+    # they're accepted.
+    if msg.get("friendRequest") and not is_friend(pid):
+        if not is_pending(pid):
+            add_friend(pid, addr[0], from_name, confirmed=False)
         # Do NOT surface the message content yet — hold it so the receiver
-        # sees only a friend request until they accept.
-        _pending_first[pid] = message
-        _emit({"event": "friend-request", "from": pid, "fromName": from_name, "text": text, "ts": ts})
+        # sees only a friend request until they accept. Assign a mid now so
+        # the accept can reveal the same message (replace in the UI).
+        if not message.get("mid"):
+            message["mid"] = secrets.token_hex(8)
+        message["held"] = True
+        with _pending_lock:
+            _pending_first.setdefault(pid, []).append(message)
+        _emit({"event": "friend-request", "from": pid, "fromName": from_name, "text": text, "ts": ts, "mid": message["mid"]})
         return
     append_history(message)
     _emit({"event": "message", "message": message})
@@ -893,6 +922,16 @@ def send_message(peer_id: str, text: str, friend_request: bool = False, attachme
             # become trusted (can reply/accept) and show as a friend request.
             if not is_pending(peer_id) and not is_friend(peer_id):
                 add_friend(peer_id, peer["address"], peer["name"], confirmed=False)
+            # A friend request is a handshake: register the held message NOW,
+            # before sending, so a fast peer accept (which arrives on a separate
+            # connection/thread) can always find and reveal it.
+            msg["to"] = peer_id
+            msg["outgoing"] = True
+            if not msg.get("mid"):
+                msg["mid"] = secrets.token_hex(8)
+            msg["held"] = True
+            with _pending_lock:
+                _pending_sent.setdefault(peer_id, []).append(msg)
         # Send the message first; the receiver replies with "ok" after reading it.
         s.sendall(json.dumps({"t": "msg", **msg}).encode("utf-8") + b"\n")
         try:
@@ -900,10 +939,14 @@ def send_message(peer_id: str, text: str, friend_request: bool = False, attachme
         except Exception:
             pass
         s.close()
-        msg["to"] = peer_id
-        msg["outgoing"] = True
-        append_history(msg)
-        _emit({"event": "message", "message": msg})
+        if friend_request:
+            _emit({"event": "friend-request", "outgoing": True, "to": peer_id, "toName": peer["name"],
+                   "text": text, "ts": msg["ts"], "mid": msg["mid"]})
+        else:
+            msg["to"] = peer_id
+            msg["outgoing"] = True
+            append_history(msg)
+            _emit({"event": "message", "message": msg})
         return True
     except OSError as e:
         _emit({"event": "error", "message": "could not reach %s: %s" % (peer["name"], e)})
@@ -1224,9 +1267,16 @@ def stdin_loop() -> None:
             if send_control(pid, "friendAccept"):
                 add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
                 _emit({"event": "friend-accepted", "id": pid, "name": pname})
+                # Reveal the messages we held from them until acceptance.
+                with _pending_lock:
+                    held = _pending_first.pop(pid, [])
+                _reveal(held)
         elif kind == "rejectFriend":
             pid = str(cmd.get("id", ""))
             send_control(pid, "friendReject")
+            # Discard the held messages; they were declined.
+            with _pending_lock:
+                _pending_first.pop(pid, None)
             _emit({"event": "friend-rejected", "id": pid})
         elif kind == "unfriend":
             pid = str(cmd.get("id", ""))

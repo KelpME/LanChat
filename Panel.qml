@@ -1120,6 +1120,10 @@ Panel {
                 // width dependency that used to clip long messages).
                 Rectangle {
                   id: bubble
+                  // A held handshake request shows as a banner, not a text
+                  // bubble — hide the bubble so the content isn't leaked
+                  // before the friend accepts.
+                  visible: !(modelData.friendRequest && modelData.held)
                   readonly property real bubbleMaxWidth: list.width * 0.8
                   readonly property real bubblePaddingX: Style.space(14)
                   readonly property real bubblePaddingY: Style.space(9)
@@ -1232,9 +1236,9 @@ Panel {
                   }
                 }
 
-                // Friend request banner (incoming, not yet a friend).
+                // Friend request banner (pending handshake, both directions).
                 Rectangle {
-                  visible: !modelData.outgoing && modelData.friendRequest && !root.isConfirmedFriend(modelData.from)
+                  visible: modelData.friendRequest && modelData.held
                   anchors.left: parent.left
                   width: list.width * 0.8
                   height: Style.space(38)
@@ -1247,17 +1251,21 @@ Panel {
 
                     Text {
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "Friend request from " + modelData.fromName
+                      text: modelData.outgoing
+                        ? "Friend request sent — waiting for " + (modelData.toName || "them") + " to accept"
+                        : "Friend request from " + modelData.fromName
                       color: Color.popups.text
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                     }
 
                     Button {
+                      visible: !modelData.outgoing
                       text: "Accept"
                       onClicked: root.acceptFriend(modelData.from)
                     }
                     Button {
+                      visible: !modelData.outgoing
                       text: "Reject"
                       onClicked: root.rejectFriend(modelData.from)
                     }

@@ -85,6 +85,22 @@ QtObject {
     return s !== "" && s !== "dnd"
   }
 
+  // Is this peer a confirmed friend? Sending to anyone else initiates a
+  // handshake (friend request held until they accept) instead of a plain message.
+  function isConfirmedFriend(id) {
+    var list = lanchat.friends
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id && list[i].confirmed) return true
+    }
+    return false
+  }
+
+  // The daemon's send cmd; a non-friend target becomes a friend request.
+  function sendPayload(to, text, attachment) {
+    return JSON.stringify({ cmd: "send", to: to, text: text || "", attachment: attachment || null,
+      friend_request: !lanchat.isConfirmedFriend(to) }) + "\n"
+  }
+
   // Send a message. If the peer is DND or offline, hold it in the queue with a
   // "!" indicator until they're available again. Otherwise send normally
   // (honoring the undo/send-delay window).
@@ -101,7 +117,7 @@ QtObject {
       pendingSends = pendingSends.concat([{ mid: mid, to: to, text: text, attachment: attachment, total: sendDelay, remaining: sendDelay }])
       undoTimer.restart()
     } else {
-      daemon.write(JSON.stringify({ cmd: "send", to: to, text: text || "", attachment: attachment || null }) + "\n")
+      daemon.write(lanchat.sendPayload(to, text, attachment))
     }
   }
 
@@ -111,7 +127,7 @@ QtObject {
     for (var i = 0; i < lanchat.heldQueue.length; i++) {
       var h = lanchat.heldQueue[i]
       if (h.to === peer) {
-        daemon.write(JSON.stringify({ cmd: "send", to: h.to, text: h.text || "", attachment: h.attachment || null }) + "\n")
+        daemon.write(lanchat.sendPayload(h.to, h.text, h.attachment))
       } else {
         still.push(h)
       }
@@ -280,6 +296,19 @@ QtObject {
 
   // ---- events from the daemon -------------------------------------------
 
+  // Insert or replace a message in the list keyed by mid (dedup on reveal).
+  function upsertMessage(m) {
+    if (!m.mid) { lanchat.messages = lanchat.messages.concat([m]); return }
+    var msgs = lanchat.messages.slice()
+    var idx = -1
+    for (var i = 0; i < msgs.length; i++) {
+      if (msgs[i].mid === m.mid) { idx = i; break }
+    }
+    if (idx >= 0) msgs[idx] = m
+    else msgs.push(m)
+    lanchat.messages = msgs
+  }
+
   function onDaemonLine(raw) {
     var obj
     try { obj = JSON.parse(raw) } catch (e) { return }
@@ -365,6 +394,27 @@ QtObject {
       lanchat.statusMessage = (obj.name || "Peer") + " declined your request"
       lanchat.statusTimer.restart()
       break
+
+    case "friend-request": {
+      // A handshake is pending. Show it as a held message (the banner
+      // renders Accept/Reject for inbound; an outgoing request shows as
+      // "waiting"). Outgoing means WE sent the request and are holding our
+      // own message until they accept.
+      var fr = {
+        from: obj.from || "",
+        fromName: obj.fromName || "",
+        to: obj.to || "",
+        toName: obj.toName || "",
+        text: obj.text || "",
+        ts: obj.ts || Date.now(),
+        mid: obj.mid || "",
+        outgoing: !!obj.outgoing,
+        friendRequest: true,
+        held: true
+      }
+      lanchat.upsertMessage(fr)
+      break
+    }
 
     case "download-dir":
       lanchat.downloadDir = obj.dir || ""
@@ -467,15 +517,14 @@ QtObject {
     }
 
     case "message": {
-      var msgs = lanchat.messages.slice()
-      msgs.push(obj.message)
-      lanchat.messages = msgs
-      if (!lanchat.panelOpen && !obj.message.outgoing) {
+      lanchat.upsertMessage(obj.message)
+      var msgOut = !!obj.message.outgoing
+      if (!lanchat.panelOpen && !msgOut) {
         lanchat.unreadCount++
         lanchat.playMessageSound()
       }
       // If the panel is open for this peer, send a read receipt back.
-      if (lanchat.panelOpen && !obj.message.outgoing && obj.message.from) {
+      if (lanchat.panelOpen && !msgOut && obj.message.from) {
         lanchat.sendReadReceipt(obj.message.from, obj.message.mid)
       }
       break
@@ -561,7 +610,7 @@ QtObject {
         var s = lanchat.pendingSends[i]
         s.remaining -= 0.1
         if (s.remaining <= 0) {
-          daemon.write(JSON.stringify({ cmd: "send", to: s.to, text: s.text || "", attachment: s.attachment || null }) + "\n")
+          daemon.write(lanchat.sendPayload(s.to, s.text, s.attachment))
         } else {
           still.push(s)
         }

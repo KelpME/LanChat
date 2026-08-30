@@ -137,9 +137,13 @@ def main():
 
         # Become friends first (friend request + accept) so messages flow.
         a.cmd(cmd="send", to=idb, text="friend me", friend_request=True)
-        b.wait_event("message")
+        b.wait_event("friend-request")
         b.cmd(cmd="acceptFriend", id=ida)
         a.wait_event("friend-accepted")
+        # Accepting reveals the held handshake message on both sides; drain them
+        # so the next wait_event("message") below sees the real message.
+        a.wait_event("message")  # A reveals its held outgoing "friend me"
+        b.wait_event("message")  # B reveals the held incoming "friend me"
 
         # Send from A -> B over real TLS, authenticated.
         a.cmd(cmd="send", to=idb, text="hello from alpha")
