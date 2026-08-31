@@ -40,6 +40,9 @@ QtObject {
   property int httpPort: 4814
   property bool apiFullAccess: false
   property string panelSize: "medium"
+  // Manual pixel override for panel size; 0 = follow the panelSize preset.
+  property int customW: 0
+  property int customH: 0
   property string status: "available"
   property bool soundEnabled: true
   property bool typingEnabled: true
@@ -364,6 +367,14 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setPanelSize", size: size }) + "\n")
   }
 
+  // Set a manual pixel size for the panel. 0 on either axis means "follow
+  // the preset" for that axis; persisted so the size survives a restart.
+  function setCustomSize(w, h) {
+    customW = w
+    customH = h
+    daemon.write(JSON.stringify({ cmd: "setCustomSize", w: w, h: h }) + "\n")
+  }
+
   // Set user status: "available" | "dnd" | "away" | "brb".
   function setStatus(s) {
     status = s
@@ -450,6 +461,8 @@ QtObject {
       if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
       if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
       if (obj.panelSize !== undefined) lanchat.panelSize = obj.panelSize
+      if (obj.customW !== undefined) lanchat.customW = obj.customW
+      if (obj.customH !== undefined) lanchat.customH = obj.customH
       if (obj.status !== undefined) lanchat.status = obj.status
       if (obj.soundEnabled !== undefined) lanchat.soundEnabled = obj.soundEnabled
       if (obj.typingEnabled !== undefined) lanchat.typingEnabled = obj.typingEnabled
@@ -491,6 +504,11 @@ QtObject {
 
     case "panel-size":
       lanchat.panelSize = obj.size || "medium"
+      break
+
+    case "custom-size":
+      if (obj.w !== undefined) lanchat.customW = obj.w
+      if (obj.h !== undefined) lanchat.customH = obj.h
       break
 
     case "api-full-access":

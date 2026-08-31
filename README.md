@@ -109,7 +109,9 @@ agents) — it is not needed for peer messaging.
 | `downloadDir` | `~/Downloads`      | Where accepted attachments are saved         |
 | `sendDelay`   | `0`                | Undo window in seconds (`0` = off)           |
 | `apiFullAccess` | `false`          | Whether the HTTP API can read chat data      |
-| `panelSize`   | `medium`           | Panel size: `small`, `medium`, `large`, `xl`, `full` |
+| `panelSize`   | `medium`           | Panel size preset: `small`, `medium`, `large`, `xl`, `full`. Custom W×H typed in the panel overrides the preset. |
+| `customW`     | `0`                | Manual panel width in px (`0` = follow the preset)          |
+| `customH`     | `0`                | Manual panel height in px (`0` = follow the preset)         |
 | `status`      | `available`        | Your status: `available`, `dnd`, `away`, `brb`       |
 | `soundEnabled`| `true`             | Play a chime when a new message arrives              |
 | `typingEnabled`| `true`            | Send my typing indicator to friends                  |

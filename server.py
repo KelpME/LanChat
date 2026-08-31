@@ -194,6 +194,9 @@ def load_config() -> None:
     CONFIG.setdefault("apiFullAccess", False)
     # Panel size: "small" | "medium" | "large" | "xl" | "full".
     CONFIG.setdefault("panelSize", "medium")
+    # Manual pixel override for panel size (0 = follow the preset).
+    CONFIG.setdefault("customW", 0)
+    CONFIG.setdefault("customH", 0)
     # User status: "available" | "dnd" | "away" | "brb". Broadcast to friends.
     CONFIG.setdefault("status", "available")
     # Play a sound on incoming messages.
@@ -1756,6 +1759,16 @@ def stdin_loop() -> None:
                 CONFIG["panelSize"] = size
                 _save_config()
                 _emit({"event": "panel-size", "size": size})
+        elif kind == "setCustomSize":
+            try:
+                w = max(0, int(cmd.get("w", 0)))
+                h = max(0, int(cmd.get("h", 0)))
+            except (TypeError, ValueError):
+                w, h = 0, 0
+            CONFIG["customW"] = w
+            CONFIG["customH"] = h
+            _save_config()
+            _emit({"event": "custom-size", "w": w, "h": h})
         elif kind == "setStatus":
             s = str(cmd.get("status", "available"))
             if s in STATUSES:
@@ -1874,6 +1887,8 @@ def _ready_event() -> dict:
         "sendDelay": CONFIG.get("sendDelay", 0),
         "apiFullAccess": api_full_access(),
         "panelSize": panel_size(),
+        "customW": int(CONFIG.get("customW", 0) or 0),
+        "customH": int(CONFIG.get("customH", 0) or 0),
         "status": status(),
         "soundEnabled": sound_enabled(),
         "typingEnabled": typing_enabled(),

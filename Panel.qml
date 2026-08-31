@@ -427,12 +427,42 @@ Panel {
     : Lanchat.panelSize === "large" ? 3/4
     : Lanchat.panelSize === "xl" ? 0.85
     : 3/5  // medium (also the default)
-  readonly property int panelW: Lanchat.panelSize === "full"
-    ? Math.round(screenW - Style.space(10))
-    : Math.round(screenW * wFrac)
-  readonly property int panelH: Lanchat.panelSize === "full"
-    ? Math.round(screenH - Style.space(10) - Style.space(35))
-    : Math.round(screenH * hFrac)
+
+  // Manual size override, persisted in Lanchat (0 = follow the preset
+  // fractions). The preset buttons and W×H boxes write through
+  // Lanchat.setCustomSize so the size survives a restart.
+  function fracFor(size, axis) {
+    if (axis === "w") return size === "small" ? 1/2 : size === "large" ? 4/5 : size === "xl" ? 9/10 : 2/3
+    return size === "small" ? 0.45 : size === "large" ? 3/4 : size === "xl" ? 0.85 : 3/5
+  }
+
+  function applyPanelSize(size) {
+    Lanchat.setPanelSize(size)
+    if (size === "full") {
+      Lanchat.setCustomSize(Math.round(root.screenW - Style.space(10)),
+                            Math.round(root.screenH - Style.space(10) - Style.space(35)))
+    } else {
+      Lanchat.setCustomSize(Math.round(root.screenW * root.fracFor(size, "w")),
+                            Math.round(root.screenH * root.fracFor(size, "h")))
+    }
+  }
+
+  function applyManualSize(wText, hText) {
+    var wv = parseInt(wText, 10)
+    var hv = parseInt(hText, 10)
+    var w = (!isNaN(wv) && wv > 0) ? wv : Lanchat.customW
+    var h = (!isNaN(hv) && hv > 0) ? hv : Lanchat.customH
+    Lanchat.setCustomSize(w, h)
+  }
+
+  readonly property int panelW: Lanchat.customW > 0 ? Lanchat.customW
+    : Lanchat.panelSize === "full"
+      ? Math.round(screenW - Style.space(10))
+      : Math.round(screenW * wFrac)
+  readonly property int panelH: Lanchat.customH > 0 ? Lanchat.customH
+    : Lanchat.panelSize === "full"
+      ? Math.round(screenH - Style.space(10) - Style.space(35))
+      : Math.round(screenH * hFrac)
 
   KeyboardPanel {
     id: win
@@ -1251,11 +1281,81 @@ Panel {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
 
-                      Button { width: Style.space(24); height: Style.space(18); text: "S"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("small") }
-                      Button { width: Style.space(24); height: Style.space(18); text: "M"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("medium") }
-                      Button { width: Style.space(24); height: Style.space(18); text: "L"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("large") }
-                      Button { width: Style.space(28); height: Style.space(18); text: "XL"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("xl") }
-                      Button { width: Style.space(24); height: Style.space(18); text: "F"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("full") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "S"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("small") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "M"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("medium") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "L"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("large") }
+                      Button { width: Style.space(28); height: Style.space(18); text: "XL"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("xl") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "F"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("full") }
+                    }
+                  }
+
+                  // Manual size row (W × H in pixels). Picking a preset above
+                  // fills these boxes with that preset's computed size; typing
+                  // here overrides the size directly.
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: sizeWHHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Size (W × H)"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: sizeWHHover.containsMouse
+                      text: "Panel width × height in pixels. Pick a preset above, or type your own and press Enter / Apply."
+                    }
+
+                    Row {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.space(4)
+
+                      TextField {
+                        id: sizeWField
+                        width: Style.space(40)
+                        text: Lanchat.customW > 0 ? String(Lanchat.customW) : String(root.panelW)
+                        maximumLength: 5
+                        horizontalPadding: Style.space(4)
+                        verticalPadding: Style.space(3)
+                        inputMethodHints: Qt.ImhDigitsOnly
+                        onEditingFinished: root.applyManualSize(sizeWField.text, sizeHField.text)
+                      }
+                      Text {
+                        text: "×"
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        anchors.verticalCenter: parent.verticalCenter
+                      }
+                      TextField {
+                        id: sizeHField
+                        width: Style.space(40)
+                        text: Lanchat.customH > 0 ? String(Lanchat.customH) : String(root.panelH)
+                        maximumLength: 5
+                        horizontalPadding: Style.space(4)
+                        verticalPadding: Style.space(3)
+                        inputMethodHints: Qt.ImhDigitsOnly
+                        onEditingFinished: root.applyManualSize(sizeWField.text, sizeHField.text)
+                      }
+                      Button {
+                        text: "Apply"
+                        fontSize: Style.font.caption
+                        onClicked: root.applyManualSize(sizeWField.text, sizeHField.text)
+                      }
                     }
                   }
 
