@@ -1304,7 +1304,11 @@ def send_message(peer_id: str, text: str, friend_request: bool = False, attachme
     }
     if attachment:
         msg["attachment"] = attachment  # {name,size,mime,fileId,sha256}
-    if friend_request:
+    # Never re-propose friendship to someone who already accepted. The UI only
+    # sets friend_request for non-friends, but if its state is momentarily
+    # stale this guard keeps us from re-holding a message to a confirmed friend
+    # as a request (the "keeps sending friend requests to friends" bug).
+    if friend_request and not is_friend(peer_id):
         msg["friendRequest"] = True
         # Record the peer as a pending-request friend on our side, so they
         # become trusted (can reply/accept) and show as a friend request.

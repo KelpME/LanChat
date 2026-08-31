@@ -182,6 +182,17 @@ Panel {
     return false
   }
 
+  // Friend relationship of a peer: "friend" (confirmed), "pending" (a request
+  // is outstanding in one direction), or "" (stranger). Drives the peer-list
+  // indicator so you can see who you're actually friends with.
+  function friendState(id) {
+    var list = Lanchat.friends
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) return list[i].confirmed ? "friend" : "pending"
+    }
+    return ""
+  }
+
   function acceptFriend(id) {
     Lanchat.acceptFriend(id)
   }
@@ -410,7 +421,7 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: Style.spacing.xl
-                    anchors.right: statusText.left
+                    anchors.right: friendBadge.left
                     anchors.rightMargin: Style.spacing.md
                     text: modelData.name
                     color: modelData.id === root.selectedPeerId
@@ -419,6 +430,22 @@ Panel {
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     elide: Text.ElideRight
+                  }
+
+                  // Friend indicator: shows when this peer is a confirmed friend
+                  // or has a pending request. Collapses to nothing for strangers.
+                  Text {
+                    id: friendBadge
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: statusText.left
+                    anchors.rightMargin: Style.spacing.sm
+                    width: visible ? implicitWidth : 0
+                    visible: root.friendState(modelData.id) !== ""
+                    text: root.friendState(modelData.id) === "friend" ? "\u2713 Friend" : "\u2026 requested"
+                    color: root.friendState(modelData.id) === "friend" ? Color.accent : Color.muted
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.weight: Font.DemiBold
                   }
 
                   Text {
