@@ -991,7 +991,7 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
 _udp_fail_window = [0, 0.0, 0.0]  # [count since last log, last_fail_time, last_log_time]
 
 
-def _send_udp_friend_request(sock: socket.socket, target: str) -> bool:
+def _send_udp_friend_request(sock: socket.socket, pid: str) -> bool:
     """Send a SIGNED friend request to a peer over UDP (no TCP needed).
 
     Friendship is the bootstrap — the first contact between strangers who have
@@ -1001,6 +1001,20 @@ def _send_udp_friend_request(sock: socket.socket, target: str) -> bool:
     cert id, exactly like the TCP challenge-response but without needing an
     established connection. Returns True if sent.
     """
+    # Resolve the peer's IP from the peer list (or friend record) — the sender
+    # passes the peer's ID (fingerprint), not its address.
+    peer = find_peer(pid)
+    target = (peer or {}).get("address", "")
+    tport = int((peer or {}).get("port") or DEFAULT_PORT)
+    if not target:
+        for f in CONFIG.get("friends", []):
+            if f.get("id") == pid and f.get("address"):
+                target = f.get("address")
+                tport = int(f.get("port") or DEFAULT_PORT)
+                break
+    if not target:
+        _diag("udp-friend-request-failed", to=pid[:12], reason="no-address")
+        return False
     nonce = secrets.token_hex(16)
     payload = {"t": "friend-request",
                "id": host_id(),
@@ -1010,8 +1024,8 @@ def _send_udp_friend_request(sock: socket.socket, target: str) -> bool:
                "sig": _sign((host_id() + nonce).encode("utf-8")),
                "port": port()}
     try:
-        sock.sendto(json.dumps(payload).encode("utf-8"), (target, port()))
-        _diag("udp-friend-request-sent", to=target, nonce=nonce[:8])
+        sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
+        _diag("udp-friend-request-sent", to=target, port=tport, nonce=nonce[:8])
         return True
     except OSError as e:
         _diag("udp-friend-request-failed", to=target, errno=getattr(e, "errno", None))

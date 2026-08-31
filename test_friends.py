@@ -274,6 +274,19 @@ def main():
         assert not bad_reqs, "forged UDP friend request was accepted!"
         print("OK  10. forged UDP friend request rejected (bad signature)")
 
+        # 11) End-to-end via the daemon command: A sends udpFriendRequest to B
+        #     (by B's ID, as the UI does). The daemon must resolve B's address
+        #     and B receives the signed request.
+        import test_peer as _tp3
+        # Give A's daemon B's address (as discovery would have) via setFriend.
+        a.cmd(cmd="setFriend", id=idb, address="127.0.0.1", port=b.port, name="Beta")
+        a.wait_event("friend-added")
+        a.cmd(cmd="udpFriendRequest", to=idb, name="Beta")
+        fr4 = b.wait_event("friend-request")
+        assert fr4 and fr4.get("from") == ida, "B did not get UDP friend request via command"
+        assert fr4.get("fingerprint") == ida, "command-sent request must carry verified fingerprint"
+        print("OK  11. udpFriendRequest command resolves address + delivers (B got verified request)")
+
         print("\nALL FRIEND TESTS PASSED")
         return 0
     finally:
