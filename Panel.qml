@@ -1687,7 +1687,7 @@ Panel {
 
             // ---- pending message undo (countdown ring) -----------------
             Rectangle {
-              id: pendingBar
+              id: undoBar
               visible: root.pendingForPeer.length > 0
               anchors.left: parent.left
               anchors.right: parent.right
