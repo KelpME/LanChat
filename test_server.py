@@ -297,6 +297,23 @@ def main():
             "setFriend did not record a confirmed friend"
         print("OK  add friend by fingerprint (setFriend)")
 
+        # Adding by fingerprint with no name must store "Unknown", not a
+        # fabricated fallback name — the real name is filled in on discovery.
+        b.cmd(cmd="setFriend", id=sid2 + "0", name="")
+        fv = b.wait_event("friend-added")
+        assert fv and fv.get("name") == "Unknown", "expected Unknown name for no-name setFriend, got %r" % fv.get("name")
+        print("OK  add friend without a name stores 'Unknown' (not a fabricated fallback)")
+
+        # Once the friend broadcasts a real name, the Unknown record is synced.
+        # (Test _sync_friend_name directly — the subprocess daemon's CONFIG and
+        # the harness's import are separate, so upsert_peer there won't emit on b.)
+        import server as _srv2
+        _srv2.CONFIG["friends"] = [{"id": sid2 + "0", "address": "", "name": "Unknown", "confirmed": True}]
+        _srv2._sync_friend_name(sid2 + "0", "RealName")
+        synced = [f["name"] for f in _srv2.CONFIG.get("friends", []) if f["id"] == sid2 + "0"]
+        assert synced == ["RealName"], "Unknown friend name not synced: %r" % synced
+        print("OK  Unknown friend name syncs to the real name once discovered")
+
         # History reload command returns what's on disk (decrypted by daemon).
         b.cmd(cmd="history")
         hev = b.wait_event("history")

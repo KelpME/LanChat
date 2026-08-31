@@ -777,6 +777,26 @@ def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = N
         _emit({"event": "peer", "peer": _peers[pid]})
     else:
         _emit({"event": "peer", "peer": _peers[pid]})
+    # If a confirmed friend broadcasts with a real name, sync it into their
+    # friend record so an "Unknown" (added-by-fingerprint) friend gets their
+    # real display name once discovery connects them.
+    if name and name != "Unknown":
+        _sync_friend_name(pid, name)
+
+
+def _sync_friend_name(pid: str, name: str) -> None:
+    """Update a confirmed friend's stored name if we now know a real one."""
+    friends = CONFIG.get("friends", [])
+    changed = False
+    for f in friends:
+        if f.get("id") == pid and (not f.get("name") or f.get("name") == "Unknown"):
+            f["name"] = name
+            changed = True
+            break
+    if changed:
+        CONFIG["friends"] = friends
+        _save_config()
+        _emit({"event": "friends", "friends": friends_list()})
 
 
 def expire_peers() -> None:
@@ -2325,7 +2345,7 @@ def handle_command(cmd: dict) -> None:
         else:
             peer = find_peer(pid)
             addr = str(cmd.get("address") or (peer or {}).get("address") or "")
-            pname = str(cmd.get("name") or (peer or {}).get("name") or friendly_name(pid))
+            pname = str(cmd.get("name") or (peer or {}).get("name") or "Unknown")
             add_friend(pid, addr, pname, confirmed=True)
             if addr:
                 upsert_peer(pid, pname, addr, int(cmd.get("port") or (peer or {}).get("port") or DEFAULT_PORT))
