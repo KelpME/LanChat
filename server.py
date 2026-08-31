@@ -610,11 +610,20 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
     except OSError as e:
         # A full send buffer (ENOBUFS / EAGAIN) means we're flooding faster than
         # the socket drains — the classic symptom is peers "vanishing" because
-        # their hellos never make it out. Surface it so it's diagnosable.
+        # their hellos never make it out. Surface it (rate-limited) so it's
+        # diagnosable without spamming the log.
         errno = getattr(e, "errno", None)
-        _log("udp-send-failed target=%s errno=%s" % (dest, errno))
-        if errno in (105, 11, 90):  # ENOBUFS, EAGAIN, EMSGSIZE
-            _diag("udp-send-failed", target=dest[:32], errno=errno)
+        now = time.time()
+        _udp_fail_window[0] += 1
+        _udp_fail_window[1] = now
+        # Only log every ~5s of failures, and summarize the count.
+        if now - _udp_fail_window[2] >= 5.0:
+            _udp_fail_window[2] = now
+            _diag("udp-send-failed", target=dest[:32], errno=errno, count=_udp_fail_window[0])
+            _udp_fail_window[0] = 0
+
+
+_udp_fail_window = [0, 0.0, 0.0]  # [count since last log, last_fail_time, last_log_time]
 
 
 def _local_subnet_hosts(max_hosts: int = 512) -> list:
@@ -683,9 +692,14 @@ def _local_subnet_hosts(max_hosts: int = 512) -> list:
 
 def _scan_subnet(sock: socket.socket) -> None:
     """Unicast hello to every host on the local subnet — LocalSend-style
-    fallback for when UDP broadcast is filtered/blocked by the network."""
+    fallback for when UDP broadcast is filtered/blocked by the network.
+
+    Called once at startup only. Sends are throttled so the scan never bursts
+    enough datagrams to back up the socket's send queue.
+    """
     for host in _local_subnet_hosts():
         _udp_send(sock, {"t": "hello"}, target=host)
+        time.sleep(0.01)  # ~100/s — keeps the buffer from filling on a /24
 
 
 def udp_loop() -> None:
@@ -702,17 +716,21 @@ def udp_loop() -> None:
     threading.Thread(target=_udp_listener, args=(sock,), daemon=True).start()
 
     last_broadcast = 0.0
-    last_scan = 0.0
+    scanned_once = False
     while True:
         now = time.time()
         # Only announce ourselves while online (appear offline otherwise).
         if is_online() and now - last_broadcast >= BROADCAST_INTERVAL_S:
             _udp_send(sock, {"t": "hello"})
             last_broadcast = now
-        # Subnet scan every ~15s as a broadcast fallback.
-        if is_online() and now - last_scan >= 8.0:
+        # Subnet scan ONCE shortly after startup, as a broadcast fallback for
+        # networks where broadcasts are filtered. It is NOT repeated: blind
+        # unicasting to every host on the /24 every few seconds floods the UDP
+        # send queue and chokes inbound traffic. Broadcast handles steady-state
+        # discovery; the scan only seeds peers that broadcast filtering hides.
+        if is_online() and not scanned_once and now - last_broadcast >= 3.0:
             _scan_subnet(sock)
-            last_scan = now
+            scanned_once = True
         expire_peers()
         time.sleep(0.5)
 
