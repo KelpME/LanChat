@@ -181,12 +181,22 @@ def main():
         print("OK  4. messages held while peer down flushed after reconnect")
 
         # 5) Inbound dedupe by mid: re-delivering the same mid is not recorded
-        #    twice (simulates a reconnect re-send). B trusts A (confirmed friend).
+        #    twice (simulates a reconnect re-send). B trusts A (confirmed friend),
+        #    and A must prove its identity on this fresh connection (1.2.0).
+        import test_peer as _tp
+        with open(os.path.join(ha, ".config", "omarchy", "lanchat-certs", "cert.pem")) as f:
+            _a_cert = f.read()
+        with open(os.path.join(ha, ".config", "omarchy", "lanchat-certs", "key.pem")) as f:
+            _a_key = f.read()
         mid = "dup" + os.urandom(4).hex()
-        tls_send(4982, {"t": "msg", "from": ida, "fromName": "Alpha",
-                        "text": "dedupe-me", "mid": mid})
-        tls_send(4982, {"t": "msg", "from": ida, "fromName": "Alpha",
-                        "text": "dedupe-me", "mid": mid})
+        _s1 = _tp.authed_connect("127.0.0.1", 4982, _a_cert, _a_key)
+        _s1.sendall((json.dumps({"t": "msg", "from": ida, "fromName": "Alpha",
+                                 "text": "dedupe-me", "mid": mid}) + "\n").encode())
+        _s1.close()
+        _s2 = _tp.authed_connect("127.0.0.1", 4982, _a_cert, _a_key)
+        _s2.sendall((json.dumps({"t": "msg", "from": ida, "fromName": "Alpha",
+                                 "text": "dedupe-me", "mid": mid}) + "\n").encode())
+        _s2.close()
         time.sleep(0.8)
         assert count_msgs(b, "dedupe-me") == 1, \
             "duplicate mid delivered twice (got %d)" % count_msgs(b, "dedupe-me")

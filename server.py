@@ -64,11 +64,19 @@ HISTORY_LIMIT = 500
 # both machines can verify they're running the same code; falls back to the
 # manifest version when git isn't available (e.g. a bare copy).
 #
+# 1.2.0 — security: inbound message identity is now proven by challenge-response.
+#   Python's TLS stack can't request a client cert without CA-verifying it (which
+#   rejects self-signed peers), so on every inbound connection the dialing side
+#   announces its cert and must sign a random nonce with the matching private
+#   key before any of its messages are trusted. An attacker who harvested a
+#   friend's fingerprint cannot impersonate them without the friend's key,
+#   closing the spoofing gap. Old clients that never complete the proof are
+#   dropped on inbound. Both machines must run >= 1.2.0.
 # 1.1.0 — persistent bidirectional connections: one long-lived outbound TLS
-# socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
-# over the existing socket). Old and new transports do not interoperate; both
-# machines must run >= 1.1.0.
-VERSION = "1.1.0"
+#   socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
+#   over the existing socket). Old and new transports do not interoperate; both
+#   machines must run >= 1.1.0.
+VERSION = "1.2.0"
 
 
 def _git_version() -> str:
@@ -308,6 +316,77 @@ def cert_fingerprint() -> str:
 
 def display_name() -> str:
     return str(CONFIG.get("displayName") or socket.gethostname())
+
+
+# --------------------------------------------------------------------------
+# Identity proof (challenge-response)
+# --------------------------------------------------------------------------
+# The TCP transport has no client certs (Python can't request a cert without
+# CA-verifying it, which rejects self-signed peers). To close the
+# unauthenticated-inbound spoofing gap, the dialing side proves it owns the
+# private key for its claimed cert fingerprint: the receiver reads the peer's
+# `identity` (claimed id + cert), sends a random `challenge` nonce, and the
+# peer must return an `identityProof` — a signature over that nonce using the
+# claimed cert's private key. A stranger who harvested a friend's fingerprint
+# but not its key cannot sign the nonce, so impersonation is impossible.
+
+_priv_key = None
+_priv_key_lock = threading.Lock()
+
+
+def _our_cert_pem() -> str:
+    if not os.path.exists(CERT_PEM):
+        ensure_tls()
+    with open(CERT_PEM, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _load_priv_key():
+    global _priv_key
+    if _priv_key is None:
+        from cryptography.hazmat.primitives import serialization
+        with _priv_key_lock:
+            if _priv_key is None:
+                if not os.path.exists(CERT_KEY):
+                    ensure_tls()
+                with open(CERT_KEY, "rb") as f:
+                    _priv_key = serialization.load_pem_private_key(f.read(), password=None)
+    return _priv_key
+
+
+def _sign(data: bytes) -> str:
+    """Sign bytes with our private key (RSA PKCS1v15-SHA256), hex-encoded."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    import binascii
+    sig = _load_priv_key().sign(data, padding.PKCS1v15(), hashes.SHA256())
+    return binascii.hexlify(sig).decode("ascii")
+
+
+def _verify(cert_pem: str, data: bytes, sig_hex: str) -> bool:
+    """Verify a signature over `data` using the public key in `cert_pem`."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
+        pub = cert.public_key()
+        sig = bytes.fromhex(sig_hex)
+        pub.verify(sig, data, padding.PKCS1v15(), hashes.SHA256())
+        return True
+    except Exception:
+        return False
+
+
+def _cert_fingerprint_of_pem(cert_pem: str) -> str:
+    """SHA-256 fingerprint of the cert in `cert_pem` (empty on parse failure)."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+    try:
+        cert = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
+        return hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
+    except Exception:
+        return ""
 
 
 def port() -> int:
@@ -964,7 +1043,11 @@ def _maybe_set_active(pid: str, sock, initiator: str) -> bool:
 
 
 def _reader_outbound(pid: str, c: dict, sock) -> None:
-    """Reader for a socket WE dialed (verified peer id). Reads messages until the
+    """Reader for a socket WE dialed. We already verified the peer's cert
+    fingerprint (conn_loop passes expected_fingerprint=pid), so messages from
+    the peer are trusted. We still participate in the peer's identity proof:
+    its server sends us a `challenge` and we reply with a signature over the
+    nonce (proving WE own the key for our claimed id). Reads messages until the
     socket drops, then clears the slot so the supervisor reconnects."""
     src = ("", 0)
     try:
@@ -985,6 +1068,21 @@ def _reader_outbound(pid: str, c: dict, sock) -> None:
                         msg = json.loads(line.decode("utf-8"))
                     except ValueError:
                         continue
+                    t = msg.get("t")
+                    if t == "challenge":
+                        nonce = str(msg.get("nonce") or "")
+                        if nonce:
+                            try:
+                                sock.sendall(json.dumps(
+                                    {"t": "identityProof", "sig": _sign(nonce.encode("utf-8"))},
+                                    separators=(",", ":"),
+                                ).encode("utf-8") + b"\n")
+                            except OSError:
+                                pass
+                        continue
+                    if t == "identity":
+                        # Peer's server announcing itself; we already trust it.
+                        continue
                     _handle_incoming(msg, src)
     except (OSError, ssl.SSLError):
         pass
@@ -997,18 +1095,27 @@ def _reader_outbound(pid: str, c: dict, sock) -> None:
 
 
 def _reader_inbound(sock) -> None:
-    """Reader for a socket the PEER dialed (no client cert). The peer's id is
-    learned from the first message's 'from' field, then the socket is adopted as
-    active (keeper tie-break). If it loses the tie-break to an already-active
-    socket, it still reads inbound messages but is never used for writing."""
+    """Reader for a socket the PEER dialed. Identity is NOT taken on faith: the
+    peer must first prove it owns the private key for its claimed cert
+    fingerprint. It sends `identity` (claimed id + cert), we reply `challenge`
+    (random nonce), and it must return `identityProof` (signature over the
+    nonce). Only then are its messages adopted/processed — so an attacker who
+    harvested a friend's fingerprint but not its key cannot impersonate them.
+    If it loses the keeper tie-break to an already-active socket, it still
+    reads inbound messages but is never used for writing."""
     src = ("", 0)
     try:
         src = sock.getpeername()[:2]
     except OSError:
         pass
+    addr = src[0] if src else "?"
     pid = None
     active = False
     buf = b""
+    auth_state = "idle"     # idle -> awaiting identity; challenged -> awaiting proof; ok -> done
+    auth_cert = ""          # peer's cert (PEM) once identity is accepted
+    nonce = ""              # the challenge we sent
+    deferred = []           # messages arriving before proof completes
     try:
         while True:
             chunk = sock.recv(4096)
@@ -1023,11 +1130,44 @@ def _reader_inbound(sock) -> None:
                     msg = json.loads(line.decode("utf-8"))
                 except ValueError:
                     continue
-                if pid is None:
-                    claimed = str(msg.get("from") or "")
-                    if claimed and claimed != host_id():
+                t = msg.get("t")
+                if auth_state != "ok":
+                    if t == "identity" and auth_state == "idle":
+                        claimed = str(msg.get("from") or "")
+                        cert_pem = str(msg.get("cert") or "")
+                        if (not claimed or claimed == host_id()
+                                or not cert_pem
+                                or _cert_fingerprint_of_pem(cert_pem) != claimed):
+                            _log("inbound-identity-rejected from=%s addr=%s reason=bad-identity"
+                                 % (claimed[:12], addr))
+                            return
                         pid = claimed
-                        active = _maybe_set_active(pid, sock, initiator=claimed)
+                        auth_cert = cert_pem
+                        nonce = secrets.token_hex(16)
+                        auth_state = "challenged"
+                        try:
+                            sock.sendall(json.dumps(
+                                {"t": "challenge", "nonce": nonce}, separators=(",", ":")
+                            ).encode("utf-8") + b"\n")
+                        except OSError:
+                            return
+                    elif t == "identityProof" and auth_state == "challenged":
+                        if not _verify(auth_cert, nonce.encode("utf-8"), str(msg.get("sig") or "")):
+                            _log("inbound-identity-rejected from=%s addr=%s reason=bad-signature"
+                                 % (pid[:12], addr))
+                            return
+                        # Proven: this connection owns the key for `pid`.
+                        auth_state = "ok"
+                        active = _maybe_set_active(pid, sock, initiator=pid)
+                        for m in deferred:
+                            _handle_incoming(m, src)
+                        deferred = []
+                    else:
+                        # While awaiting proof, hold any other messages (e.g. a
+                        # friend request the dialer sent right after identity).
+                        deferred.append(msg)
+                    continue
+                # Authenticated: normal inbound handling.
                 if pid is not None:
                     _handle_incoming(msg, src)
     except (OSError, ssl.SSLError):
@@ -1080,6 +1220,17 @@ def conn_loop() -> None:
                 with c["lock"]:
                     c["backoff"] = min(c["backoff"] * 2.0, _RECONNECT_MAX_BACKOFF)
                     c["next_try"] = now + c["backoff"]
+                continue
+            # Announce our identity (claimed fingerprint + cert) so the peer's
+            # inbound reader can challenge us and verify we own the key. Sent
+            # before any real message; harmless if the peer is an old version.
+            try:
+                s.sendall(json.dumps(
+                    {"t": "identity", "from": host_id(), "cert": _our_cert_pem()},
+                    separators=(",", ":"),
+                ).encode("utf-8") + b"\n")
+            except OSError:
+                _close_sock(s)
                 continue
             if _maybe_set_active(pid, s, initiator=host_id()):
                 threading.Thread(target=_reader_outbound, args=(pid, c, s), daemon=True).start()

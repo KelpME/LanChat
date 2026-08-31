@@ -133,7 +133,15 @@ def main():
 
         # 2) Stranger sends a FRIEND REQUEST -> recipient sees only the request
         #    (held), not the message content, and the stranger becomes pending.
-        tls_send(4951, {"t": "msg", "from": "stranger", "fromName": "Stranger", "text": "be friends?", "friendRequest": True})
+        #    A real peer proves its own identity first (1.2.0), then requests.
+        import tempfile as _tf
+        stranger_home = _tf.mkdtemp(prefix="lanchat-stranger-")
+        import test_peer as _tp
+        scert, skey = _tp.make_certs(stranger_home)
+        sid = _tp.fingerprint(scert)
+        _tp.authed_send("127.0.0.1", 4951, scert, skey,
+                        {"t": "msg", "from": sid, "fromName": "Stranger",
+                         "text": "be friends?", "friendRequest": True})
         fr = a.wait_event("friend-request")
         assert fr and fr.get("fromName") == "Stranger" and fr.get("text") == "be friends?"
         # The content is held — no plain message surfaces before acceptance.

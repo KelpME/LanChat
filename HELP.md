@@ -30,6 +30,11 @@ certificate. Your device's identity is that cert's fingerprint — permanent and
 independent of your display name, so you can re-roll your name without breaking
 anything.
 
+When another machine connects to you, it must prove it holds the private key
+for the fingerprint it claims (it signs a random challenge). Your fingerprint is
+broadcast on the LAN, but without the matching key a stranger can't forge
+messages from you. All your machines should run the same recent version.
+
 ## The bar icon
 
 Click the chat icon in the bar to open Lanchat. An **unread-count badge** shows

@@ -173,6 +173,35 @@ def main():
         assert not wait_until(lambda: _has_message(b, "should never land"), timeout=1.0), "stranger message leaked through"
         print("OK  non-friend message dropped (friend gate)")
 
+        # --- Identity spoofing (1.2.0 fix): a stranger must prove it owns the
+        # key for a claimed friend fingerprint before its message is trusted.
+        # Attack A: claim the friend's id with NO identity proof.
+        a_pem = open(os.path.join(home_a, ".config", "omarchy", "lanchat-certs", "cert.pem")).read()
+        spoof = _ctx.wrap_socket(socket.create_connection(("127.0.0.1", b.port), timeout=3))
+        spoof.sendall((json.dumps({"t": "msg", "from": ida, "fromName": "Alpha", "text": "SPOOF1"}) + "\n").encode())
+        time.sleep(1.0)
+        spoof.close()
+        assert not _has_message(b, "SPOOF1"), "message with no identity proof leaked through"
+        print("OK  inbound spoof dropped (claim friend id, no proof)")
+        # Attack B: present the friend's (harvested) cert, but cannot sign the
+        # challenge (no private key) — send a bogus signature.
+        spoof = _ctx.wrap_socket(socket.create_connection(("127.0.0.1", b.port), timeout=3))
+        spoof.sendall((json.dumps({"t": "identity", "from": ida, "cert": a_pem}) + "\n").encode())
+        time.sleep(0.6)
+        spoof.settimeout(1.0)
+        try:
+            chall = json.loads(spoof.recv(8192).decode().splitlines()[0])["nonce"]
+        except Exception:
+            chall = None
+        assert chall, "server did not challenge the identity claim"
+        spoof.sendall((json.dumps({"t": "identityProof", "sig": "00" * 128}) + "\n").encode())
+        time.sleep(0.6)
+        spoof.sendall((json.dumps({"t": "msg", "from": ida, "fromName": "Alpha", "text": "SPOOF2"}) + "\n").encode())
+        time.sleep(1.0)
+        spoof.close()
+        assert not _has_message(b, "SPOOF2"), "message with a bogus identity signature leaked through"
+        print("OK  inbound spoof dropped (friend cert but wrong signature)")
+
         # Persistence: B's history file contains the delivered message.
         hist_path = os.path.join(home_b, ".local", "state", "lanchat", "history.json")
         with open(hist_path) as f:

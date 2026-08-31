@@ -190,7 +190,12 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
   decoupled from the cosmetic display name. Renaming never breaks a friend link.
 - **Peer verification** — when connecting, the peer's cert fingerprint is
   checked against the one you friended, preventing impersonation. The same
-  check pins file downloads to the sender's identity.
+  check pins file downloads to the sender's identity. On **inbound**
+  connections (the peer dials you), identity is proven by challenge-response
+  (1.2.0): the dialer must sign a random nonce with the private key matching
+  its claimed fingerprint before any of its messages are trusted. A stranger
+  who harvests a friend's fingerprint (broadcast in the open) but not its key
+  cannot impersonate them.
 - **Access** — discovery is open (any LAN machine is visible); the
   friend/handshake gates messaging. Only confirmed friends (or peers you've
   requested) can reach you.
