@@ -1659,10 +1659,14 @@ def stdin_loop() -> None:
                 _diag("accept-notify-failed", peer=pid[:12], name=pname, retrying=True)
         elif kind == "rejectFriend":
             pid = str(cmd.get("id", ""))
+            # Rejecting = declining the relationship: send the reject notice and
+            # REMOVE the peer from our friend list (no lingering pending record),
+            # which emits a friends event so the UI reconciles the notification
+            # banner and drops the request.
             send_control(pid, "friendReject")
-            # Discard the held messages; they were declined.
             with _pending_lock:
                 _pending_first.pop(pid, None)
+            unfriend(pid)
             _emit({"event": "friend-rejected", "id": pid})
             _diag("rejected-friend-request", peer=pid[:12])
         elif kind == "unfriend":

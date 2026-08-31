@@ -500,13 +500,17 @@ QtObject {
       break
 
     case "friend-accepted":
-      lanchat.statusMessage = (obj.name || "Peer") + " is now a friend"
-      lanchat.statusTimer.restart()
+      // Accepted -> relationship confirmed; the notifications banner drops the
+      // request via the friends-event reconcile. Nothing to show here.
       break
 
     case "friend-rejected":
-      lanchat.statusMessage = (obj.name || "Peer") + " declined your request"
-      lanchat.statusTimer.restart()
+      // A request was declined (by us or by them). Drop it from the
+      // notifications list directly so it clears immediately, independent of
+      // the friends-event reconcile. No global status banner.
+      lanchat.friendRequests = lanchat.friendRequests.filter(function(r) {
+        return r.peerId !== (obj.id || obj.peerId)
+      })
       break
 
     case "friend-request": {
