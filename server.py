@@ -1275,34 +1275,99 @@ def get_attachment(file_id: str):
         return None
 
 
+def _http_response(sock, path: str):
+    """Send a GET over a connected TLS socket and read status + headers.
+
+    Returns (code, headers, content_length, body_prefix) where body_prefix is
+    any body bytes already read with the headers. The remaining body is read
+    from the socket by the caller (streamed), so we never buffer a whole file.
+    """
+    sock.sendall(("GET %s HTTP/1.0\r\nHost: lanchat\r\nConnection: close\r\n\r\n" % path).encode())
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        buf += chunk
+    head, _, rest = buf.partition(b"\r\n\r\n")
+    lines = head.split(b"\r\n")
+    status = lines[0].decode("latin-1", "replace") if lines else ""
+    parts = status.split(" ")
+    code = int(parts[1]) if len(parts) > 1 else 0
+    headers = {}
+    for ln in lines[1:]:
+        if b":" in ln:
+            k, _, v = ln.partition(b":")
+            headers[k.strip().lower()] = v.strip().decode("latin-1", "replace")
+    clen = 0
+    try:
+        clen = int(headers.get("content-length") or 0)
+    except (TypeError, ValueError):
+        clen = 0
+    return code, headers, clen, rest
+
+
 def _download_attachment(peer: dict, file_id: str, save_to: str,
-                         expected_sha256: str = "", mid: str = "") -> bool:
+                         expected_sha256: str = "", mid: str = "",
+                         expected_fingerprint: str = "") -> bool:
     """Receiver fetches a file from a peer's HTTPS server and saves it.
 
-    Streams in chunks (never buffers the whole file in memory), writes to a
-    temp file that is atomically renamed on success, verifies the sender's
-    sha256 when provided, and emits progress/saved events from the calling
-    thread. The acceptAttachment handler runs this in a background thread so a
-    large transfer never blocks the daemon's message/presence loop.
+    The TLS connection's cert fingerprint is verified against the peer's true
+    identity (expected_fingerprint = the friend's cert fingerprint), exactly as
+    the message transport does — closing the previous unauthenticated gap. The
+    body is streamed to a temp file that is atomically renamed on success, the
+    sender's sha256 is verified when provided, and progress/saved events are
+    emitted from the calling thread. The acceptAttachment handler runs this in a
+    background thread so a large transfer never blocks the message/presence loop.
     """
-    import urllib.error
-    import urllib.request
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE  # fingerprint-verified peer already
-    url = "https://%s:%d/attachment?fileId=%s&token=%s" % (
-        peer["address"], peer.get("httpPort") or http_port(), file_id, CONFIG.get("token"))
+    addr = peer.get("address", "?")
+    hport = peer.get("httpPort") or http_port()
+    name = str(peer.get("name") or "?")
     tmp = save_to + ".part"
+    s = None
     try:
+        s = _tls_connect_host(addr, hport, name, expected_fingerprint=expected_fingerprint)
+        if s is None:
+            _log("attachment-download-rejected peer=%s file=%s err=untrusted-cert"
+                 % (name, os.path.basename(save_to)))
+            _emit({"event": "attachment-saved", "ok": False, "path": save_to,
+                   "mid": mid, "fileId": file_id, "error": "sender certificate not trusted"})
+            return False
+        s.settimeout(60)
+        code, headers, clen, prefix = _http_response(
+            s, "/attachment?fileId=%s&token=%s" % (file_id, CONFIG.get("token")))
+        if code != 200:
+            _log("attachment-download-failed peer=%s file=%s http=%s"
+                 % (name, os.path.basename(save_to), code))
+            _emit({"event": "attachment-saved", "ok": False, "path": save_to,
+                   "mid": mid, "fileId": file_id, "error": "sender returned HTTP %s" % code})
+            return False
         os.makedirs(os.path.dirname(save_to) or ".", exist_ok=True)
         h = hashlib.sha256()
         got = 0
-        total = 0
-        with urllib.request.urlopen(url, timeout=60, context=ctx) as resp:
-            total = int(resp.headers.get("Content-Length") or 0)
-            with open(tmp, "wb") as f:
+        total = clen
+        with open(tmp, "wb") as f:
+            # Flush any bytes already read with the headers, then stream the rest.
+            if prefix:
+                f.write(prefix)
+                h.update(prefix)
+                got += len(prefix)
+                _emit({"event": "attachment-progress", "fileId": file_id, "mid": mid,
+                       "bytes": got, "total": total})
+            if clen > 0:
+                while got < clen:
+                    chunk = s.recv(min(65536, clen - got))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    h.update(chunk)
+                    got += len(chunk)
+                    _emit({"event": "attachment-progress", "fileId": file_id, "mid": mid,
+                           "bytes": got, "total": total})
+            else:
+                # No Content-Length: read until the server closes the connection.
                 while True:
-                    chunk = resp.read(65536)
+                    chunk = s.recv(65536)
                     if not chunk:
                         break
                     f.write(chunk)
@@ -1325,24 +1390,26 @@ def _download_attachment(peer: dict, file_id: str, save_to: str,
     except Exception as e:
         _remove_file(tmp)
         _log("attachment-download-failed peer=%s file=%s err=%s"
-             % (peer.get("name"), os.path.basename(save_to), e))
+             % (name, os.path.basename(save_to), e))
         _emit({"event": "attachment-saved", "ok": False, "path": save_to,
                "mid": mid, "fileId": file_id, "error": str(e)})
         return False
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except OSError:
+                pass
 
 
-def _tls_connect(peer: dict, expected_fingerprint: str = ""):
-    """Connect to a peer over TLS and verify their cert fingerprint.
-
-    Self-signed certs are expected, so we do NOT verify against a CA — instead
-    we check the peer's cert fingerprint matches what we friended/expect. This
-    is the LocalSend-style trust model: the fingerprint is the identity.
-    Returns the wrapped socket, or None on failure/mismatch.
-    """
-    addr = peer.get("address", "?")
-    pport = peer.get("port", "?")
+def _tls_connect_host(addr: str, port: int, name: str, expected_fingerprint: str = ""):
+    """Open a TLS connection to addr:port and verify the peer's cert
+    fingerprint. Self-signed certs are expected, so we do NOT verify against a
+    CA — instead we check the peer's cert fingerprint matches the identity we
+    friended/expect (LocalSend-style trust model: fingerprint = identity).
+    Returns the wrapped socket, or None on failure/mismatch."""
     try:
-        raw = socket.create_connection((addr, pport), timeout=5)
+        raw = socket.create_connection((addr, port), timeout=5)
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE  # we do fingerprint verification ourselves
@@ -1351,20 +1418,26 @@ def _tls_connect(peer: dict, expected_fingerprint: str = ""):
             der = s.getpeercert(binary_form=True)
             if not der:
                 s.close()
-                _log("tls-connect-failed peer=%s addr=%s:%s err=no-cert" % (peer.get("name"), addr, pport))
+                _log("tls-connect-failed peer=%s addr=%s:%s err=no-cert" % (name, addr, port))
                 return None
             actual = hashlib.sha256(der).hexdigest()
             if actual != expected_fingerprint:
                 s.close()
-                _log("tls-connect-failed peer=%s addr=%s:%s err=fingerprint-mismatch" % (peer.get("name"), addr, pport))
+                _log("tls-connect-failed peer=%s addr=%s:%s err=fingerprint-mismatch" % (name, addr, port))
                 return None
         return s
     except OSError as e:
-        _log("tls-connect-failed peer=%s addr=%s:%s err=%s" % (peer.get("name"), addr, pport, e))
+        _log("tls-connect-failed peer=%s addr=%s:%s err=%s" % (name, addr, port, e))
         return None
     except Exception as e:
-        _log("tls-connect-failed peer=%s addr=%s:%s err=%s" % (peer.get("name"), addr, pport, e))
+        _log("tls-connect-failed peer=%s addr=%s:%s err=%s" % (name, addr, port, e))
         return None
+
+
+def _tls_connect(peer: dict, expected_fingerprint: str = ""):
+    """TLS-connect to a peer's message port, verifying their cert fingerprint."""
+    return _tls_connect_host(
+        peer.get("address", "?"), peer.get("port", "?"), str(peer.get("name") or "?"), expected_fingerprint)
 
 
 def send_message(peer_id: str, text: str, friend_request: bool = False, attachment: dict = None) -> bool:
@@ -1643,13 +1716,17 @@ def stdin_loop() -> None:
             name = _safe_filename(str(cmd.get("name", "download")))
             mid = str(cmd.get("mid", ""))
             sha256 = str(cmd.get("sha256", ""))
+            # The sender's `from` id is their cert fingerprint — the same
+            # identity the message transport verifies against. Use it to pin
+            # the download's TLS cert too (closes the unauthenticated gap).
+            fingerprint = str(cmd.get("from", ""))
             save_to = os.path.join(CONFIG.get("downloadDir", os.path.expanduser("~/Downloads")), name)
             # Run the transfer off the stdin loop so a large file never blocks
             # message processing / presence. Progress + completion events come
             # back from the download thread.
             threading.Thread(
                 target=_download_attachment,
-                args=(peer, file_id, save_to, sha256, mid),
+                args=(peer, file_id, save_to, sha256, mid, fingerprint),
                 daemon=True,
             ).start()
         elif kind == "list":
