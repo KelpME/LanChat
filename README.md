@@ -75,24 +75,19 @@ systemctl --user status lanchat        # is the daemon running?
 systemctl --user restart lanchat       # restart it
 ```
 
-**Install is fully automatic — no manual step, no sudo.** On first run the
-shell runs `lanchat-ensure-systemd.py`, which installs the unit (shipped at
-`systemd/lanchat.service`) into `~/.config/systemd/user/`, enables it, and
-starts it. All user-level, so no root is needed. (If you ever need to do it by
-hand: `make systemd-install`.)
-
-**One-time firewall step (needs sudo).** To be reachable from other machines on
-your LAN, lanchat's port (4812, udp+tcp) must be open inbound — and it's
-typically blocked by a default firewall. Open it once:
+**Install is a single command** (needs sudo once for the firewall step). Lanchat
+needs its port (4812, udp+tcp) reachable inbound from the LAN — for discovery,
+friend requests, and messaging — and Omarchy ships with the firewall closed.
+`make systemd-install` handles everything: it installs the systemd unit, and
+opens **UDP 4812 + TCP 4812 to your LAN subnet only** (e.g. `192.168.1.0/24`,
+auto-detected) — never the internet:
 
 ```bash
-make firewall-open   # prompts for sudo once, installs a scoped sudoers rule, opens 4812 to the LAN
+make systemd-install   # prompts for sudo once: enables daemon + opens 4812 to the LAN
 ```
 
-This installs a **scoped sudoers rule** that lets only lanchat's port 4812 be
-managed (no password afterward), and opens **UDP 4812 + TCP 4812 to your LAN
-subnet only** (e.g. `192.168.1.0/24`) — never the internet. It detects your LAN
-subnet automatically; nothing is hardcoded. To close the port later:
+The firewall part installs a **scoped sudoers rule** so only lanchat's port 4812
+can be managed (no password afterward). To close the port later:
 `make firewall-close`. A full `make systemd-uninstall` also closes it.
 
 The shell no longer spawns `server.py` directly. Instead it runs a tiny

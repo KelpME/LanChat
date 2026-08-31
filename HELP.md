@@ -162,11 +162,15 @@ If a machine isn't showing up in your peer list:
 1. **Is its daemon running?** `systemctl --user status lanchat` on that machine
    (or look for the red bar icon). A machine that's "Discoverable" but whose
    daemon is down won't broadcast at all.
-2. **Is it on the same network?** Both machines must be on the same LAN
+2. **Is its firewall port open?** Omarchy ships with the firewall closed, and
+   lanchat needs port 4812 (udp+tcp) reachable inbound from the LAN for
+   discovery, friend requests, and messaging. Run `make systemd-install` (or
+   `make firewall-open`) once on that machine — it opens 4812 to the LAN only.
+3. **Is it on the same network?** Both machines must be on the same LAN
    (same subnet) for discovery broadcasts to reach each other.
-3. **Is Discoverable on?** In **Settings**, switch on **Discoverable (open
+4. **Is Discoverable on?** In **Settings**, switch on **Discoverable (open
    mode)** — it's off by default. Peers appear within ~3 seconds of it being on.
-4. **Both on the same version?** Update each machine with
+5. **Both on the same version?** Update each machine with
    `omarchy plugin update KelpME.lanchat --yes`, then restart the shell.
 
 To **fully uninstall** (remove the daemon, systemd unit, and all lanchat data):

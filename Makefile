@@ -59,14 +59,17 @@ test-discovery-visibility: ## run test_discovery_visibility.py (broadcast side o
 test-systemd-control: ## run test_systemd_control.py (systemd unix-socket control channel + bridge)
 	@$(PY) test_systemd_control.py
 
-## systemd-install: install + enable the lanchat systemd user unit
-systemd-install: ## copy systemd/lanchat.service to ~/.config/systemd/user and enable it
+## systemd-install: install + enable the lanchat systemd unit AND open the firewall port
+## This is the full install: daemon under systemd + lanchat 4812 opened to the LAN
+## (the port is REQUIRED for discovery, friend requests, and messaging to work —
+## the outbound dial still needs the recipient's 4812 reachable inbound).
+systemd-install: firewall-open ## copy systemd/lanchat.service, enable it, and open 4812 to the LAN
 	@mkdir -p $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user
 	@cp systemd/lanchat.service $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.service
 	@systemctl --user daemon-reload
 	@systemctl --user enable --now lanchat.service
 	@echo "Lanchat daemon now runs under systemd. Status: systemctl --user status lanchat"
-	@echo "TIP: run 'make firewall-open' once to open lanchat's port to the LAN (needs sudo)."
+	@echo "Firewall port 4812 (udp+tcp) is open to the LAN."
 
 ## firewall-open: open lanchat's port (4812) to the LAN via ufw (one-time, needs sudo)
 ## Installs a scoped sudoers rule so only lanchat's port 4812 can be managed,
