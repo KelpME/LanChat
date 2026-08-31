@@ -36,6 +36,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -70,6 +71,9 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # both machines can verify they're running the same code; falls back to the
 # manifest version when git isn't available (e.g. a bare copy).
 #
+# 1.2.3 — at-rest encryption: message history is now AES-256-GCM encrypted with
+#   a dedicated 0600 key, so history.json isn't readable as plaintext. Protects
+#   the file in isolation (backup/copy/sync); not against full device compromise.
 # 1.2.2 — transport hardening: bound per-connection buffered input (512KB) and
 #   concurrent inbound connections (64) so a flooding LAN peer can't exhaust
 #   memory or threads.
@@ -88,7 +92,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
 #   over the existing socket). Old and new transports do not interoperate; both
 #   machines must run >= 1.1.0.
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 
 
 def _git_version() -> str:
@@ -471,19 +475,120 @@ def http_bind() -> str:
 # Message history (per-machine persistence)
 # --------------------------------------------------------------------------
 
+# At-rest encryption (1.2.3): history is encrypted with AES-256-GCM so the file
+# on disk isn't human-readable. The key is a dedicated random 32-byte key at
+# 0600 (HISTORY_KEY). This protects against the history file being read in
+# isolation (a backup, a casual copy, sync, a grabbed file) — NOT against full
+# compromise of the machine (an attacker who can read history.key can also read
+# history.json). If `cryptography` is unavailable, it degrades to plaintext.
+HISTORY_MAGIC = b"LANCHIST1"   # 9-byte magic prefix, kept simple
+HISTORY_KEY = os.path.join(STATE_DIR, "history.key")
+_hist_crypto = None   # True once we know cryptography is usable (lazy)
+
 _history = []
 _hist_lock = threading.Lock()
-_seen_mids = set()      # mids already appended to history (inbound dedupe)
+_seen_mids = set()    # mids already appended to history (inbound dedupe)
+
+
+def _hist_crypto_ok() -> bool:
+    global _hist_crypto
+    if _hist_crypto is None:
+        try:
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _AESGCM
+            _hist_crypto = callable(_AESGCM)  # reference so ruff keeps the import
+        except Exception:
+            _hist_crypto = False
+    return _hist_crypto
+
+
+def _hist_key() -> bytes:
+    """Load or generate the 32-byte AES key (0600)."""
+    if os.path.exists(HISTORY_KEY):
+        with open(HISTORY_KEY, "rb") as f:
+            k = f.read()
+        if len(k) == 32:
+            return k
+    k = secrets.token_bytes(32)
+    os.makedirs(STATE_DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=STATE_DIR, prefix=".hk-")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(k)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, HISTORY_KEY)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return k
+
+
+def _history_encrypt(plain: bytes) -> str:
+    """Encrypt history bytes to a base64 string for storage."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = _hist_key()
+    nonce = secrets.token_bytes(12)
+    ct = AESGCM(key).encrypt(nonce, plain, None)
+    import base64
+    return base64.b64encode(HISTORY_MAGIC + nonce + ct).decode("ascii")
+
+
+def _history_decrypt(b64: str) -> bytes:
+    """Decrypt a base64 history string back to bytes, or raise on failure."""
+    import base64
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    raw = base64.b64decode(b64)
+    if raw[:9] != HISTORY_MAGIC or len(raw) < 9 + 12 + 16:
+        raise ValueError("bad history blob")
+    nonce = raw[9:21]
+    ct = raw[21:]
+    return AESGCM(_hist_key()).decrypt(nonce, ct, None)
+
+
+def _history_write_bytes(data: bytes) -> None:
+    """Atomically write bytes to HISTORY_PATH (binary sibling of atomic_write)."""
+    d = os.path.dirname(HISTORY_PATH) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, HISTORY_PATH)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def load_history() -> None:
     global _history
+    _history = []
+    if not os.path.exists(HISTORY_PATH):
+        return
     try:
         with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            _history = data[-HISTORY_LIMIT:]
-    except (OSError, ValueError):
+            text = f.read()
+    except OSError:
+        return
+    # Try decrypted first (current format), then plaintext (pre-1.2.3).
+    data = None
+    if _hist_crypto_ok() and text:
+        try:
+            data = json.loads(_history_decrypt(text).decode("utf-8"))
+        except Exception:
+            data = None
+    if data is None:
+        try:
+            data = json.loads(text)  # legacy plaintext
+        except (ValueError, OSError):
+            data = None
+    if isinstance(data, list):
+        _history = data[-HISTORY_LIMIT:]
+    else:
         _history = []
 
 
@@ -502,7 +607,11 @@ def append_history(message: dict) -> None:
 def _save_history_locked() -> None:
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
-        atomic_write(HISTORY_PATH, json.dumps(_history, separators=(",", ":")))
+        plain = json.dumps(_history, separators=(",", ":")).encode("utf-8")
+        if _hist_crypto_ok():
+            _history_write_bytes(_history_encrypt(plain).encode("ascii"))
+        else:
+            _history_write_bytes(plain)
     except OSError:
         pass
 

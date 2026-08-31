@@ -227,14 +227,16 @@ def main():
         assert m and m["message"]["text"] == "after flood", "message after flood not delivered"
         print("OK  transport still delivers after flood dropped")
 
-        # Persistence: B's history file contains the delivered message.
+        # Persistence (1.2.3): B's history file is AES-GCM encrypted, so the
+        # delivered message text is NOT readable as plaintext on disk.
         hist_path = os.path.join(home_b, ".local", "state", "lanchat", "history.json")
         with open(hist_path) as f:
-            hist = json.load(f)
-        assert any(m.get("text") == "hello from alpha" for m in hist), "history not persisted"
-        print("OK  history persisted to disk")
+            hist_raw = f.read()
+        assert "hello from alpha" not in hist_raw, "history not encrypted (message visible on disk)"
+        assert hist_raw.startswith("TEFOQ0hJU1Qx"), "history blob missing LANCHIST1 magic"
+        print("OK  history encrypted at rest (message not plaintext on disk)")
 
-        # History reload command returns what's on disk.
+        # History reload command returns what's on disk (decrypted by daemon).
         b.cmd(cmd="history")
         hev = b.wait_event("history")
         assert hev and any(m.get("text") == "hello from alpha" for m in hev["messages"])

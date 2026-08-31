@@ -206,6 +206,10 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 - **Transport hardening** (1.2.2) — per-connection buffered input is bounded
   (512 KB) and concurrent inbound connections are capped (64), so a flooding
   LAN peer can't exhaust memory or threads.
+- **At-rest encryption** (1.2.3) — message history is AES-256-GCM encrypted on
+  disk with a dedicated 0600 key, so `history.json` isn't readable as
+  plaintext. This protects the file in isolation (a backup, a copy, sync);
+  it is not a defense against full compromise of the machine.
 
 > The cert is self-signed (no CA), which is appropriate for LAN peer-to-peer.
 > Because discovery is open, any machine on your LAN can see you and send a
