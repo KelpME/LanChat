@@ -1377,6 +1377,10 @@ def stdin_loop() -> None:
                 _stop_http()
             CONFIG["httpEnabled"] = enabled
             _save_config()
+        elif kind == "recheckSetup":
+            # Re-evaluate inbound reachability and re-emit ready so the UI
+            # can dismiss the setup overlay after the user opens the ports.
+            _emit(_ready_event())
         elif kind == "setApiFullAccess":
             CONFIG["apiFullAccess"] = bool(cmd.get("enabled"))
             _save_config()
@@ -1482,6 +1486,55 @@ def stdin_loop() -> None:
 # Startup
 # --------------------------------------------------------------------------
 
+def _inbound_blocked() -> bool:
+    """Detect whether a deny-inbound firewall (UFW / firewalld) is likely to
+    block LAN peers from reaching us, WITHOUT needing root.
+
+    Checks whether ufw or firewalld is enabled and active. If one is, inbound
+    to the lanchat ports is almost certainly blocked unless an allow rule was
+    added — that's the setup condition we want to surface in the UI.
+
+    Non-root users can't query UFW's full status ("need root"), but that's
+    itself a signal: if UFW is installed and the status query errors with
+    "need root", it's more likely active than not, and its default inbound
+    policy is deny. We treat "installed + status not verifiably inactive" as
+    needs-setup.
+    """
+    import subprocess as _sp
+    # UFW: active if its systemd unit is running, or status says active.
+    try:
+        r = _sp.run(["systemctl", "is-active", "ufw"],
+                    capture_output=True, text=True, timeout=2)
+        if (r.stdout or "").strip() == "active":
+            return True
+    except (OSError, _sp.SubprocessError):
+        pass
+    try:
+        r = _sp.run(["ufw", "status"], capture_output=True, text=True, timeout=2)
+        out = (r.stdout or "").strip().lower()
+        err = (r.stderr or "").strip().lower()
+        if "status: active" in out:
+            return True
+        if "inactive" in out:
+            return False
+        # "ERROR: You need to be root" means UFW exists; without an explicit
+        # inactive signal we can't rule it out, so flag for setup.
+        if "need to be root" in err or "need root" in out + err:
+            return True
+    except (OSError, _sp.SubprocessError):
+        pass
+    # firewalld: running if its systemd unit is active.
+    try:
+        r = _sp.run(["systemctl", "is-active", "firewalld"],
+                    capture_output=True, text=True, timeout=2)
+        if (r.stdout or "").strip() == "active":
+            return True
+    except (OSError, _sp.SubprocessError):
+        pass
+    # Neither firewall present/enabled — assume inbound is fine.
+    return False
+
+
 def _ready_event() -> dict:
     return {
         "event": "ready",
@@ -1504,6 +1557,7 @@ def _ready_event() -> dict:
         "readReceiptsEnabled": read_receipts_enabled(),
         "showReadReceipts": show_read_receipts(),
         "logPath": _LOG_PATH,
+        "needsSetup": _inbound_blocked(),
     }
 
 

@@ -1573,6 +1573,62 @@ Panel {
           elide: Text.ElideRight
         }
       }
+
+      // ---- first-run setup overlay: a deny-inbound firewall is likely
+      // blocking LAN peers from reaching us. Guide the user to open the ports.
+      Rectangle {
+        visible: Lanchat.needsSetup
+        anchors.fill: parent
+        color: Color.popups.background
+        z: 100
+
+        Column {
+          anchors.centerIn: parent
+          width: parent.width - Style.space(48)
+          spacing: Style.spacing.md
+
+          Text {
+            width: parent.width
+            text: "Lanchat can send, but may not receive"
+            color: Color.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.title
+            font.weight: Font.Bold
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+          }
+
+          Text {
+            width: parent.width
+            text: "A firewall (UFW/firewalld) is active and may be blocking peers "
+              + "from connecting to this machine. Open the lanchat ports once:"
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            wrapMode: Text.Wrap
+            horizontalAlignment: Text.AlignHCenter
+          }
+
+          Text {
+            width: parent.width
+            text: "sudo bash scripts/setup-firewall.sh"
+            color: Color.accent
+            font.family: "monospace"
+            font.pixelSize: Style.font.body
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+          }
+
+          Button {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "I've run it — re-check"
+            onClicked: {
+              // Ask the daemon to re-evaluate and re-emit ready with needsSetup.
+              Lanchat.recheckSetup()
+            }
+          }
+        }
+      }
     }
   }
 }
