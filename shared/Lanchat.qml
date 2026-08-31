@@ -69,6 +69,10 @@ QtObject {
   function logPath() {
     return lanchat.logPathValue
   }
+  property string setupScriptPathValue: ""
+  function setupScriptPath() {
+    return lanchat.setupScriptPathValue
+  }
 
   function startDaemon() {
     if (daemon.running) return
@@ -349,6 +353,7 @@ QtObject {
       if (obj.showReadReceipts !== undefined) lanchat.showReadReceipts = obj.showReadReceipts
       if (obj.logPath) lanchat.logPathValue = obj.logPath
       if (obj.needsSetup !== undefined) lanchat.needsSetup = obj.needsSetup
+      if (obj.setupScriptPath) lanchat.setupScriptPathValue = obj.setupScriptPath
       lanchat.refreshHistory()
       lanchat.refreshPeers()
       break

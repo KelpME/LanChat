@@ -208,6 +208,16 @@ Panel {
     Quickshell.execDetached(["xdg-open", Lanchat.logPath()])
   }
 
+  // Launch a terminal running the firewall setup command, so the user just
+  // presses Enter (sudo will prompt for their password in that terminal).
+  function runSetup() {
+    var cmd = "sudo bash " + Lanchat.setupScriptPath()
+    // Pick the first installed terminal emulator via a shell command -v probe.
+    Util.execArgv(["bash", "-lc",
+      'for t in foot alacritty kitty konsole gnome-terminal xterm x-terminal-emulator; do command -v "$t" >/dev/null 2>&1 && { exec "$t" -e bash -c "' +
+      cmd + '; echo; read -p \'Press Enter to close...\'"; break; }; done'])
+  }
+
   // Last component of a path (folder name).
   function pathBasename(path) {
     var p = String(path || "")
@@ -1748,6 +1758,12 @@ Panel {
               anchors.horizontalCenter: parent.horizontalCenter
               text: "\uF0C5 Copy command"  // nf-fa-copy
               onClicked: root.copyToClipboard("sudo bash scripts/setup-firewall.sh")
+            }
+
+            Button {
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: "\u2387 Open terminal"  // nf-fa-terminal
+              onClicked: root.runSetup()
             }
 
             Button {

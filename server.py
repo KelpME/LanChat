@@ -1558,6 +1558,7 @@ def _ready_event() -> dict:
         "showReadReceipts": show_read_receipts(),
         "logPath": _LOG_PATH,
         "needsSetup": _inbound_blocked(),
+        "setupScriptPath": os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "setup-firewall.sh"),
     }
 
 
