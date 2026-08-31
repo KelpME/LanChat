@@ -314,6 +314,17 @@ def main():
         assert synced == ["RealName"], "Unknown friend name not synced: %r" % synced
         print("OK  Unknown friend name syncs to the real name once discovered")
 
+        # display_name must NEVER return a bare hostname for a missing/null
+        # displayName — always a friendly skateboard name (or a custom name).
+        import server as _srv3
+        for cfg in ({}, {"displayName": None}, {"displayName": ""}):
+            _srv3.CONFIG = cfg
+            n = _srv3.display_name()
+            assert n and n != socket.gethostname(), "display_name fell back to hostname for %r" % cfg
+        _srv3.CONFIG = {"displayName": "MyCustom"}
+        assert _srv3.display_name() == "MyCustom", "custom display name not preserved"
+        print("OK  display_name never falls back to the bare hostname")
+
         # History reload command returns what's on disk (decrypted by daemon).
         b.cmd(cmd="history")
         hev = b.wait_event("history")

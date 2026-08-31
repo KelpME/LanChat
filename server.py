@@ -262,6 +262,13 @@ def load_config() -> None:
     #                with the requester's verified identity) or rejected.
     CONFIG.setdefault("visibility", "private")
     CONFIG.setdefault("acceptRequests", True)
+    # Default self-name: a deterministic friendly {modifier}{trick} name. If a
+    # config was written without a displayName (or it's null/empty), fill in a
+    # skateboard name — NEVER fall back to the bare hostname (a machine name is
+    # not a friendly display name). Persisted so it sticks.
+    if not CONFIG.get("displayName"):
+        CONFIG["displayName"] = friendly_name(socket.gethostname())
+        _save_config()
     # Full API access to chat data (read history/peers) vs send-only.
     # When False, the agent can send messages to friends but cannot read
     # history, list peers, or download attachments.
@@ -381,7 +388,13 @@ def cert_fingerprint() -> str:
 
 
 def display_name() -> str:
-    return str(CONFIG.get("displayName") or socket.gethostname())
+    # Never return a bare hostname as the display name — always a friendly
+    # skateboard name (or the user's custom name). load_config ensures a
+    # friendly default is persisted, so this fallback is only a safety net.
+    name = CONFIG.get("displayName")
+    if name:
+        return str(name)
+    return friendly_name(socket.gethostname())
 
 
 # --------------------------------------------------------------------------
