@@ -14,7 +14,10 @@ RUFF    ?= ruff
 TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py
 PYFILES := server.py naming.py $(TESTS) test_peer.py
 
-.PHONY: help test lint fmt check qml syntax clean typecheck
+# Bare `make` (no target) shows the help listing.
+.DEFAULT_GOAL := help
+
+.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info
 
 ## help: list all targets and what they do
 help: ## (default) show this help
