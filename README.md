@@ -81,6 +81,20 @@ shell runs `lanchat-ensure-systemd.py`, which installs the unit (shipped at
 starts it. All user-level, so no root is needed. (If you ever need to do it by
 hand: `make systemd-install`.)
 
+**One-time firewall step (needs sudo).** To be reachable from other machines on
+your LAN, lanchat's port (4812, udp+tcp) must be open inbound — and it's
+typically blocked by a default firewall. Open it once:
+
+```bash
+make firewall-open   # prompts for sudo once, installs a scoped sudoers rule, opens 4812 to the LAN
+```
+
+This installs a **scoped sudoers rule** that lets only lanchat's port 4812 be
+managed (no password afterward), and opens **UDP 4812 + TCP 4812 to your LAN
+subnet only** (e.g. `192.168.1.0/24`) — never the internet. It detects your LAN
+subnet automatically; nothing is hardcoded. To close the port later:
+`make firewall-close`. A full `make systemd-uninstall` also closes it.
+
 The shell no longer spawns `server.py` directly. Instead it runs a tiny
 `lanchat-bridge.py` that connects to the daemon's unix-socket control channel
 (`$XDG_RUNTIME_DIR/lanchat.sock`) and proxies commands/events, so the QML

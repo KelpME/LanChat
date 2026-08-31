@@ -17,7 +17,7 @@ PYFILES := server.py naming.py $(TESTS) test_peer.py
 # Bare `make` (no target) shows the help listing.
 .DEFAULT_GOAL := help
 
-.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info help-html test-systemd-control systemd-install systemd-status systemd-uninstall
+.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info help-html test-systemd-control systemd-install systemd-status systemd-uninstall firewall-open firewall-close
 
 ## help: list all targets and what they do
 help: ## (default) show this help
@@ -66,6 +66,22 @@ systemd-install: ## copy systemd/lanchat.service to ~/.config/systemd/user and e
 	@systemctl --user daemon-reload
 	@systemctl --user enable --now lanchat.service
 	@echo "Lanchat daemon now runs under systemd. Status: systemctl --user status lanchat"
+	@echo "TIP: run 'make firewall-open' once to open lanchat's port to the LAN (needs sudo)."
+
+## firewall-open: open lanchat's port (4812) to the LAN via ufw (one-time, needs sudo)
+## Installs a scoped sudoers rule so only lanchat's port 4812 can be managed,
+## then opens UDP+TCP 4812 to the LAN subnet (never the internet).
+firewall-open: ## open lanchat 4812 to the LAN (install scoped sudoers rule + open port)
+	@echo "Installing scoped sudoers rule (this prompts for your sudo password once)..."
+	@sudo scripts/lanchat-sudoers.sh
+	@echo "Opening lanchat port 4812 to the LAN..."
+	@scripts/lanchat-firewall.sh open
+	@echo "Done. Lanchat is now reachable from your LAN (port 4812 udp+tcp)."
+
+## firewall-close: remove lanchat's port rule (keeps the sudoers rule)
+firewall-close: ## close lanchat 4812 to the LAN (remove the ufw rules)
+	@scripts/lanchat-firewall.sh close
+	@echo "Lanchat port 4812 closed."
 
 ## systemd-status: show the daemon's systemd state
 systemd-status: ## systemctl --user status lanchat (is the daemon running?)
@@ -77,6 +93,8 @@ systemd-uninstall: ## FULL uninstall: stop the daemon, remove the systemd unit, 
 	@-rm -f $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.service
 	@systemctl --user daemon-reload
 	@echo "Lanchat systemd unit removed."
+	@echo "Closing lanchat's firewall port (best-effort)..."
+	@-scripts/lanchat-firewall.sh close 2>/dev/null || true
 	@echo "Wiping user data:"
 	@-rm -rf $${XDG_CONFIG_HOME:-$$HOME/.config}/omarchy/lanchat.json 2>/dev/null; echo "  removed config (lanchat.json)"
 	@-rm -rf $${XDG_CONFIG_HOME:-$$HOME/.config}/omarchy/lanchat-certs 2>/dev/null; echo "  removed TLS certs (lanchat-certs/)"
