@@ -532,15 +532,15 @@ Panel {
               ListView {
                 id: peerList
                 width: parent.width
-                anchors.top: parent.top
-                anchors.bottom: notifBanner.top
+                anchors.top: peersOnlineBar.bottom
+                anchors.topMargin: Style.spacing.sm
+                anchors.leftMargin: Style.spacing.sm
+                anchors.rightMargin: Style.spacing.sm
+                anchors.bottomMargin: Style.spacing.xs
+                anchors.bottom: settings.top
                 clip: true
                 model: Lanchat.displayPeers
                 spacing: Style.spacing.xs
-                anchors.topMargin: Style.spacing.sm
-                anchors.bottomMargin: Style.spacing.xs
-                anchors.leftMargin: Style.spacing.sm
-                anchors.rightMargin: Style.spacing.sm
 
                 delegate: Rectangle {
                   required property var modelData
@@ -670,7 +670,8 @@ Panel {
                 id: onboardingBanner
                 width: parent.width
                 height: root.showOnboarding ? onbContent.implicitHeight + Style.space(12) : 0
-                anchors.bottom: notifBanner.top
+                anchors.top: parent.top
+                anchors.topMargin: Style.spacing.xs
                 visible: root.showOnboarding
                 clip: true
 
@@ -722,7 +723,8 @@ Panel {
                 height: Lanchat.friendRequests.length === 0 ? 0
                        : root.notifExpanded ? Style.space(24) + notifRows.implicitHeight + Style.spacing.xs
                        : Style.space(24)
-                anchors.bottom: peersOnlineBar.top
+                anchors.top: onboardingBanner.bottom
+                anchors.topMargin: Style.spacing.xs
                 visible: Lanchat.friendRequests.length > 0
                 clip: true
 
@@ -847,7 +849,8 @@ Panel {
                 height: Style.space(26)
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.bottom: settings.top
+                anchors.top: notifBanner.bottom
+                anchors.topMargin: Style.spacing.xs
 
                 Text {
                   anchors.left: parent.left
