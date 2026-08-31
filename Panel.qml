@@ -1619,12 +1619,22 @@ Panel {
             wrapMode: Text.Wrap
           }
 
-          Button {
+          Row {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "I've run it — re-check"
-            onClicked: {
-              // Ask the daemon to re-evaluate and re-emit ready with needsSetup.
-              Lanchat.recheckSetup()
+            spacing: Style.spacing.md
+
+            // Copy the setup command so the user can paste it into a terminal.
+            Button {
+              text: "\uF0C5 Copy command"  // nf-fa-copy
+              onClicked: root.copyToClipboard("sudo bash scripts/setup-firewall.sh")
+            }
+
+            Button {
+              text: "I've run it — re-check"
+              onClicked: {
+                // Ask the daemon to re-evaluate and re-emit ready with needsSetup.
+                Lanchat.recheckSetup()
+              }
             }
           }
         }
