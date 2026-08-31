@@ -40,6 +40,9 @@ QtObject {
   property int httpPort: 4814
   property bool apiFullAccess: false
   property string panelSize: "medium"
+  // (1.3) Discovery/request model.
+  property string visibility: "private"   // "open" | "private"
+  property bool acceptRequests: true
   // Manual pixel override for panel size; 0 = follow the panelSize preset.
   property int customW: 0
   property int customH: 0
@@ -311,6 +314,17 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setOnline", online: on }) + "\n")
   }
 
+  // (1.3) Add a confirmed friend directly by their cert fingerprint. Optional
+  // address/port help the daemon dial immediately; without them the friend's
+  // address is learned from their next hello (confirmed friends are accepted
+  // in private mode).
+  function addFriendByFingerprint(id, address, port) {
+    var fid = String(id || "").trim()
+    if (!fid) return
+    daemon.write(JSON.stringify({ cmd: "setFriend", id: fid,
+      address: String(address || "").trim(), port: port || 0 }) + "\n")
+  }
+
   // Accept/reject an incoming friend request.
   function acceptFriend(id) {
     daemon.write(JSON.stringify({ cmd: "acceptFriend", id: id }) + "\n")
@@ -359,6 +373,20 @@ QtObject {
   function setApiFullAccess(on) {
     apiFullAccess = on
     daemon.write(JSON.stringify({ cmd: "setApiFullAccess", enabled: on }) + "\n")
+  }
+
+  // (1.3) Set discovery visibility: "open" (broadcast, discoverable) or
+  // "private" (invisible). Takes effect immediately in the daemon's UDP loop.
+  function setVisibility(v) {
+    var val = (v === "open") ? "open" : "private"
+    visibility = val
+    daemon.write(JSON.stringify({ cmd: "setVisibility", visibility: val }) + "\n")
+  }
+
+  // (1.3) Toggle whether inbound friend requests are accepted.
+  function setAcceptRequests(on) {
+    acceptRequests = !!on
+    daemon.write(JSON.stringify({ cmd: "setAcceptRequests", enabled: !!on }) + "\n")
   }
 
   // Set the panel size: "small" | "medium" | "large" | "xl" | "full".
@@ -461,6 +489,8 @@ QtObject {
       if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
       if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
       if (obj.panelSize !== undefined) lanchat.panelSize = obj.panelSize
+      if (obj.visibility !== undefined) lanchat.visibility = obj.visibility
+      if (obj.acceptRequests !== undefined) lanchat.acceptRequests = obj.acceptRequests
       if (obj.customW !== undefined) lanchat.customW = obj.customW
       if (obj.customH !== undefined) lanchat.customH = obj.customH
       if (obj.status !== undefined) lanchat.status = obj.status
@@ -515,6 +545,14 @@ QtObject {
       lanchat.apiFullAccess = obj.enabled === true
       break
 
+    case "visibility":
+      if (obj.visibility) lanchat.visibility = obj.visibility
+      break
+
+    case "accept-requests":
+      lanchat.acceptRequests = obj.enabled === true
+      break
+
     case "http":
       lanchat.httpEnabled = obj.enabled === true
       if (obj.port) lanchat.httpPort = obj.port
@@ -553,7 +591,10 @@ QtObject {
         name: obj.outgoing ? (obj.toName || obj.to || "") : (obj.fromName || obj.from || ""),
         outgoing: !!obj.outgoing,
         ts: obj.ts || Date.now(),
-        mid: obj.mid || ""
+        mid: obj.mid || "",
+        // (1.3) The requester's verified cert fingerprint, so the UI can show
+        // it and require confirmation it matches before accepting.
+        fingerprint: obj.fingerprint || obj.from || ""
       }
       lanchat.upsertFriendRequest(fr)
       break

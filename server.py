@@ -865,11 +865,13 @@ def _udp_listener(sock: socket.socket) -> None:
             if pid == host_id():
                 continue
             # (1.3) Private visibility: we don't respond to unsolicited hello
-            # probes — otherwise anyone who pings our IP learns we exist.
-            # Existing friend connections ride the TCP socket, not UDP, so
-            # ignoring probes doesn't affect established friends. We still
-            # dial OUT to friends by fingerprint (see conn_loop).
-            if visibility() != "open":
+            # probes from strangers — otherwise anyone who pings our IP learns
+            # we exist. BUT a peer we've already added by fingerprint (a
+            # confirmed friend) is trusted: accept their hello so we learn
+            # their address and can dial them. (A stranger spoofing a friend's
+            # id in a hello could poison the peer table, but the TLS
+            # fingerprint check in conn_loop rejects the actual dial.)
+            if visibility() != "open" and not is_friend(pid):
                 continue
             # Prefer the peer's broadcast display name; fall back to a
             # deterministic friendly name derived from its id.
@@ -2282,6 +2284,24 @@ def stdin_loop() -> None:
             _reveal(held)
             if not _notify_accept(pid):
                 _diag("accept-notify-failed", peer=pid[:12], name=pname, retrying=True)
+        elif kind == "setFriend":
+            # (1.3) Add a confirmed friend directly by cert fingerprint (the
+            # private-mode "add by fingerprint" path). Optional address/port
+            # lets conn_loop dial immediately; without them we learn the
+            # friend's address when their hello arrives (they're a confirmed
+            # friend, so private-mode discovery accepts it).
+            pid = str(cmd.get("id", "")).strip()
+            if not pid:
+                _emit({"event": "error", "message": "setFriend requires an id (cert fingerprint)"})
+            else:
+                peer = find_peer(pid)
+                addr = str(cmd.get("address") or (peer or {}).get("address") or "")
+                pname = str(cmd.get("name") or (peer or {}).get("name") or friendly_name(pid))
+                add_friend(pid, addr, pname, confirmed=True)
+                if addr:
+                    upsert_peer(pid, pname, addr, int(cmd.get("port") or (peer or {}).get("port") or DEFAULT_PORT))
+                _emit({"event": "friend-added", "id": pid, "name": pname})
+                _diag("friend-added-by-fingerprint", peer=pid[:12], name=pname, addr=addr)
         elif kind == "rejectFriend":
             pid = str(cmd.get("id", ""))
             # Rejecting = declining the relationship: send the reject notice and

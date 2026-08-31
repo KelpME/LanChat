@@ -276,6 +276,15 @@ def main():
         b.cmd(cmd="setVisibility", visibility="open"); b.wait_event("visibility")
         b.cmd(cmd="setAcceptRequests", enabled=True); b.wait_event("accept-requests")
 
+        # (1.3) Add a friend directly by fingerprint (private-mode path).
+        b.cmd(cmd="setFriend", id=sid2, name="ByFingerprint")
+        fv = b.wait_event("friend-added")
+        assert fv and fv.get("id") == sid2, "setFriend did not add the friend"
+        assert any(f.get("id") == sid2 and f.get("confirmed")
+                   for e in b.events if e.get("event") == "friends" for f in e.get("friends", [])), \
+            "setFriend did not record a confirmed friend"
+        print("OK  add friend by fingerprint (setFriend)")
+
         # History reload command returns what's on disk (decrypted by daemon).
         b.cmd(cmd="history")
         hev = b.wait_event("history")

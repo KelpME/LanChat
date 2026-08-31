@@ -155,6 +155,21 @@ Panel {
   // Whether the friend-request notifications banner is expanded (dropdown).
   property bool notifExpanded: true
 
+  // (1.3) Option-B friend-request accept: when non-empty, the banner row for
+  // this peer shows its verified fingerprint and a "Confirm" button instead of
+  // a blind Accept — the user must confirm the fingerprint matches what they
+  // expected before the request is accepted.
+  property string confirmFrPeerId: ""
+  property string confirmFrFingerprint: ""
+  function beginConfirmFriend(peerId, fingerprint) {
+    root.confirmFrPeerId = peerId
+    root.confirmFrFingerprint = fingerprint || ""
+  }
+  function cancelConfirmFriend() {
+    root.confirmFrPeerId = ""
+    root.confirmFrFingerprint = ""
+  }
+
   // Two-step confirm for the "Clear all chats" action. Resets after a couple
   // of seconds so the button doesn't stay armed.
   property bool confirmClearAll: false
@@ -293,6 +308,14 @@ Panel {
   }
   function rejectFriend(id) {
     Lanchat.rejectFriend(id)
+  }
+
+  // (1.3) Read the "Add friend by fingerprint" field and add the friend.
+  function addFriendByFingerprint() {
+    var fid = addFrInput ? addFrInput.text.trim() : ""
+    if (!fid) return
+    Lanchat.addFriendByFingerprint(fid)
+    addFrInput.text = ""
   }
 
   // Path to the help document (HELP.md next to the panel).
@@ -702,11 +725,37 @@ Panel {
                         elide: Text.ElideRight
                       }
                       Item { width: Style.space(4) }
+                      // (1.3) Option B: confirm the verified fingerprint before
+                      // accepting. First click on Accept reveals the fingerprint
+                      // + a Confirm button; only Confirm accepts.
+                      Text {
+                        visible: !modelData.outgoing && root.confirmFrPeerId === modelData.peerId
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Fingerprint:\n" + (root.confirmFrFingerprint || modelData.peerId || "").slice(0, 16) + "…"
+                        color: Color.popups.mutedText
+                        font.family: Style.font.mono || Style.font.family
+                        font.pixelSize: Style.font.micro
+                      }
                       Button {
-                        visible: !modelData.outgoing
+                        visible: !modelData.outgoing && root.confirmFrPeerId === modelData.peerId
+                        text: "Confirm"
+                        fontSize: Style.font.caption
+                        onClicked: {
+                          root.acceptFriend(modelData.peerId)
+                          root.cancelConfirmFriend()
+                        }
+                      }
+                      Button {
+                        visible: !modelData.outgoing && root.confirmFrPeerId === modelData.peerId
+                        text: "Back"
+                        fontSize: Style.font.caption
+                        onClicked: root.cancelConfirmFriend()
+                      }
+                      Button {
+                        visible: !modelData.outgoing && root.confirmFrPeerId !== modelData.peerId
                         text: "Accept"
                         fontSize: Style.font.caption
-                        onClicked: root.acceptFriend(modelData.peerId)
+                        onClicked: root.beginConfirmFriend(modelData.peerId, modelData.fingerprint)
                       }
                       Button {
                         visible: !modelData.outgoing
@@ -844,6 +893,47 @@ Panel {
                       anchors.verticalCenter: parent.verticalCenter
                       text: "\uF046"
                       onClicked: Lanchat.regenerateName()
+                    }
+                  }
+
+                  // (1.3) Add a friend by fingerprint (private mode).
+                  Item {
+                    width: parent.width
+                    height: Style.space(30)
+
+                    Text {
+                      id: addFrLabel
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Add friend"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    TextField {
+                      id: addFrInput
+                      anchors.left: addFrLabel.right
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.right: addFrButton.left
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      maximumLength: 128
+                      placeholderText: "cert fingerprint"
+                      horizontalPadding: Style.space(8)
+                      verticalPadding: Style.space(4)
+                      onAccepted: root.addFriendByFingerprint()
+                    }
+
+                    Button {
+                      id: addFrButton
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Add"
+                      onClicked: root.addFriendByFingerprint()
                     }
                   }
 
@@ -1149,6 +1239,77 @@ Panel {
                     PanelToolTip {
                       visible: fullTipHover.containsMouse
                       text: "On = agent can read your chats, peers, and files. Off = send-only."
+                    }
+                  }
+
+                  // (1.3) Visibility row: "open" (discoverable) / "private"
+                  // (invisible on discovery).
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: visTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Discoverable (open mode)"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.visibility === "open"
+                      onToggled: Lanchat.setVisibility(Lanchat.visibility === "open" ? "private" : "open")
+                    }
+
+                    PanelToolTip {
+                      visible: visTipHover.containsMouse
+                      text: "On = broadcast your presence on the LAN (trusted networks). Off = invisible; connect by adding a fingerprint."
+                    }
+                  }
+
+                  // (1.3) Accept-friend-requests toggle.
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: reqTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Accept friend requests"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.acceptRequests
+                      onToggled: Lanchat.setAcceptRequests(!Lanchat.acceptRequests)
+                    }
+
+                    PanelToolTip {
+                      visible: reqTipHover.containsMouse
+                      text: "On = receive friend requests (shown with the requester's verified fingerprint). Off = reject all incoming requests."
                     }
                   }
 
