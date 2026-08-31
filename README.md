@@ -106,7 +106,7 @@ agents) — it is not needed for peer messaging.
 | `httpPort`    | `4814`             | Port the HTTPS API listens on                |
 | `httpBind`    | `127.0.0.1`        | HTTP API bind: loopback-only by default      |
 | `visibility`  | `private`          | `private` (invisible on discovery) or `open` (broadcast, discoverable) |
-| `acceptRequests` | `true`          | Whether inbound friend requests are accepted |
+| `acceptRequests` | `true`          | Whether inbound friend requests are received |
 | `online`      | `true`             | Presence toggle (stop receiving while off)   |
 | `friends`     | `[]`               | Your confirmed/pending friends               |
 | `downloadDir` | `~/Downloads`      | Where accepted attachments are saved         |

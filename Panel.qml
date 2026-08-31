@@ -535,11 +535,11 @@ Panel {
               ListView {
                 id: peerList
                 width: parent.width
-                anchors.top: peersOnlineBar.bottom
+                anchors.top: notifBanner.bottom
                 anchors.topMargin: Style.spacing.sm
                 anchors.leftMargin: Style.spacing.sm
                 anchors.rightMargin: Style.spacing.sm
-                anchors.bottom: onboardingBanner.top
+                anchors.bottom: settings.top
                 anchors.bottomMargin: Style.spacing.xs
                 clip: true
                 model: Lanchat.displayPeers
@@ -673,8 +673,8 @@ Panel {
                 id: onboardingBanner
                 width: parent.width
                 height: root.showOnboarding ? onbContent.implicitHeight + Style.space(12) : 0
-                anchors.bottom: notifBanner.top
-                anchors.bottomMargin: Style.spacing.xs
+                anchors.top: peersOnlineBar.bottom
+                anchors.topMargin: Style.spacing.xs
                 visible: root.showOnboarding
                 clip: true
 
@@ -726,8 +726,8 @@ Panel {
                 height: Lanchat.friendRequests.length === 0 ? 0
                        : root.notifExpanded ? Style.space(24) + notifRows.implicitHeight + Style.spacing.xs
                        : Style.space(24)
-                anchors.bottom: settings.top
-                anchors.bottomMargin: Style.spacing.xs
+                anchors.top: onboardingBanner.bottom
+                anchors.topMargin: Style.spacing.xs
                 visible: Lanchat.friendRequests.length > 0
                 clip: true
 
@@ -874,12 +874,12 @@ Panel {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                // Cap height so the expanded body stops at the top-pinned
-                // peers bar — it can never grow into/behind it. As settings
-                // grows it rides the friend-request/onboarding banners (which
-                // anchor to its top) upward, crushing only the peer list above.
+                // Cap height so the expanded body stops at the bottom of the
+                // pinned alert stack (notifBanner) — settings can never grow
+                // into/over the always-visible alerts, so expanding it only
+                // crushes the peer list and never pushes anything off-screen.
                 height: settingsHeader.height + (settings.expanded
-                  ? Math.min(settingsBody.contentHeight, Math.max(0, settings.parent.height - peersOnlineBar.y - settingsHeader.height - Style.space(12)))
+                  ? Math.min(settingsBody.contentHeight, Math.max(0, settings.parent.height - (notifBanner.y + notifBanner.height) - settingsHeader.height - Style.space(12)))
                   : 0)
 
                 // header
@@ -918,7 +918,7 @@ Panel {
                 Flickable {
                   id: settingsBody
                   width: parent.width
-                  height: Math.min(bodyCol.implicitHeight, Math.max(0, settings.parent.height - peersOnlineBar.y - settingsHeader.height - Style.space(12)))
+                  height: Math.min(bodyCol.implicitHeight, Math.max(0, settings.parent.height - (notifBanner.y + notifBanner.height) - settingsHeader.height - Style.space(12)))
                   visible: settings.expanded
                   contentWidth: width
                   contentHeight: bodyCol.implicitHeight
@@ -1414,7 +1414,7 @@ Panel {
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "Accept friend requests"
+                      text: "Receive friend requests"
                       color: Color.popups.text
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption

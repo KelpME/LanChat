@@ -51,7 +51,7 @@ run the same recent version.
   keeps you invisible on the network; **on** makes you discoverable for trusted
   LANs. Existing friends keep working either way — visibility only controls how
   *new* people find you.
-- **Accept friend requests** — whether incoming friend requests are shown to
+- **Receive friend requests** — whether incoming friend requests are shown to
   you at all. **On** (the default): requests appear in the notifications banner
   with the requester's verified fingerprint to confirm. **Off**: all incoming
   requests are rejected silently.
