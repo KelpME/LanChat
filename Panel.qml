@@ -44,8 +44,9 @@ Panel {
     return null
   }
 
-  // Live-filtered thread for the selected peer: delivered messages plus any
-  // held (DND/offline-queued) outgoing messages.
+  // Live-filtered thread for the selected peer. The daemon is the single
+  // source of truth for delivery — it holds undelivered messages server-side
+  // and flushes on reconnect — so the client only renders delivered messages.
   readonly property var thread: {
     var out = []
     var all = Lanchat.messages
@@ -54,16 +55,6 @@ Panel {
       var mine = m.outgoing && m.to === selectedPeerId
       var theirs = !m.outgoing && m.from === selectedPeerId
       if (mine || theirs) out.push(m)
-    }
-    // Append held messages (queued because the peer was DND/offline) — but
-    // only while the peer is STILL undeliverable. If they've come back online,
-    // the message should be shown as delivered (the self-healing flush sends
-    // it), never left as a stale "held" alert.
-    var held = Lanchat.heldQueue
-    for (var j = 0; j < held.length; j++) {
-      if (held[j].to === selectedPeerId && !Lanchat.canDeliver(held[j].to)) {
-        out.push({ to: selectedPeerId, from: "", fromName: "You", text: held[j].text || "", held: true, outgoing: true, ts: Date.now() })
-      }
     }
     return out
   }
@@ -1560,31 +1551,6 @@ Panel {
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     wrapMode: Text.Wrap
-                  }
-
-                  // Held indicator: "!" shown while the message is queued for a
-                  // DND/offline peer, with a hover tooltip.
-                  Text {
-                    visible: modelData.held
-                    anchors.top: parent.top
-                    anchors.left: parent.left
-                    anchors.topMargin: Style.space(3)
-                    anchors.leftMargin: Style.space(3)
-                    text: "!"
-                    color: Color.urgent
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    font.weight: Font.Bold
-
-                    MouseArea {
-                      id: heldTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-                    PanelToolTip {
-                      visible: heldTipHover.containsMouse
-                      text: "Held — " + (Lanchat.peerStatus(modelData.to) === "dnd" ? "recipient is on Do Not Disturb" : "recipient is offline") + ". Will send when they're available."
-                    }
                   }
 
                   // Edit button (outgoing messages only), shown on hover.

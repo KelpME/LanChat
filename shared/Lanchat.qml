@@ -39,7 +39,6 @@ QtObject {
   property string downloadDir: ""
   property int sendDelay: 0
   property var pendingSends: []  // [{mid, to, text, remaining, total}] undo-window
-  property var heldQueue: []     // [{mid, to, text, attachment}] held for DND/offline peer
   property var friendRequests: [] // [{peerId, name, outgoing, ts, mid}] pending friend requests (notifications)
   property var typing: ({})      // peerId -> name currently typing
   property var readReceipts: {}  // mid -> true (peer confirmed reading)
@@ -179,11 +178,6 @@ QtObject {
     if (!text && !attachment) return
     if (!to) return
     var mid = "m" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)
-    if (!canDeliver(to)) {
-      // Peer is offline or DND: hold the message.
-      heldQueue = heldQueue.concat([{ mid: mid, to: to, text: text || "", attachment: attachment || null, held: true }])
-      return
-    }
     // A stranger can't be messaged yet — adding a friend is a separate action
     // (the peer-card button). Prompt, don't silently turn the message into a
     // friend request.
@@ -198,34 +192,6 @@ QtObject {
     } else {
       daemon.write(lanchat.sendPayload(to, text, attachment))
     }
-  }
-
-  // Send all held messages for a peer (called when they become available).
-  function flushHeld(peer) {
-    var still = []
-    for (var i = 0; i < lanchat.heldQueue.length; i++) {
-      var h = lanchat.heldQueue[i]
-      if (h.to === peer) {
-        daemon.write(lanchat.sendPayload(h.to, h.text, h.attachment))
-      } else {
-        still.push(h)
-      }
-    }
-    lanchat.heldQueue = still
-  }
-
-  // Self-healing flush: send every held message whose peer is now reachable,
-  // regardless of whether we saw the status-transition event. The old code
-  // only flushed on a one-shot transition, so held messages could stay stuck
-  // forever while the peer was plainly online. Runs on a short timer and on
-  // daemon ready so the "held" state can never go stale.
-  function flushReadyHeld() {
-    var flush = {}
-    for (var i = 0; i < lanchat.heldQueue.length; i++) {
-      var h = lanchat.heldQueue[i]
-      if (lanchat.canDeliver(h.to)) flush[h.to] = true
-    }
-    for (var pid in flush) lanchat.flushHeld(pid)
   }
 
   // Cancel a held (undelivered) message.
@@ -467,10 +433,6 @@ QtObject {
       lanchat.rebuildDisplayPeers()
       lanchat.refreshHistory()
       lanchat.refreshPeers()
-      // Ensure the self-healing held flush is running, then clear any
-      // messages stuck flagged as "held" for a now-reachable peer.
-      lanchat.heldFlushTimer.start()
-      lanchat.flushReadyHeld()
       break
 
     case "show-typing":
@@ -619,10 +581,6 @@ QtObject {
 
     case "peer": {
       var peer = obj.peer
-      var prev = null
-      for (var k = 0; k < lanchat.peers.length; k++) {
-        if (lanchat.peers[k].id === peer.id) { prev = lanchat.peers[k]; break }
-      }
       var next = lanchat.peers.slice()
       var found = -1
       for (var i = 0; i < next.length; i++) {
@@ -632,16 +590,6 @@ QtObject {
       else next.push(peer)
       lanchat.peers = next
       lanchat.rebuildDisplayPeers()
-
-      // If the peer just became deliverable (was DND/offline, now available),
-      // flush any held messages to them.
-      var nowStatus = peer.status || "available"
-      var wasStatus = prev ? (prev.status || "available") : ""
-      var wasUndeliverable = wasStatus === "" || wasStatus === "dnd"
-      var nowDeliverable = nowStatus !== "" && nowStatus !== "dnd"
-      if (wasUndeliverable && nowDeliverable) {
-        lanchat.flushHeld(peer.id)
-      }
       break
     }
 
@@ -752,15 +700,6 @@ QtObject {
   property Timer restartTimer: Timer {
     interval: 2000
     onTriggered: lanchat.startDaemon()
-  }
-
-  // Self-healing held-message flush: periodically re-checks deliverability so
-  // a held message is sent as soon as its peer is reachable, even if the
-  // status-transition event was missed.
-  property Timer heldFlushTimer: Timer {
-    interval: 1500
-    repeat: true
-    onTriggered: lanchat.flushReadyHeld()
   }
 
   // Drives the send-delay countdown; releases held messages when their time
