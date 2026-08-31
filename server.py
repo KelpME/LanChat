@@ -64,6 +64,9 @@ HISTORY_LIMIT = 500
 # both machines can verify they're running the same code; falls back to the
 # manifest version when git isn't available (e.g. a bare copy).
 #
+# 1.2.1 — security hardening of the HTTP API: it now binds loopback-only by
+#   default (httpBind; set "0.0.0.0" for LAN exposure), and adds rate limits
+#   (/send, failed-auth brute-force guard -> 429) plus a 256KB body cap.
 # 1.2.0 — security: inbound message identity is now proven by challenge-response.
 #   Python's TLS stack can't request a client cert without CA-verifying it (which
 #   rejects self-signed peers), so on every inbound connection the dialing side
@@ -76,7 +79,7 @@ HISTORY_LIMIT = 500
 #   socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
 #   over the existing socket). Old and new transports do not interoperate; both
 #   machines must run >= 1.1.0.
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 
 def _git_version() -> str:
@@ -196,6 +199,10 @@ def load_config() -> None:
     # Defaults for the optional HTTP API (always present so toggling is simple).
     CONFIG.setdefault("httpEnabled", False)
     CONFIG.setdefault("httpPort", DEFAULT_HTTP_PORT)
+    # API bind address. Loopback-only by default so the token-authenticated API
+    # isn't exposed to the LAN; set to "0.0.0.0" to allow remote agents
+    # (e.g. other machines holding the token) to reach it.
+    CONFIG.setdefault("httpBind", "127.0.0.1")
     # Full API access to chat data (read history/peers) vs send-only.
     # When False, the agent can send messages to friends but cannot read
     # history, list peers, or download attachments.
@@ -356,9 +363,10 @@ def _load_priv_key():
 
 def _sign(data: bytes) -> str:
     """Sign bytes with our private key (RSA PKCS1v15-SHA256), hex-encoded."""
+    import binascii
+
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.asymmetric import padding
-    import binascii
     sig = _load_priv_key().sign(data, padding.PKCS1v15(), hashes.SHA256())
     return binascii.hexlify(sig).decode("ascii")
 
@@ -366,7 +374,7 @@ def _sign(data: bytes) -> str:
 def _verify(cert_pem: str, data: bytes, sig_hex: str) -> bool:
     """Verify a signature over `data` using the public key in `cert_pem`."""
     from cryptography import x509
-    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.asymmetric import padding
     try:
         cert = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
@@ -443,6 +451,11 @@ def http_port() -> int:
         return int(CONFIG.get("httpPort", DEFAULT_HTTP_PORT))
     except (TypeError, ValueError):
         return DEFAULT_HTTP_PORT
+
+
+def http_bind() -> str:
+    """Loopback by default; "0.0.0.0" opts into LAN exposure."""
+    return str(CONFIG.get("httpBind") or "127.0.0.1")
 
 
 # --------------------------------------------------------------------------
@@ -1685,8 +1698,42 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):  # silence request logging
         pass
 
+    # --- rate limiting ------------------------------------------------------
+    # Class-level shared state: a simple sliding-window throttle on outbound
+    # sends and on failed auth (brute-force guard). Rates are modest; a legit
+    # local agent won't hit them, but a scanner/attacker quickly does.
+    _MAX_BODY = 256 * 1024            # reject bodies larger than this
+    _SEND_WINDOW_S = 10.0             # allow up to _SEND_MAX per window
+    _SEND_MAX = 40
+    _AUTH_WINDOW_S = 10.0             # allow up to _AUTH_MAX failed auths
+    _AUTH_MAX = 10
+    _send_ts = []                     # timestamps of recent /send calls
+    _auth_fail_ts = []                # timestamps of recent failed auths
+    _rl_lock = threading.Lock()
+
+    @classmethod
+    def _throttle(cls, bucket, limit, window, now):
+        """Return True if the request is allowed; else False (over the limit)."""
+        with cls._rl_lock:
+            bucket[:] = [t for t in bucket if now - t < window]
+            if len(bucket) >= limit:
+                return False
+            bucket.append(now)
+            return True
+
     def _auth_ok(self, token):
-        return bool(token) and token == CONFIG.get("token")
+        ok = bool(token) and token == CONFIG.get("token")
+        if not ok:
+            # Count the failure for the brute-force throttle.
+            self._throttle(self._auth_fail_ts, self._AUTH_MAX, self._AUTH_WINDOW_S, time.time())
+        return ok
+
+    def _auth_blocked(self):
+        """True if the recent failed-auth window is full (too many bad tokens)."""
+        now = time.time()
+        with self._rl_lock:
+            self._auth_fail_ts[:] = [t for t in self._auth_fail_ts if now - t < self._AUTH_WINDOW_S]
+            return len(self._auth_fail_ts) >= self._AUTH_MAX
 
     def _send_json(self, code, obj):
         data = json.dumps(obj).encode("utf-8")
@@ -1703,6 +1750,9 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
             length = 0
         if length <= 0:
             return {}
+        if length > self._MAX_BODY:
+            self._send_json(413, {"ok": False, "error": "request body too large"})
+            return None
         raw = self.rfile.read(length)
         try:
             return json.loads(raw.decode("utf-8"))
@@ -1715,6 +1765,8 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
         token = (qs.get("token") or [""])[0]
         if parsed.path == "/health":
             return self._send_json(200, {"ok": True})
+        if self._auth_blocked():
+            return self._send_json(429, {"ok": False, "error": "rate limited"})
         if not self._auth_ok(token):
             return self._send_json(401, {"ok": False, "error": "unauthorized"})
         if parsed.path == "/peers":
@@ -1750,10 +1802,16 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         body = self._body()
+        if body is None:  # oversized body already answered with 413
+            return
         if parsed.path == "/send":
             token = body.get("token")
+            if self._auth_blocked():
+                return self._send_json(429, {"ok": False, "error": "rate limited"})
             if not self._auth_ok(token):
                 return self._send_json(401, {"ok": False, "error": "unauthorized"})
+            if not self._throttle(self._send_ts, self._SEND_MAX, self._SEND_WINDOW_S, time.time()):
+                return self._send_json(429, {"ok": False, "error": "rate limited"})
             to = str(body.get("to", ""))
             text = str(body.get("text", ""))
             if not to or not text.strip():
@@ -1776,12 +1834,12 @@ def _start_http() -> bool:
     last_err = None
     for attempt in range(5):
         try:
-            srv = http.server.ThreadingHTTPServer(("", http_port()), _ApiHandler)
+            srv = http.server.ThreadingHTTPServer((http_bind(), http_port()), _ApiHandler)
             srv.socket = ensure_tls().wrap_socket(srv.socket, server_side=True)
             _http_server = srv
             _http_server_thread = threading.Thread(target=srv.serve_forever, daemon=True)
             _http_server_thread.start()
-            _emit({"event": "http", "enabled": True, "port": http_port()})
+            _emit({"event": "http", "enabled": True, "port": http_port(), "bind": http_bind()})
             return True
         except OSError as e:
             last_err = e
@@ -1900,6 +1958,13 @@ def stdin_loop() -> None:
                 _stop_http()
             CONFIG["httpEnabled"] = enabled
             _save_config()
+        elif kind == "setHttpBind":
+            # Bind address for the HTTP API: "127.0.0.1" (default, loopback-only)
+            # or "0.0.0.0" (LAN exposure). Applies on the next enable/restart.
+            bind = str(cmd.get("bind") or "127.0.0.1")
+            CONFIG["httpBind"] = bind
+            _save_config()
+            _emit({"event": "http-bind", "bind": bind})
         elif kind == "setApiFullAccess":
             CONFIG["apiFullAccess"] = bool(cmd.get("enabled"))
             _save_config()
@@ -2032,6 +2097,7 @@ def _ready_event() -> dict:
         "port": port(),
         "httpEnabled": http_enabled(),
         "httpPort": http_port(),
+        "httpBind": http_bind(),
         "online": is_online(),
         "friends": friends_list(),
         "downloadDir": CONFIG.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),

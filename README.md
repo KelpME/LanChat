@@ -200,12 +200,15 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
   friend/handshake gates messaging. Only confirmed friends (or peers you've
   requested) can reach you.
 - **Presence** — the online toggle stops broadcasts and drops inbound while off.
+- **Optional HTTP API** — token-authenticated, **loopback-only by default**
+  (1.2.1+; `httpBind: "0.0.0.0"` opts into LAN exposure), with rate limits on
+  `/send` and a brute-force guard on failed auth, plus a request-body cap.
 
 > The cert is self-signed (no CA), which is appropriate for LAN peer-to-peer.
 > Because discovery is open, any machine on your LAN can see you and send a
 > friend request — but they can't message you until you accept, and their cert
 > fingerprint identifies them. The `token` in config only protects the optional
-> HTTPS API.
+> HTTPS API, which is loopback-only by default.
 
 ## How it works
 

@@ -292,6 +292,50 @@ def main():
         assert code == 401
         print("OK  HTTP API rejects wrong token")
 
+        # (1.2.1) Brute-force guard: a burst of wrong tokens trips 429.
+        got_429 = False
+        for i in range(15):
+            code, _ = http("GET", "/peers", token="WRONG-%d" % i)
+            if code == 429:
+                got_429 = True
+                break
+        assert got_429, "brute-force burst did not trip the rate limit"
+        print("OK  HTTP brute-force guard returns 429 after repeated bad tokens")
+
+        # (1.2.1) Loopback-only bind by default: the API is reachable on
+        # 127.0.0.1 (http() uses it above) but NOT on the LAN address.
+        lan_ip = None
+        try:
+            import fcntl as _fcntl
+            import struct as _struct
+            for iface in ("eth0", "enp0s31f6", "enp3s0", "wlan0", "wlp2s0"):
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    addr = socket.inet_ntoa(_fcntl.ioctl(
+                        s.fileno(), 0x8915, _struct.pack("256s", iface[:15].encode()))[20:24])
+                    if addr and not addr.startswith("127."):
+                        lan_ip = addr
+                        break
+                except OSError:
+                    continue
+        except Exception:
+            lan_ip = None
+        if lan_ip:
+            raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            raw.settimeout(1.0)
+            try:
+                raw.connect((lan_ip, http_port))
+                # TLS handshake may still fail; check we can't even get the server.
+                reachable = True
+            except OSError:
+                reachable = False
+            finally:
+                raw.close()
+            assert not reachable, "HTTP API reachable on LAN address despite loopback bind"
+            print("OK  HTTP API NOT reachable on LAN IP (%s) — loopback-only bind" % lan_ip)
+        else:
+            print("SKIP LAN-address reachability (no LAN interface found in test env)")
+
         # Disable again.
         a.cmd(cmd="setHttp", enabled=False)
         aev = a.wait_event("http")

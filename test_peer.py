@@ -50,6 +50,7 @@ def fingerprint(cert_pem: str) -> str:
 
 def _sign(key_pem: str, data: bytes) -> str:
     import binascii
+
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
     key = serialization.load_pem_private_key(key_pem.encode("utf-8"), password=None)
