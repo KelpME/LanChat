@@ -206,11 +206,15 @@ Panel {
     Quickshell.execDetached(["xdg-open", Lanchat.logPath()])
   }
 
+  // The absolute, universally-runnable setup command (works from any cwd).
+  function setupCommand() {
+    return "sudo bash " + Lanchat.setupScriptPath()
+  }
+
   // Launch a terminal that SHOWS the setup command first, then lets the user
   // press Enter to run it (sudo prompts for the password in that terminal).
   function runSetup() {
-    var script = Lanchat.setupScriptPath()
-    var cmd = "sudo bash " + script
+    var cmd = root.setupCommand()
     // Pick the first installed terminal emulator via a shell command -v probe.
     // Inside the terminal: print what's about to run, pause for Enter, run it,
     // then pause again so the user can read the output before closing.
@@ -1638,10 +1642,10 @@ Panel {
 
             Text {
               anchors.centerIn: parent
-              text: "sudo bash scripts/setup-firewall.sh"
+              text: root.setupCommand()
               color: Color.foreground
               font.family: "monospace"
-              font.pixelSize: Style.font.body
+              font.pixelSize: Style.font.caption
               horizontalAlignment: Text.AlignHCenter
               elide: Text.ElideMiddle
             }
@@ -1658,7 +1662,7 @@ Panel {
 
             Button {
               text: "\uF0C5 Copy command"  // nf-fa-copy
-              onClicked: root.copyToClipboard("sudo bash scripts/setup-firewall.sh")
+              onClicked: root.copyToClipboard(root.setupCommand())
             }
           }
 
