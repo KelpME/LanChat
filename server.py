@@ -864,15 +864,12 @@ def _udp_listener(sock: socket.socket) -> None:
             # Skip ourselves — our own broadcast/scan echoes back on loopback.
             if pid == host_id():
                 continue
-            # (1.3) Private visibility: we don't respond to unsolicited hello
-            # probes from strangers — otherwise anyone who pings our IP learns
-            # we exist. BUT a peer we've already added by fingerprint (a
-            # confirmed friend) is trusted: accept their hello so we learn
-            # their address and can dial them. (A stranger spoofing a friend's
-            # id in a hello could poison the peer table, but the TLS
-            # fingerprint check in conn_loop rejects the actual dial.)
-            if visibility() != "open" and not is_friend(pid):
-                continue
+            # (1.3) Visibility controls whether WE broadcast (are discoverable),
+            # NOT whether we can see others. A private device still listens and
+            # records devices that broadcast, so it can see open peers on the
+            # network — it just doesn't announce itself or reply, so those peers
+            # don't see it back. Confirmed friends are always accepted too.
+            hidden = visibility() != "open"
             # Prefer the peer's broadcast display name; fall back to a
             # deterministic friendly name derived from its id.
             name = str(pkt.get("name") or friendly_name(pid))
@@ -888,8 +885,10 @@ def _udp_listener(sock: socket.socket) -> None:
             # Reply so the caller learns about us immediately. Send a UNICAST
             # pong back to the sender's address — broadcast replies get lost
             # on networks where broadcasts are filtered, leaving discovery
-            # one-way (they see us, we don't see them).
-            _udp_send(sock, {"t": "pong"}, target=addr[0])
+            # one-way (they see us, we don't see them). In private mode we do
+            # NOT pong, so we stay invisible to the devices we discover.
+            if not hidden:
+                _udp_send(sock, {"t": "pong"}, target=addr[0])
 
 
 def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:

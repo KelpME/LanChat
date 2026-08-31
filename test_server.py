@@ -251,12 +251,14 @@ def main():
         b.cmd(cmd="setVisibility", visibility="private")
         b.wait_event("visibility")
         probe_pid = "probe-" + os.urandom(4).hex()
-        # Send a hello from an unknown id; B should not add it as a peer.
+        # Private mode still SEES devices that broadcast (open peers), so an
+        # unknown probe's hello IS recorded — but we don't pong, so the probe
+        # never learns about B.
         udp_broadcast(b.port, {"t": "hello", "id": probe_pid, "name": "Probe", "port": 9999})
         time.sleep(0.8)
-        assert not wait_until(lambda: _has_peer(b, probe_pid), timeout=1.0), \
-            "private mode added an unknown probe as a peer"
-        print("OK  private visibility ignores unknown hello probes (no peer added)")
+        assert wait_until(lambda: _has_peer(b, probe_pid), timeout=1.0), \
+            "private mode did not see a broadcasting peer (visibility should not block seeing others)"
+        print("OK  private mode still sees broadcasting peers")
         # And a stranger friend request is dropped when acceptRequests is off.
         b.cmd(cmd="setAcceptRequests", enabled=False)
         b.wait_event("accept-requests")
@@ -272,6 +274,16 @@ def main():
         assert not wait_until(lambda: _has_friend_request(b, sid2), timeout=1.0), \
             "friend request accepted despite acceptRequests=false"
         print("OK  friend request dropped when acceptRequests disabled")
+        # The exact reported scenario: a private device (A) must see an open
+        # device (B) that is broadcasting. A is private, B is open; B's hello
+        # should make A record B.
+        a.cmd(cmd="setVisibility", visibility="private"); a.wait_event("visibility")
+        udp_broadcast(a.port, {"t": "hello", "id": idb, "name": "Beta", "port": b.port})
+        time.sleep(0.8)
+        assert wait_until(lambda: _has_peer(a, idb), timeout=1.0), \
+            "private device A did not discover open device B via broadcast"
+        print("OK  private A discovers open B (visibility doesn't block seeing others)")
+        a.cmd(cmd="setVisibility", visibility="open"); a.wait_event("visibility")
         # Restore open visibility + requests for the rest of the test.
         b.cmd(cmd="setVisibility", visibility="open"); b.wait_event("visibility")
         b.cmd(cmd="setAcceptRequests", enabled=True); b.wait_event("accept-requests")
