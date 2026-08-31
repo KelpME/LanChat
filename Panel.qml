@@ -171,6 +171,13 @@ Panel {
     onTriggered: root.showClearAllCheck = false
   }
 
+  // True when there's a chat alert to show in the thread's alert bar for the
+  // currently selected peer (or a peer-agnostic one).
+  readonly property bool visibleChatAlert: {
+    Lanchat.chatAlert !== "" &&
+    (Lanchat.chatAlertPeerId === "" || Lanchat.chatAlertPeerId === selectedPeerId)
+  }
+
   // Outgoing attachments staged in the compose area, NOT yet sent. Picking
   // files appends here; the user reviews each, removes any, then presses Send.
   // [{name, path}]
@@ -1648,10 +1655,14 @@ Panel {
               }
             }
 
-            // ---- pending attachment accept bar -------------------------
+            // ---- chat alert bar --------------------------------------
+            // One bar between the thread and compose for all user-facing
+            // chat alerts, in priority order: a pending incoming file
+            // (actionable, persists), then a transient chat alert (save
+            // result, add-friend prompt, or server notice).
             Rectangle {
-              id: pendingBar
-              visible: root.pendingAttachment !== null
+              id: chatAlertBar
+              visible: root.pendingAttachment !== null || root.visibleChatAlert
               width: parent.width
               height: Style.space(38)
               color: Style.selectedAccentFill
@@ -1673,20 +1684,27 @@ Panel {
 
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
-                  width: Math.max(10, parent.width - Style.space(84))
+                  width: root.pendingAttachment !== null
+                    ? Math.max(10, parent.width - Style.space(84))
+                    : Math.max(10, parent.width - Style.space(12))
                   text: {
                     var p = root.pendingAttachment
-                    if (!p) return ""
-                    if (root.pendingDownloading) {
-                      if (Lanchat.dlTotal > 0) {
-                        var pct = Math.min(99, Math.floor(100 * Lanchat.dlBytes / Lanchat.dlTotal))
-                        return "Saving " + p.attachment.name + "\u2026 " + pct + "%"
+                    if (p) {
+                      if (root.pendingDownloading) {
+                        if (Lanchat.dlTotal > 0) {
+                          var pct = Math.min(99, Math.floor(100 * Lanchat.dlBytes / Lanchat.dlTotal))
+                          return "Saving " + p.attachment.name + "\u2026 " + pct + "%"
+                        }
+                        return "Saving " + p.attachment.name + "\u2026"
                       }
-                      return "Saving " + p.attachment.name + "\u2026"
+                      return "Incoming file: " + p.attachment.name
                     }
-                    return "Incoming file: " + p.attachment.name
+                    if (root.visibleChatAlert) return Lanchat.chatAlert
+                    return ""
                   }
-                  color: Color.popups.text
+                  color: (root.pendingAttachment === null && Lanchat.chatAlertIsError)
+                    ? Color.urgent
+                    : Color.popups.text
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                   elide: Text.ElideRight
@@ -1695,6 +1713,7 @@ Panel {
                 Item { width: Style.space(10); height: 1 }
 
                 Button {
+                  visible: root.pendingAttachment !== null
                   text: root.pendingDownloading ? "Saving\u2026" : "Save"
                   enabled: !root.pendingDownloading
                   onClicked: {
@@ -1997,29 +2016,6 @@ Panel {
               }
             }
           }
-        }
-      }
-
-      // ---- transient status banner (top, so it never hides the input) --
-      Rectangle {
-        visible: Lanchat.statusMessage !== ""
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: Style.space(46)
-        height: Style.space(26)
-        color: Style.pressedFill
-        Text {
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.leftMargin: Style.spacing.panelPadding
-          anchors.rightMargin: Style.spacing.panelPadding
-          text: Lanchat.statusMessage
-          color: Color.popups.text
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
         }
       }
     }

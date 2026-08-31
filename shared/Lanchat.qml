@@ -18,7 +18,21 @@ QtObject {
   property string myName: ""
   property int myPort: 0
   property bool daemonReady: false
-  property string statusMessage: ""
+
+  // Transient chat alert shown in the thread's alert bar: save results,
+  // add-friend prompt, and server notices. chatAlertPeerId scopes it to a
+  // peer's thread; empty means show for any selected peer. Dev-facing alerts
+  // (daemon errors, crashes) go to `diagnostics` instead.
+  property string chatAlert: ""
+  property bool chatAlertIsError: false
+  property string chatAlertPeerId: ""
+  function showChatAlert(msg, isError, peerId) {
+    chatAlert = msg
+    chatAlertIsError = !!isError
+    chatAlertPeerId = peerId || ""
+    chatAlertTimer.restart()
+  }
+
   property bool panelOpen: false
   property string version: ""
 
@@ -189,8 +203,7 @@ QtObject {
     // (the peer-card button). Prompt, don't silently turn the message into a
     // friend request.
     if (!lanchat.isConfirmedFriend(to) && !lanchat.isPending(to)) {
-      statusMessage = "Add " + lanchat.peerName(to) + " as a friend to start chatting"
-      statusTimer.restart()
+      lanchat.showChatAlert("Add " + lanchat.peerName(to) + " as a friend to start chatting", false, to)
       return
     }
     if (sendDelay > 0) {
@@ -575,23 +588,36 @@ QtObject {
       lanchat.dlFileId = ""
       lanchat.dlBytes = 0
       lanchat.dlTotal = 0
-      if (obj.ok && obj.mid) {
-        // Mark the matching message accepted so the pending accept bar clears.
-        var upd = lanchat.messages.slice()
-        for (var ai = 0; ai < upd.length; ai++) {
-          if (upd[ai].mid === obj.mid && upd[ai].attachment) {
-            upd[ai].attachment.accepted = true
+      // Find the owning peer (via the message's `from`) so the result shows in
+      // the right thread's alert bar.
+      var fromPeer = ""
+      if (obj.mid) {
+        var msgs = lanchat.messages.slice()
+        for (var si = 0; si < msgs.length; si++) {
+          if (msgs[si].mid === obj.mid && msgs[si].attachment) {
+            fromPeer = msgs[si].from || ""
             break
           }
         }
-        lanchat.messages = upd
-        lanchat.statusMessage = "Saved to " + obj.path
-      } else {
-        lanchat.statusMessage = obj.error
-          ? ("Failed to save attachment: " + obj.error)
-          : "Failed to save attachment"
       }
-      lanchat.statusTimer.restart()
+      if (obj.ok) {
+        if (obj.mid) {
+          // Mark the matching message accepted so the pending accept bar clears.
+          var upd = lanchat.messages.slice()
+          for (var ai = 0; ai < upd.length; ai++) {
+            if (upd[ai].mid === obj.mid && upd[ai].attachment) {
+              upd[ai].attachment.accepted = true
+              break
+            }
+          }
+          lanchat.messages = upd
+        }
+        lanchat.showChatAlert(obj.path ? "Saved to " + obj.path : "Saved", false, fromPeer)
+      } else {
+        lanchat.showChatAlert(obj.error
+          ? ("Failed to save attachment: " + obj.error)
+          : "Failed to save attachment", true, fromPeer)
+      }
       break
 
     case "typing": {
@@ -692,13 +718,14 @@ QtObject {
       break
 
     case "error":
-      lanchat.statusMessage = obj.message || "Lanchat error"
-      lanchat.statusTimer.restart()
+      // Dev-facing: daemon reported a failure. Goes to the diagnostics log,
+      // not the user-facing chat alert bar.
+      lanchat.pushDiagnostic(obj.message || "Lanchat error")
       break
 
     case "notice":
-      lanchat.statusMessage = obj.message || ""
-      lanchat.statusTimer.restart()
+      // User-facing setup/config notice (e.g. first-run token message).
+      lanchat.showChatAlert(obj.message || "", false, "")
       break
 
     case "diagnostic": {
@@ -722,18 +749,28 @@ QtObject {
 
   function onDaemonExit(code) {
     lanchat.daemonReady = false
-    lanchat.statusMessage = "Lanchat daemon stopped (exit " + code + ") — restarting…"
-    lanchat.statusTimer.restart()
+    // Dev-facing crash alert → diagnostics log (the restart message is the
+    // important part; the user sees the daemon come back).
+    lanchat.pushDiagnostic("Lanchat daemon stopped (exit " + code + ") — restarting…")
     // Auto-restart after a short delay so a crash doesn't leave the app dead,
     // but with a gap to avoid a tight loop if it keeps failing.
     lanchat.restartTimer.restart()
   }
 
-  // Transient status (errors/notices) clears itself after a few seconds so it
-  // never sticks around and hides UI.
-  property Timer statusTimer: Timer {
-    interval: 6000
-    onTriggered: lanchat.statusMessage = ""
+  // Push a message into the rolling diagnostics log (capped at 100 lines).
+  function pushDiagnostic(message) {
+    var d = { ts: Date.now(), message: message }
+    var diag = lanchat.diagnostics.slice()
+    diag.push(d)
+    if (diag.length > 100) diag = diag.slice(diag.length - 100)
+    lanchat.diagnostics = diag
+  }
+
+  // Transient chat alerts (save results, add-friend prompt, notices) clear
+  // themselves after a few seconds so they never stick around and hide UI.
+  property Timer chatAlertTimer: Timer {
+    interval: 5000
+    onTriggered: lanchat.chatAlert = ""
   }
 
   // Restarts the daemon after a crash. 2s gap avoids a tight restart loop.
