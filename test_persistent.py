@@ -114,6 +114,15 @@ def main():
         disco(a.port, idb, "Beta", 4982)
         disco(b.port, ida, "Alpha", 4981)
         time.sleep(1.5)
+        # Steady presence: real peers re-broadcast every ~3s; without a
+        # heartbeat the faster presence timeout could expire them mid-test.
+        _halt = {"go": True}
+        def _beat():
+            while _halt["go"]:
+                disco(a.port, idb, "Beta", 4982)
+                disco(b.port, ida, "Alpha", 4981)
+                time.sleep(2.0)
+        threading.Thread(target=_beat, daemon=True).start()
 
         # Friend handshake (accept rides the persistent socket — no reverse dial).
         a.cmd(cmd="send", to=idb, text="friend me", friend_request=True)

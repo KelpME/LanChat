@@ -113,6 +113,15 @@ def main():
         disco(a.port, idb, "Beta", 4952)
         disco(b.port, ida, "Alpha", 4951)
         time.sleep(1.5)  # let the UDP listener register the peer
+        # Real peers re-broadcast every ~3s; without a heartbeat the faster
+        # presence timeout would expire them mid-test. Simulate steady presence.
+        _halt = {"go": True}
+        def _beat():
+            while _halt["go"]:
+                disco(a.port, idb, "Beta", 4952)
+                disco(b.port, ida, "Alpha", 4951)
+                time.sleep(2.0)
+        threading.Thread(target=_beat, daemon=True).start()
 
         # 1) Unknown host (stranger) plain message to A is dropped.
         a.cmd(cmd="history")

@@ -134,6 +134,15 @@ def main():
         assert wait_until(lambda: _has_peer(a, idb)), "A did not learn beta"
         assert wait_until(lambda: _has_peer(b, ida)), "B did not learn alpha"
         print("OK  discovery populated peer lists")
+        # Real peers re-broadcast every ~3s; keep both alive for the whole test
+        # so the faster presence timeout can't expire them mid-run.
+        _halt = {"go": True}
+        def _beat():
+            while _halt["go"]:
+                udp_broadcast(a.port, {"t": "hello", "id": idb, "name": "Beta-machine", "port": b.port})
+                udp_broadcast(b.port, {"t": "hello", "id": ida, "name": "Alpha-machine", "port": a.port})
+                time.sleep(2.0)
+        threading.Thread(target=_beat, daemon=True).start()
 
         # Become friends first (friend request + accept) so messages flow.
         a.cmd(cmd="send", to=idb, text="friend me", friend_request=True)

@@ -54,8 +54,8 @@ HISTORY_PATH = os.path.join(STATE_DIR, "history.json")
 
 DEFAULT_PORT = 4812
 DEFAULT_HTTP_PORT = 4814
-PEER_TIMEOUT_S = 15.0      # drop a peer after this long without a hello
-BROADCAST_INTERVAL_S = 5.0
+PEER_TIMEOUT_S = 6.0       # drop a peer after this long without a hello
+BROADCAST_INTERVAL_S = 3.0
 HISTORY_LIMIT = 500
 
 # Version of the plugin/daemon. Keep in sync with manifest.json "version".
