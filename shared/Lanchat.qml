@@ -44,7 +44,8 @@ QtObject {
   property var typing: ({})      // peerId -> name currently typing
   property var readReceipts: {}  // mid -> true (peer confirmed reading)
 
-  property var peers: []          // [{id,name,address,port,lastSeen}]
+  property var peers: []          // [{id,name,address,port,lastSeen}] online peers
+  property var displayPeers: []   // peers merged with offline confirmed/pending friends
   property var messages: []       // [{from,fromName,text,ts,outgoing}]
   property int unreadCount: 0
   property int onlineCount: 0
@@ -80,9 +81,12 @@ QtObject {
 
   // Current status of a peer ("" if not discovered / offline).
   function peerStatus(id) {
-    var list = lanchat.peers
+    var list = lanchat.displayPeers
     for (var i = 0; i < list.length; i++) {
-      if (list[i].id === id) return list[i].status || "available"
+      if (list[i].id === id) {
+        var s = list[i].status || "available"
+        return s === "offline" ? "" : s
+      }
     }
     return ""  // not online
   }
@@ -113,13 +117,45 @@ QtObject {
     return false
   }
 
-  // Display name of a discovered peer (fallback: their id).
+  // Display name of a discovered peer (fallback: friends list, then their id).
   function peerName(id) {
-    var list = lanchat.peers
+    var list = lanchat.displayPeers
     for (var i = 0; i < list.length; i++) {
       if (list[i].id === id) return list[i].name
     }
+    var friends = lanchat.friends
+    for (var j = 0; j < friends.length; j++) {
+      if (friends[j].id === id) return friends[j].name || id
+    }
     return id
+  }
+
+  // Merge the live (online) peers with confirmed/pending friends so a friend
+  // who goes offline stays visible, marked "offline", instead of vanishing.
+  // Strangers still disappear when they stop broadcasting. Rebuilds the
+  // display list (and onlineCount) whenever peers or friends change.
+  function rebuildDisplayPeers() {
+    var map = {}
+    var peers = lanchat.peers
+    for (var i = 0; i < peers.length; i++) map[peers[i].id] = peers[i]
+    var friends = lanchat.friends
+    for (var j = 0; j < friends.length; j++) {
+      var f = friends[j]
+      if (!map[f.id]) {
+        map[f.id] = { id: f.id, name: f.name || lanchat.peerName(f.id),
+                      address: f.address || "", port: 0, httpPort: 0,
+                      status: "offline", lastSeen: 0, version: "" }
+      }
+    }
+    var out = []
+    for (var id in map) out.push(map[id])
+    out.sort(function(x, y) {
+      return String(x.name).toLowerCase().localeCompare(String(y.name).toLowerCase())
+    })
+    lanchat.displayPeers = out
+    var online = 0
+    for (var k = 0; k < out.length; k++) if (out[k].status !== "offline") online++
+    lanchat.onlineCount = online
   }
 
   // Explicit "add a friend" action — decoupled from messaging. Sends a friend
@@ -409,6 +445,7 @@ QtObject {
       if (obj.showReadReceipts !== undefined) lanchat.showReadReceipts = obj.showReadReceipts
       if (obj.logPath) lanchat.logPathValue = obj.logPath
       lanchat.reconcileFriendRequests()
+      lanchat.rebuildDisplayPeers()
       lanchat.refreshHistory()
       lanchat.refreshPeers()
       break
@@ -459,6 +496,7 @@ QtObject {
     case "friends":
       lanchat.friends = obj.friends || []
       lanchat.reconcileFriendRequests()
+      lanchat.rebuildDisplayPeers()
       break
 
     case "friend-accepted":
@@ -565,7 +603,7 @@ QtObject {
       if (found >= 0) next[found] = peer
       else next.push(peer)
       lanchat.peers = next
-      lanchat.onlineCount = next.length
+      lanchat.rebuildDisplayPeers()
 
       // If the peer just became deliverable (was DND/offline, now available),
       // flush any held messages to them.
@@ -580,9 +618,11 @@ QtObject {
     }
 
     case "peer-gone": {
+      // Keep confirmed/pending friends in the list (marked offline); only
+      // strangers are removed. The merge happens in rebuildDisplayPeers.
       var list = lanchat.peers.filter(function(p) { return p.id !== obj.id })
       lanchat.peers = list
-      lanchat.onlineCount = list.length
+      lanchat.rebuildDisplayPeers()
       break
     }
 
@@ -632,7 +672,7 @@ QtObject {
 
     case "peers":
       lanchat.peers = obj.peers || []
-      lanchat.onlineCount = (obj.peers || []).length
+      lanchat.rebuildDisplayPeers()
       break
 
     case "error":

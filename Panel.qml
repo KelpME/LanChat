@@ -37,7 +37,7 @@ Panel {
   }
 
   readonly property var selectedPeer: {
-    var list = Lanchat.peers
+    var list = Lanchat.displayPeers
     for (var i = 0; i < list.length; i++) {
       if (list[i].id === selectedPeerId) return list[i]
     }
@@ -263,8 +263,8 @@ Panel {
     Lanchat.panelOpen = root.opened
     if (root.opened) {
       Lanchat.clearUnread()
-      if (selectedPeerId === "" && Lanchat.peers.length > 0)
-        selectedPeerId = Lanchat.peers[0].id
+      if (selectedPeerId === "" && Lanchat.displayPeers.length > 0)
+        selectedPeerId = Lanchat.displayPeers[0].id
       Qt.callLater(function() { list.positionViewAtEnd() })
     }
   }
@@ -373,7 +373,7 @@ Panel {
                 anchors.top: parent.top
                 anchors.bottom: peersOnlineBar.top
                 clip: true
-                model: Lanchat.peers
+                model: Lanchat.displayPeers
                 spacing: Style.spacing.xs
                 anchors.topMargin: Style.spacing.sm
                 anchors.bottomMargin: Style.spacing.xs
@@ -403,7 +403,7 @@ Panel {
                     color: Color.accent
                   }
 
-                  // Status dot: colored per the peer's status.
+                  // Status dot: colored per the peer's status; gray when offline.
                   Rectangle {
                     width: Style.space(9)
                     height: Style.space(9)
@@ -411,7 +411,8 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: Style.spacing.sm
-                    color: modelData.status === "dnd" ? "#e33"
+                    color: modelData.status === "offline" ? Color.muted
+                      : modelData.status === "dnd" ? "#e33"
                       : modelData.status === "away" ? Qt.rgba(0.9,0.7,0.2,1)
                       : modelData.status === "brb" ? Qt.rgba(0.9,0.5,0.3,1)
                       : Color.accent  // available
@@ -473,7 +474,8 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.right: parent.right
                     anchors.rightMargin: Style.spacing.sm
-                    text: modelData.status === "dnd" ? "\u2715"  // ✕ Do Not Disturb
+                    text: modelData.status === "offline" ? "Offline"
+                      : modelData.status === "dnd" ? "\u2715"  // ✕ Do Not Disturb
                       : modelData.status === "away" ? "\u23F0"   // ⏰ Away
                       : modelData.status === "brb" ? "\u23EB"    // ⏫ Be Right Back
                       : "\u2713"                                  // ✓ Available
@@ -484,7 +486,7 @@ Panel {
                 }
 
                 Text {
-                  visible: Lanchat.peers.length === 0
+                  visible: Lanchat.displayPeers.length === 0
                   anchors.centerIn: parent
                   width: parent.width - Style.space(24)
                   text: "No peers online. They'll appear here automatically."
