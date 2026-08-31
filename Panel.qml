@@ -423,7 +423,9 @@ Panel {
                   Text {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
-                    anchors.leftMargin: Style.spacing.xl
+                    // Clear the status dot: dot starts at spacing.sm and is
+                    // space(9) wide, so the name begins past it.
+                    anchors.leftMargin: Style.spacing.sm + Style.space(9) + Style.spacing.xs
                     anchors.right: friendBadge.left
                     anchors.rightMargin: Style.spacing.md
                     text: modelData.name
