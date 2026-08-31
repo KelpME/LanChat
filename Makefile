@@ -96,6 +96,10 @@ systemd-uninstall: ## FULL uninstall: stop the daemon, remove the systemd unit, 
 	@-rm -f $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.service
 	@systemctl --user daemon-reload
 	@echo "Lanchat systemd unit removed."
+	@echo "Killing any surviving lanchat daemon/bridge processes (so a reinstall starts clean, no stale cert)..."
+	@-pkill -f "KelpME.lanchat/server.py" 2>/dev/null || true
+	@-pkill -f "KelpME.lanchat/lanchat-bridge.py" 2>/dev/null || true
+	@-sleep 1
 	@echo "Closing lanchat's firewall port (best-effort)..."
 	@-scripts/lanchat-firewall.sh close 2>/dev/null || true
 	@echo "Wiping user data:"
