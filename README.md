@@ -63,6 +63,32 @@ omarchy plugin enable KelpME.lanchat
 
 To update, `omarchy plugin update` (fast-forward pulls the git checkout).
 
+### Daemon runs under systemd
+
+Since 1.4.0 the daemon is a **systemd user service**, not a child of the shell.
+This is what makes it reliable and observable: it starts at login, restarts
+automatically on crash (`Restart=always`), and you can always tell whether it's
+running:
+
+```bash
+systemctl --user status lanchat        # is the daemon running?
+systemctl --user restart lanchat       # restart it
+```
+
+Install the unit once per machine (the plugin ships it at
+`systemd/lanchat.service`):
+
+```bash
+make systemd-install    # copies the unit, daemon-reload, enable --now
+```
+
+The shell no longer spawns `server.py` directly. Instead it runs a tiny
+`lanchat-bridge.py` that connects to the daemon's unix-socket control channel
+(`$XDG_RUNTIME_DIR/lanchat.sock`) and proxies commands/events, so the QML
+wiring is unchanged. If the daemon is down, the bridge exits and the UI shows a
+clear **"Daemon not running"** warning (bar icon turns red) instead of a
+misleading "0 peers online".
+
 ## First-run setup
 
 On first run the daemon generates its config and TLS certificate automatically —
@@ -239,12 +265,15 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 
 The plugin is three pieces:
 
-- **`shared/Lanchat.qml`** — a QML singleton that owns the daemon process and
-  all shared state. A true singleton, so exactly one daemon runs no matter how
+- **`shared/Lanchat.qml`** — a QML singleton that owns the bridge process and
+  all shared state. A true singleton, so exactly one bridge runs no matter how
   many bar surfaces or entry points exist.
 - **`server.py`** — a stdlib-only Python daemon: TLS TCP server for messages,
   UDP broadcast discovery, heartbeat/expiry for online status, attachment
-  serving, and JSON persistence.
+  serving, and JSON persistence. Runs under systemd (`systemd/lanchat.service`).
+- **`lanchat-bridge.py`** — a stdlib-only proxy the shell spawns: it connects
+  to the daemon's unix-socket control channel and forwards commands/events, so
+  the QML's Process-based wiring is unchanged.
 - **`Service.qml` / `BarWidget.qml` / `Panel.qml`** — the always-on service,
   the bar icon + badge, and the chat panel.
 
@@ -254,8 +283,9 @@ heartbeats stop (a peer expires after ~6 seconds). Messaging is a TLS connection
 to the peer, authenticated by the peer's cert fingerprint (the shared token is
 used only by the optional HTTPS API).
 
-The QML and the daemon talk over newline-delimited JSON — commands on stdin,
-events on stdout:
+The QML and the daemon talk over newline-delimited JSON — commands on the
+bridge's stdin, events on its stdout (the bridge proxies both to/from the
+daemon's unix socket):
 
 ```
 stdin  →  {"cmd":"send","to":"<id>","text":"..."}  {"cmd":"history"}  {"cmd":"list"}
@@ -271,8 +301,8 @@ omarchy plugin validate .
 ```
 
 Saving any file under `~/.config/omarchy/plugins/KelpME.lanchat/` reloads the
-plugin code automatically; the daemon is restarted by the singleton when it
-exits. Run the offline end-to-end suites (two isolated instances):
+plugin code automatically; the daemon is supervised by systemd (it restarts
+itself on crash). Run the offline end-to-end suites (two isolated instances):
 
 ```bash
 python3 server.py
@@ -282,6 +312,7 @@ python3 test_persistent.py   # persistent connections, reconnect/hold/dedupe
 python3 test_features.py     # lazy-load, clear/delete, attachment plumbing, config
 python3 test_attachments.py  # recipient file receipt: accept, checksum, auth pinning
 python3 test_discovery_visibility.py  # broadcast side of the private/open visibility flip
+python3 test_systemd_control.py      # systemd unix-socket control channel + bridge
 ```
 
 > The plugin reloads QML but not always compiled types — after editing QML,
