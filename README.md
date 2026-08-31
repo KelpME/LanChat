@@ -90,22 +90,29 @@ misleading "0 peers online".
 
 ### Uninstalling
 
-The plugin and the systemd unit are removed in two steps — **the systemd unit
-must be removed first**, because `omarchy plugin remove` alone would leave the
-daemon running under systemd:
+A full uninstall removes the systemd unit **and** all your lanchat data. Do it
+in two steps — the systemd unit first, because `omarchy plugin remove` alone
+would leave the daemon running under systemd:
 
 ```bash
-# 1. Stop + remove the systemd unit (daemon stops, no longer auto-starts)
+# 1. Stop the daemon, remove the systemd unit, and wipe config/certs/history
 cd ~/.config/omarchy/plugins/KelpME.lanchat && make systemd-uninstall
 
 # 2. Remove the plugin itself
 omarchy plugin remove KelpME.lanchat --yes
 ```
 
-Your **config, TLS certs, and message history are not touched** by either step —
-they live outside the plugin (`~/.config/omarchy/lanchat.json`,
-`~/.config/omarchy/lanchat-certs/`, `~/.local/state/lanchat/`). To fully wipe
-them too, delete those files/dirs yourself after removing the plugin.
+`make systemd-uninstall` removes:
+- the daemon + its systemd user unit (stops, disables, deletes the unit file)
+- `~/.config/omarchy/lanchat.json` (config, incl. token & friends)
+- `~/.config/omarchy/lanchat-certs/` (TLS identity — a fresh install gets a new one)
+- `~/.local/state/lanchat/` (message history + logs)
+
+So after a full uninstall + reinstall, lanchat starts from a completely clean
+state (new identity, empty history). If you'd rather **keep** your identity,
+config, and history across a reinstall, just skip step 1's data-wipe and only
+remove the systemd unit + plugin — or simply reinstall without uninstalling at
+all (`omarchy plugin update` upgrades in place).
 
 ## First-run setup
 

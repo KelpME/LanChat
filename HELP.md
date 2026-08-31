@@ -169,4 +169,8 @@ If a machine isn't showing up in your peer list:
 4. **Both on the same version?** Update each machine with
    `omarchy plugin update KelpME.lanchat --yes`, then restart the shell.
 
+To **fully uninstall** (remove the daemon, systemd unit, and all lanchat data):
+`cd ~/.config/omarchy/plugins/KelpME.lanchat && make systemd-uninstall`, then
+`omarchy plugin remove KelpME.lanchat --yes`.
+
 History stays per-machine and is never synced to a server.

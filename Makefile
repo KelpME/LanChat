@@ -71,13 +71,17 @@ systemd-install: ## copy systemd/lanchat.service to ~/.config/systemd/user and e
 systemd-status: ## systemctl --user status lanchat (is the daemon running?)
 	@systemctl --user status lanchat --no-pager || true
 
-## systemd-uninstall: stop + disable + remove the lanchat systemd user unit
-systemd-uninstall: ## remove the daemon from systemd (run BEFORE omarchy plugin remove)
+## systemd-uninstall: stop + disable + remove the unit AND wipe all lanchat data
+systemd-uninstall: ## FULL uninstall: stop the daemon, remove the systemd unit, and delete config/certs/history (run BEFORE omarchy plugin remove)
 	@-systemctl --user disable --now lanchat.service 2>/dev/null || true
 	@-rm -f $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.service
 	@systemctl --user daemon-reload
-	@echo "Lanchat systemd unit removed. Now remove the plugin itself: omarchy plugin remove KelpME.lanchat --yes"
-	@echo "NOTE: your config/certs/history are NOT touched (they live outside the plugin)."
+	@echo "Lanchat systemd unit removed."
+	@echo "Wiping user data:"
+	@-rm -rf $${XDG_CONFIG_HOME:-$$HOME/.config}/omarchy/lanchat.json 2>/dev/null; echo "  removed config (lanchat.json)"
+	@-rm -rf $${XDG_CONFIG_HOME:-$$HOME/.config}/omarchy/lanchat-certs 2>/dev/null; echo "  removed TLS certs (lanchat-certs/)"
+	@-rm -rf $${XDG_STATE_HOME:-$$HOME/.local/state}/lanchat 2>/dev/null; echo "  removed history + logs (state/lanchat/)"
+	@echo "Now remove the plugin itself: omarchy plugin remove KelpME.lanchat --yes"
 
 ## lint: ruff check on all Python
 lint: ## run `ruff check` (fast, no fix)

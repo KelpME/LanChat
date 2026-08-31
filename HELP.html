@@ -213,6 +213,9 @@ systemctl --user restart lanchat    # restart it
 <li><strong>Both on the same version?</strong> Update each machine with
    <code>omarchy plugin update KelpME.lanchat --yes</code>, then restart the shell.</li>
 </ol>
+<p>To <strong>fully uninstall</strong> (remove the daemon, systemd unit, and all lanchat data):
+<code>cd ~/.config/omarchy/plugins/KelpME.lanchat &amp;&amp; make systemd-uninstall</code>, then
+<code>omarchy plugin remove KelpME.lanchat --yes</code>.</p>
 <p>History stays per-machine and is never synced to a server.</p>
 </body>
 </html>
