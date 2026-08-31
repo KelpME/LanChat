@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "KelpME.lanchat",
   "name": "Lanchat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "KelpME",
   "license": "MIT",
   "description": "Private LAN messaging between your own machines. Automatic discovery over UDP, shared-secret auth, message history per machine.",

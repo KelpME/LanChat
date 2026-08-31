@@ -60,7 +60,27 @@ HISTORY_LIMIT = 500
 
 # Version of the plugin/daemon. Keep in sync with manifest.json "version".
 # Bump when behaviour changes; breaking changes should bump the major number.
-VERSION = "1.0.0"
+# The reported version derives from the checked-out git commit (short hash) so
+# both machines can verify they're running the same code; falls back to the
+# manifest version when git isn't available (e.g. a bare copy).
+VERSION = "1.0.1"
+
+
+def _git_version() -> str:
+    try:
+        import subprocess as _sp
+        here = os.path.dirname(os.path.abspath(__file__))
+        short = _sp.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=here, stderr=_sp.DEVNULL, text=True).strip()
+        if short:
+            return "%s-%s" % (VERSION, short)
+    except Exception:
+        pass
+    return VERSION
+
+
+VERSION = _git_version()
 
 CONFIG = {}
 _out_lock = threading.Lock()
@@ -127,7 +147,7 @@ def _diag(msg: str, **fields) -> None:
     """Log a diagnostic line AND surface it to the UI as a diagnostic event."""
     extra = ("  " + " ".join("%s=%s" % (k, v) for k, v in fields.items())) if fields else ""
     _log(msg + extra)
-    ev = {"event": "diagnostic", "message": msg}
+    ev = {"event": "diagnostic", "message": msg, "ts": int(time.time() * 1000), "version": VERSION}
     ev.update(fields)
     _emit(ev)
 
@@ -444,10 +464,11 @@ def peer_snapshot() -> list:
         )
 
 
-def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = None, pstatus: str = "available") -> None:
+def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = None, pstatus: str = "available", pversion: str = "") -> None:
     now = time.time()
     with _peers_lock:
         existed = pid in _peers
+        prev_version = _peers[pid].get("version", "") if existed else ""
         _peers[pid] = {
             "id": pid,
             "name": name,
@@ -456,9 +477,10 @@ def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = N
             "httpPort": phttp,
             "status": pstatus if pstatus in STATUSES else "available",
             "lastSeen": int(now * 1000),
+            "version": pversion or prev_version,
         }
     if not existed:
-        _diag("peer-discovered", id=pid[:12], name=name, address=address, port=pport)
+        _diag("peer-discovered", id=pid[:12], name=name, address=address, port=pport, version=pversion)
         _emit({"event": "peer", "peer": _peers[pid]})
     else:
         _emit({"event": "peer", "peer": _peers[pid]})
@@ -590,6 +612,7 @@ def _udp_listener(sock: socket.socket) -> None:
                 int(pkt.get("port", DEFAULT_PORT)),
                 int(pkt.get("httpPort", 0)) or None,
                 str(pkt.get("status") or "available"),
+                str(pkt.get("version") or ""),
             )
             # Reply so the caller learns about us immediately. Send a UNICAST
             # pong back to the sender's address — broadcast replies get lost
@@ -604,6 +627,7 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
     pkt["port"] = port()
     pkt["httpPort"] = http_port()
     pkt["status"] = status()
+    pkt["version"] = VERSION
     dest = target or "255.255.255.255"
     try:
         sock.sendto(json.dumps(pkt).encode("utf-8"), (dest, port()))
@@ -702,6 +726,20 @@ def _scan_subnet(sock: socket.socket) -> None:
         time.sleep(0.01)  # ~100/s — keeps the buffer from filling on a /24
 
 
+def _announce_to_known(sock: socket.socket) -> None:
+    """Unicast hello directly to every peer we already know.
+
+    Broadcast may be filtered on some networks (so periodic broadcast hellos
+    never arrive), but unicast always works. Re-announcing to known peers every
+    broadcast interval keeps them from expiring — this is what makes steady-
+    state discovery reliable where broadcast is unreliable.
+    """
+    with _peers_lock:
+        known = [(p["address"], p["port"]) for p in _peers.values()]
+    for addr, pport in known:
+        _udp_send(sock, {"t": "hello"}, target=addr)
+
+
 def udp_loop() -> None:
     global _udp_sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -716,6 +754,7 @@ def udp_loop() -> None:
     threading.Thread(target=_udp_listener, args=(sock,), daemon=True).start()
 
     last_broadcast = 0.0
+    last_unicast = 0.0
     scanned_once = False
     while True:
         now = time.time()
@@ -723,11 +762,18 @@ def udp_loop() -> None:
         if is_online() and now - last_broadcast >= BROADCAST_INTERVAL_S:
             _udp_send(sock, {"t": "hello"})
             last_broadcast = now
+            # Reliable steady-state discovery: on networks where UDP broadcast
+            # is filtered, peers only ever appear via the one-time scan. Keep
+            # them alive by re-announcing DIRECTLY to every known peer every
+            # broadcast interval — unicast always works, unlike broadcast.
+            _announce_to_known(sock)
+            last_unicast = now
         # Subnet scan ONCE shortly after startup, as a broadcast fallback for
         # networks where broadcasts are filtered. It is NOT repeated: blind
         # unicasting to every host on the /24 every few seconds floods the UDP
-        # send queue and chokes inbound traffic. Broadcast handles steady-state
-        # discovery; the scan only seeds peers that broadcast filtering hides.
+        # send queue and chokes inbound traffic. Broadcast + unicast-to-known
+        # handle steady-state discovery; the scan only seeds peers that
+        # broadcast filtering hides.
         if is_online() and not scanned_once and now - last_broadcast >= 3.0:
             _scan_subnet(sock)
             scanned_once = True
