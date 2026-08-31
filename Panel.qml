@@ -675,10 +675,11 @@ Panel {
               Item {
                 id: onboardingBanner
                 width: parent.width
-                height: root.showOnboarding ? onbContent.implicitHeight + Style.space(12) : 0
+                height: root.showOnboarding && Lanchat.visibility === "private"
+                        ? onbContent.implicitHeight + Style.space(12) : 0
                 anchors.top: peersOnlineBar.bottom
                 anchors.topMargin: Style.spacing.xs
-                visible: root.showOnboarding
+                visible: root.showOnboarding && Lanchat.visibility === "private"
                 clip: true
 
                 Rectangle {
