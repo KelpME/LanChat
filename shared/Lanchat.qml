@@ -32,7 +32,6 @@ QtObject {
   property bool showTyping: true
   property bool readReceiptsEnabled: true
   property bool showReadReceipts: true
-  property bool needsSetup: false   // a deny-inbound firewall may block peers
 
   property bool online: true
   property var friends: []        // [{id,address,name,confirmed}]
@@ -68,10 +67,6 @@ QtObject {
   property string logPathValue: ""
   function logPath() {
     return lanchat.logPathValue
-  }
-  property string setupScriptPathValue: ""
-  function setupScriptPath() {
-    return lanchat.setupScriptPathValue
   }
 
   function startDaemon() {
@@ -236,11 +231,6 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "rejectFriend", id: id }) + "\n")
   }
 
-  // Re-evaluate inbound reachability (after the user opens firewall ports).
-  function recheckSetup() {
-    daemon.write(JSON.stringify({ cmd: "recheckSetup" }) + "\n")
-  }
-
   // Remove a peer from your friends list (unfriend).
   function unfriend(id) {
     daemon.write(JSON.stringify({ cmd: "unfriend", id: id }) + "\n")
@@ -352,8 +342,6 @@ QtObject {
       if (obj.readReceiptsEnabled !== undefined) lanchat.readReceiptsEnabled = obj.readReceiptsEnabled
       if (obj.showReadReceipts !== undefined) lanchat.showReadReceipts = obj.showReadReceipts
       if (obj.logPath) lanchat.logPathValue = obj.logPath
-      if (obj.needsSetup !== undefined) lanchat.needsSetup = obj.needsSetup
-      if (obj.setupScriptPath) lanchat.setupScriptPathValue = obj.setupScriptPath
       lanchat.refreshHistory()
       lanchat.refreshPeers()
       break

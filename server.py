@@ -63,7 +63,12 @@ HISTORY_LIMIT = 500
 # The reported version derives from the checked-out git commit (short hash) so
 # both machines can verify they're running the same code; falls back to the
 # manifest version when git isn't available (e.g. a bare copy).
-VERSION = "1.0.1"
+#
+# 1.1.0 — persistent bidirectional connections: one long-lived outbound TLS
+# socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
+# over the existing socket). Old and new transports do not interoperate; both
+# machines must run >= 1.1.0.
+VERSION = "1.1.0"
 
 
 def _git_version() -> str:
@@ -364,6 +369,7 @@ def http_port() -> int:
 
 _history = []
 _hist_lock = threading.Lock()
+_seen_mids = set()      # mids already appended to history (inbound dedupe)
 
 
 def load_history() -> None:
@@ -382,6 +388,7 @@ def append_history(message: dict) -> None:
     if not message.get("mid"):
         message["mid"] = secrets.token_hex(8)
     with _hist_lock:
+        _seen_mids.add(message["mid"])
         _history.append(message)
         if len(_history) > HISTORY_LIMIT:
             _history = _history[-HISTORY_LIMIT:]
@@ -399,6 +406,13 @@ def _save_history_locked() -> None:
 def history_snapshot() -> list:
     with _hist_lock:
         return list(_history)
+
+
+def _has_mid(mid: str) -> bool:
+    """True if a message with this mid is already in history (dedupe on
+    reconnect / re-delivery)."""
+    with _hist_lock:
+        return mid in _seen_mids
 
 
 def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
@@ -454,7 +468,6 @@ def edit_message(mid: str, new_text: str) -> bool:
 
 _peers = {}          # id -> {id, name, address, port, lastSeen}
 _peers_lock = threading.Lock()
-_inbound_proven = False  # set True once a peer successfully reaches us inbound
 
 
 def peer_snapshot() -> list:
@@ -497,6 +510,7 @@ def expire_peers() -> None:
                 gone.append((pid, age))
                 del _peers[pid]
     for pid, age in gone:
+        _drop_conn(pid)  # close any persistent socket to the expired peer
         _diag("peer-expired", id=pid[:12], age_s=round(age, 1), timeout_s=PEER_TIMEOUT_S)
         _emit({"event": "peer-gone", "id": pid})
 
@@ -792,11 +806,272 @@ def broadcast_now() -> None:
 
 
 # --------------------------------------------------------------------------
-# TCP server (incoming messages)
+# Persistent bidirectional connection manager
+# --------------------------------------------------------------------------
+# Every peer gets ONE active full-duplex TLS socket, reused for many messages
+# in both directions — no per-message dial. Both sides dial out to every known
+# peer AND accept the peer's dial. To avoid a racy split-brain (each side
+# keeping a different socket of a two-dial pair), the socket initiated by the
+# side with the LOWER cert-fingerprint id is the "keeper"; the redundant one is
+# closed. A socket that drops triggers reconnect-with-backoff; messages sent
+# while no socket is up are held and flushed on reconnect, deduped by mid.
+#
+# Identity: an outbound socket's peer id is known (we verified the cert). An
+# inbound socket presents no client cert, so its peer id is learned from the
+# first message's "from" field (the existing self-claimed-id trust model).
+
+_conns = {}          # pid -> connection state dict
+_conns_lock = threading.Lock()
+_RECONNECT_MAX_BACKOFF = 16.0
+
+
+def _conn(pid: str) -> dict:
+    with _conns_lock:
+        c = _conns.get(pid)
+        if c is None:
+            c = {
+                "pid": pid,
+                "sock": None,
+                "initiator": None,      # host_id() if we dialed, else the pid
+                "lock": threading.Lock(),   # serializes writes + close
+                "backoff": 2.0,
+                "next_try": 0.0,
+                "dialing": False,
+                "hold": [],             # outbound msgs awaiting a socket
+                "sent_mids": set(),     # mids already written (dedupe on flush)
+            }
+            _conns[pid] = c
+        return c
+
+
+def _close_sock(sock) -> None:
+    try:
+        sock.close()
+    except OSError:
+        pass
+
+
+def _flush_locked(c: dict) -> None:
+    """Write queued outbound messages over the active socket, in order, skipping
+    any mid already written before a drop (dedupe). Called under c['lock']."""
+    if c["sock"] is None:
+        return
+    still = []
+    for p in c["hold"]:
+        mid = p.get("mid")
+        if mid and mid in c["sent_mids"]:
+            continue  # already attempted before the socket dropped
+        try:
+            c["sock"].sendall(json.dumps(p, separators=(",", ":")).encode("utf-8") + b"\n")
+            if mid:
+                c["sent_mids"].add(mid)
+        except OSError:
+            still.append(p)
+            break  # socket died mid-flush; keep the rest for the next reconnect
+    c["hold"] = still
+
+
+def _write(pid: str, payload: dict) -> bool:
+    """Write one JSON line to a peer's active socket, or hold it for later if the
+    socket is down. Returns True if delivered now, False if queued/dropped.
+    Only messages (and the accept handshake) are held; transient control
+    messages (typing / read / reject) are dropped when the socket is down."""
+    c = _conn(pid)
+    holdable = payload.get("t") in ("msg", "friendAccept")
+    mid = payload.get("mid")
+    with c["lock"]:
+        sock = c["sock"]
+        if sock is not None:
+            try:
+                sock.sendall(json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n")
+                if mid:
+                    c["sent_mids"].add(mid)
+                return True
+            except OSError:
+                _close_sock(sock)
+                c["sock"] = None
+        if holdable:
+            c["hold"].append(payload)
+        return False
+
+
+def _drop_conn(pid: str) -> None:
+    c = _conn(pid)
+    with c["lock"]:
+        sock = c["sock"]
+        c["sock"] = None
+        c["initiator"] = None
+    if sock is not None:
+        _close_sock(sock)
+
+
+def _drop_all_conns() -> None:
+    with _conns_lock:
+        pids = list(_conns.keys())
+    for pid in pids:
+        _drop_conn(pid)
+
+
+def _maybe_set_active(pid: str, sock, initiator: str) -> bool:
+    """Try to make `sock` the active connection for `pid`. When another socket
+    already holds the slot, apply the deterministic keeper tie-break (keep the
+    socket initiated by the lower fingerprint id) so both machines converge on
+    the same connection. Adopts `sock` unconditionally when no socket is up yet.
+    Returns True if `sock` is (or becomes) the active connection."""
+    keeper = min(host_id(), pid)
+    c = _conn(pid)
+    with c["lock"]:
+        cur = c["sock"]
+        if cur is sock:
+            return True
+        if cur is not None:
+            cur_init = c.get("initiator")
+            if cur_init == keeper and initiator != keeper:
+                return False      # a better (keeper) socket already active
+            if cur_init != keeper and initiator != keeper:
+                return False      # neither is the keeper yet — keep the first
+            _close_sock(cur)      # new socket is the keeper -> replace
+        c["sock"] = sock
+        c["initiator"] = initiator
+        c["backoff"] = 2.0
+        c["next_try"] = 0.0
+        try:
+            sock.settimeout(None)
+        except OSError:
+            pass
+        _flush_locked(c)
+        return True
+
+
+def _reader_outbound(pid: str, c: dict, sock) -> None:
+    """Reader for a socket WE dialed (verified peer id). Reads messages until the
+    socket drops, then clears the slot so the supervisor reconnects."""
+    src = ("", 0)
+    try:
+        src = sock.getpeername()[:2]
+    except OSError:
+        pass
+    buf = b""
+    try:
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if line.strip():
+                    try:
+                        msg = json.loads(line.decode("utf-8"))
+                    except ValueError:
+                        continue
+                    _handle_incoming(msg, src)
+    except (OSError, ssl.SSLError):
+        pass
+    finally:
+        with c["lock"]:
+            if c["sock"] is sock:
+                c["sock"] = None
+                c["initiator"] = None
+        _close_sock(sock)
+
+
+def _reader_inbound(sock) -> None:
+    """Reader for a socket the PEER dialed (no client cert). The peer's id is
+    learned from the first message's 'from' field, then the socket is adopted as
+    active (keeper tie-break). If it loses the tie-break to an already-active
+    socket, it still reads inbound messages but is never used for writing."""
+    src = ("", 0)
+    try:
+        src = sock.getpeername()[:2]
+    except OSError:
+        pass
+    pid = None
+    active = False
+    buf = b""
+    try:
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if not line.strip():
+                    continue
+                try:
+                    msg = json.loads(line.decode("utf-8"))
+                except ValueError:
+                    continue
+                if pid is None:
+                    claimed = str(msg.get("from") or "")
+                    if claimed and claimed != host_id():
+                        pid = claimed
+                        active = _maybe_set_active(pid, sock, initiator=claimed)
+                if pid is not None:
+                    _handle_incoming(msg, src)
+    except (OSError, ssl.SSLError):
+        pass
+    finally:
+        if active and pid:
+            c = _conn(pid)
+            with c["lock"]:
+                if c["sock"] is sock:
+                    c["sock"] = None
+                    c["initiator"] = None
+        _close_sock(sock)
+
+
+def _peer_dial_targets() -> list:
+    """Known peers + confirmed friends to keep a connection to. Friends we
+    haven't seen recently are still dialed from their stored address."""
+    targets = {}
+    with _peers_lock:
+        for pid, p in _peers.items():
+            targets[pid] = (p["address"], p["port"])
+    for f in CONFIG.get("friends", []):
+        if f.get("confirmed") and f.get("address"):
+            targets.setdefault(f["id"], (f["address"], f.get("port") or DEFAULT_PORT))
+    return [(pid, addr, pport) for pid, (addr, pport) in targets.items()]
+
+
+def conn_loop() -> None:
+    """Supervisor: dial out to peers with no active socket, respecting backoff."""
+    while True:
+        time.sleep(1.0)
+        if not is_online():
+            continue
+        now = time.time()
+        for pid, addr, pport in _peer_dial_targets():
+            if pid == host_id():
+                continue
+            c = _conn(pid)
+            with c["lock"]:
+                if c["sock"] is not None or c["dialing"]:
+                    continue
+                if now < c.get("next_try", 0.0):
+                    continue
+                c["dialing"] = True
+            s = _tls_connect({"id": pid, "address": addr, "port": pport, "name": pid},
+                             expected_fingerprint=pid)
+            with c["lock"]:
+                c["dialing"] = False
+            if s is None:
+                with c["lock"]:
+                    c["backoff"] = min(c["backoff"] * 2.0, _RECONNECT_MAX_BACKOFF)
+                    c["next_try"] = now + c["backoff"]
+                continue
+            if _maybe_set_active(pid, s, initiator=host_id()):
+                threading.Thread(target=_reader_outbound, args=(pid, c, s), daemon=True).start()
+            else:
+                _close_sock(s)
+
+
+# --------------------------------------------------------------------------
+# TCP listener (accepts the peer's outbound dials)
 # --------------------------------------------------------------------------
 
 def tcp_loop() -> None:
-    global _inbound_proven
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -810,50 +1085,9 @@ def tcp_loop() -> None:
         try:
             raw_conn, addr = srv.accept()
             conn = tls_ctx.wrap_socket(raw_conn, server_side=True)
-        except (OSError, ssl.SSLError) as e:
-            _log("inbound-tls-failed addr=%s err=%s" % (addr, e))
+        except (OSError, ssl.SSLError):
             continue
-        # A successful inbound TLS connection proves other machines can reach
-        # us — clear the setup flag even if a firewall is still active.
-        _inbound_proven = True
-        threading.Thread(target=_handle_client, args=(conn, addr), daemon=True).start()
-
-
-def _handle_client(conn: socket.socket, addr) -> None:
-    conn.settimeout(30)
-    try:
-        buf = b""
-        while b"\n" not in buf:
-            chunk = conn.recv(4096)
-            if not chunk:
-                conn.close()
-                return
-            buf += chunk
-        line, rest = buf.split(b"\n", 1)
-        # No token handshake — the friend/handshake gate (is_trusted) decides
-        # what actually gets processed in _handle_incoming.
-        conn.sendall(b"ok\n")
-        # The first line is the first message (no token preamble anymore).
-        if line.strip():
-            _handle_incoming(line, addr)
-        lines = rest.split(b"\n") if rest else []
-        for line in lines:
-            if line.strip():
-                _handle_incoming(line, addr)
-        while True:
-            chunk = conn.recv(4096)
-            if not chunk:
-                break
-            for line in chunk.split(b"\n"):
-                if line.strip():
-                    _handle_incoming(line, addr)
-    except OSError:
-        pass
-    finally:
-        try:
-            conn.close()
-        except OSError:
-            pass
+        threading.Thread(target=_reader_inbound, args=(conn,), daemon=True).start()
 
 
 # Handshake hold: pid -> list of held messages awaiting the recipient's accept.
@@ -873,11 +1107,7 @@ def _reveal(held, outgoing: bool = False) -> None:
         _emit({"event": "message", "message": m})
 
 
-def _handle_incoming(line: bytes, addr) -> None:
-    try:
-        msg = json.loads(line.decode("utf-8"))
-    except ValueError:
-        return
+def _handle_incoming(msg: dict, addr) -> None:
     if msg.get("t") == "friendAccept":
         pid = str(msg.get("from", ""))
         pname = str(msg.get("fromName") or friendly_name(pid))
@@ -911,6 +1141,12 @@ def _handle_incoming(line: bytes, addr) -> None:
         return
     pid = str(msg.get("from", ""))
     is_req = bool(msg.get("friendRequest"))
+    # Dedupe on re-delivery: a message whose mid is already in history (e.g.
+    # the socket dropped after delivery but before ack, then re-flushed) is
+    # not appended again.
+    if msg.get("mid") and _has_mid(msg["mid"]):
+        _log("inbound-dropped from=%s reason=duplicate-mid %s" % (pid[:12], msg["mid"][:12]))
+        return
     # Friend requests are the entry point: a stranger may ask to be friends.
     # Everything else must come from a trusted peer.
     if not is_req and not is_trusted(pid, addr[0]):
@@ -940,6 +1176,8 @@ def _handle_incoming(line: bytes, addr) -> None:
         "peerAddress": addr[0],
         "friendRequest": bool(msg.get("friendRequest")),
     }
+    if msg.get("mid"):
+        message["mid"] = msg["mid"]
     # A friend request from a stranger is a legitimate inbound channel: it's
     # how they ask to talk. Record them as a pending-request peer so their
     # replies (accept) are trusted. Hold EVERY friend request from a
@@ -1053,119 +1291,67 @@ def _tls_connect(peer: dict, expected_fingerprint: str = ""):
 
 def send_message(peer_id: str, text: str, friend_request: bool = False, attachment: dict = None) -> bool:
     peer = find_peer(peer_id)
-    if peer is None:
-        _diag("send-peer-offline", to=peer_id[:12], text=text[:40])
-        _emit({"event": "error", "message": "peer '%s' is not online yet" % peer_id})
-        return False
-    s = _tls_connect(peer, expected_fingerprint=peer_id)
-    if s is None:
-        _diag("send-tls-failed", to=peer_id[:12], name=peer["name"])
-        _emit({"event": "error", "message": "could not establish secure connection to %s" % peer["name"]})
-        return False
-    try:
-        s.settimeout(5)
-        msg = {
-            "from": host_id(),
-            "fromName": display_name(),
-            "text": text,
-            "ts": int(time.time() * 1000),
-        }
-        if attachment:
-            msg["attachment"] = attachment  # {name,size,mime,fileId,sha256}
-        if friend_request:
-            msg["friendRequest"] = True
-            # Record the peer as a pending-request friend on our side, so they
-            # become trusted (can reply/accept) and show as a friend request.
-            if not is_pending(peer_id) and not is_friend(peer_id):
-                add_friend(peer_id, peer["address"], peer["name"], confirmed=False)
-            # A friend request is a handshake: register the held message NOW,
-            # before sending, so a fast peer accept (which arrives on a separate
-            # connection/thread) can always find and reveal it.
-            msg["to"] = peer_id
-            msg["outgoing"] = True
-            if not msg.get("mid"):
-                msg["mid"] = secrets.token_hex(8)
-            msg["held"] = True
-            with _pending_lock:
-                _pending_sent.setdefault(peer_id, []).append(msg)
-        # Send the message first; the receiver replies with "ok" after reading it.
-        s.sendall(json.dumps({"t": "msg", **msg}).encode("utf-8") + b"\n")
-        try:
-            s.recv(64)  # consume the "ok" ack
-        except Exception:
-            pass
-        s.close()
-        if friend_request:
-            _emit({"event": "friend-request", "outgoing": True, "to": peer_id, "toName": peer["name"],
-                   "text": text, "ts": msg["ts"], "mid": msg["mid"]})
-            _diag("outbound-friend-request", to=peer_id[:12], name=peer["name"], text=text[:40])
-        else:
-            msg["to"] = peer_id
-            msg["outgoing"] = True
-            append_history(msg)
-            _emit({"event": "message", "message": msg})
-            _diag("outbound-message-sent", to=peer_id[:12], name=peer["name"], text=text[:40])
-        return True
-    except OSError as e:
-        _emit({"event": "error", "message": "could not reach %s: %s" % (peer["name"], e)})
-        return False
+    name = (peer or {}).get("name") or friendly_name(peer_id)
+    msg = {
+        "t": "msg",
+        "from": host_id(),
+        "fromName": display_name(),
+        "text": text,
+        "ts": int(time.time() * 1000),
+        "to": peer_id,
+        "outgoing": True,
+        "mid": secrets.token_hex(8),
+    }
+    if attachment:
+        msg["attachment"] = attachment  # {name,size,mime,fileId,sha256}
+    if friend_request:
+        msg["friendRequest"] = True
+        # Record the peer as a pending-request friend on our side, so they
+        # become trusted (can reply/accept) and show as a friend request.
+        if not is_pending(peer_id) and not is_friend(peer_id):
+            add_friend(peer_id, (peer or {}).get("address", ""), name, confirmed=False)
+        # A friend request is a handshake: register the held message NOW,
+        # before sending, so a fast peer accept can always find and reveal it.
+        msg["held"] = True
+        with _pending_lock:
+            _pending_sent.setdefault(peer_id, []).append(msg)
+    # Write to the peer's persistent socket (or hold until it reconnects).
+    delivered = _write(peer_id, msg)
+    if friend_request:
+        _emit({"event": "friend-request", "outgoing": True, "to": peer_id, "toName": name,
+               "text": text, "ts": msg["ts"], "mid": msg["mid"]})
+        _diag("outbound-friend-request", to=peer_id[:12], name=name, text=text[:40])
+    else:
+        append_history(msg)
+        _emit({"event": "message", "message": msg})
+        _diag("outbound-message-sent", to=peer_id[:12], name=name, text=text[:40])
+        if not delivered:
+            _emit({"event": "error", "message": "%s is offline; message held until the connection returns" % name})
+    return True
 
 
 def send_control(peer_id: str, ctype: str, mid: str = "") -> bool:
-    """Send a friend accept/reject / typing / read control message to a peer."""
-    peer = find_peer(peer_id)
-    if peer is None:
-        _diag("send-control-peer-offline", peer=peer_id[:12], ctype=ctype)
-        return False
-    s = _tls_connect(peer, expected_fingerprint=peer_id)
-    if s is None:
-        _diag("send-control-tls-failed", peer=peer_id[:12], ctype=ctype,
-              addr=peer.get("address"), port=peer.get("port"))
-        return False
-    try:
-        s.settimeout(5)
-        # Send the control message first; the receiver replies with "ok" after reading it.
-        payload = {
-            "t": ctype,  # friendAccept / friendReject / typing / typingStopped / read
-            "from": host_id(),
-            "fromName": display_name(),
-        }
-        if mid:
-            payload["mid"] = mid
-        s.sendall(json.dumps(payload).encode("utf-8") + b"\n")
-        try:
-            s.recv(64)  # consume the "ok" ack
-        except Exception:
-            pass
-        s.close()
-        return True
-    except OSError as e:
-        _diag("send-control-io-failed", peer=peer_id[:12], ctype=ctype, err=str(e))
-        return False
+    """Send a friend accept/reject / typing / read control message to a peer
+    over its persistent socket (no per-message dial)."""
+    payload = {
+        "t": ctype,  # friendAccept / friendReject / typing / typingStopped / read
+        "from": host_id(),
+        "fromName": display_name(),
+    }
+    if mid:
+        payload["mid"] = mid
+    delivered = _write(peer_id, payload)
+    if not delivered and ctype != "friendAccept":
+        # Transient control (typing/read/reject) is dropped, not queued.
+        _diag("send-control-dropped", peer=peer_id[:12], ctype=ctype)
+    return delivered
 
 
 def _notify_accept(peer_id: str) -> bool:
-    """Send the friendAccept notification back to the sender.
-
-    If the peer is momentarily unreachable (vanishing peer), retry in the
-    background every few seconds until it lands, so the handshake completes on
-    the sender's side too. Returns True if the first attempt succeeded.
-    """
-    if send_control(peer_id, "friendAccept"):
-        return True
-    peer = find_peer(peer_id)
-    name = peer["name"] if peer else friendly_name(peer_id)
-
-    def _retry():
-        for _ in range(60):  # try for up to ~5 minutes
-            time.sleep(5)
-            if send_control(peer_id, "friendAccept"):
-                _diag("accept-notify-delivered", peer=peer_id[:12], name=name)
-                return
-        _diag("accept-notify-gave-up", peer=peer_id[:12], name=name)
-
-    threading.Thread(target=_retry, daemon=True).start()
-    return False
+    """Send the friendAccept notification over the peer's persistent socket.
+    If no socket is up yet, the message is held and flushed on reconnect — no
+    reverse dial, no polling."""
+    return send_control(peer_id, "friendAccept")
 
 
 # --------------------------------------------------------------------------
@@ -1382,10 +1568,6 @@ def stdin_loop() -> None:
                 _stop_http()
             CONFIG["httpEnabled"] = enabled
             _save_config()
-        elif kind == "recheckSetup":
-            # Re-evaluate inbound reachability and re-emit ready so the UI
-            # can dismiss the setup overlay after the user opens the ports.
-            _emit(_ready_event())
         elif kind == "setApiFullAccess":
             CONFIG["apiFullAccess"] = bool(cmd.get("enabled"))
             _save_config()
@@ -1450,6 +1632,10 @@ def stdin_loop() -> None:
             _emit({"event": "online", "online": on})
             if on:
                 broadcast_now()
+            else:
+                # Going offline: drop all persistent sockets and stop dialing
+                # (conn_loop also gates on is_online).
+                _drop_all_conns()
         elif kind == "acceptFriend":
             pid = str(cmd.get("id", ""))
             peer = find_peer(pid)
@@ -1491,61 +1677,6 @@ def stdin_loop() -> None:
 # Startup
 # --------------------------------------------------------------------------
 
-def _inbound_blocked() -> bool:
-    """Detect whether a deny-inbound firewall (UFW / firewalld) is likely to
-    block LAN peers from reaching us, WITHOUT needing root.
-
-    Checks whether ufw or firewalld is enabled and active. If one is, inbound
-    to the lanchat ports is almost certainly blocked unless an allow rule was
-    added — that's the setup condition we want to surface in the UI.
-
-    Non-root users can't query UFW's full status ("need root"), but that's
-    itself a signal: if UFW is installed and the status query errors with
-    "need root", it's more likely active than not, and its default inbound
-    policy is deny. We treat "installed + status not verifiably inactive" as
-    needs-setup.
-
-    BUT: if a peer has already reached us inbound (proven by a successful TLS
-    accept), inbound clearly works, so we return False regardless of what the
-    firewall state suggests.
-    """
-    if _inbound_proven:
-        return False
-    import subprocess as _sp
-    # UFW: active if its systemd unit is running, or status says active.
-    try:
-        r = _sp.run(["systemctl", "is-active", "ufw"],
-                    capture_output=True, text=True, timeout=2)
-        if (r.stdout or "").strip() == "active":
-            return True
-    except (OSError, _sp.SubprocessError):
-        pass
-    try:
-        r = _sp.run(["ufw", "status"], capture_output=True, text=True, timeout=2)
-        out = (r.stdout or "").strip().lower()
-        err = (r.stderr or "").strip().lower()
-        if "status: active" in out:
-            return True
-        if "inactive" in out:
-            return False
-        # "ERROR: You need to be root" means UFW exists; without an explicit
-        # inactive signal we can't rule it out, so flag for setup.
-        if "need to be root" in err or "need root" in out + err:
-            return True
-    except (OSError, _sp.SubprocessError):
-        pass
-    # firewalld: running if its systemd unit is active.
-    try:
-        r = _sp.run(["systemctl", "is-active", "firewalld"],
-                    capture_output=True, text=True, timeout=2)
-        if (r.stdout or "").strip() == "active":
-            return True
-    except (OSError, _sp.SubprocessError):
-        pass
-    # Neither firewall present/enabled — assume inbound is fine.
-    return False
-
-
 def _ready_event() -> dict:
     return {
         "event": "ready",
@@ -1568,8 +1699,6 @@ def _ready_event() -> dict:
         "readReceiptsEnabled": read_receipts_enabled(),
         "showReadReceipts": show_read_receipts(),
         "logPath": _LOG_PATH,
-        "needsSetup": _inbound_blocked(),
-        "setupScriptPath": os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "setup-firewall.sh"),
     }
 
 
@@ -1581,6 +1710,7 @@ def main() -> None:
         _start_http()
     threading.Thread(target=tcp_loop, daemon=True).start()
     threading.Thread(target=udp_loop, daemon=True).start()
+    threading.Thread(target=conn_loop, daemon=True).start()
     stdin_loop()  # blocks until the shell closes stdin; also supervises the process lifetime
 
 

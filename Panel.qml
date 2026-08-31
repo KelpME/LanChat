@@ -134,10 +134,6 @@ Panel {
   // next send as an edit of that mid.
   property string editingMid: ""
   property bool diagExpanded: false
-  // Dismissed the non-blocking firewall setup notice for this session.
-  property bool setupDismissed: false
-  // Whether the collapsible firewall setup dropdown is expanded.
-  property bool setupExpanded: false
   function editMsg(mid, text) {
     editingMid = mid
     input.text = text
@@ -208,26 +204,6 @@ Panel {
   // Open the daemon diagnostic log (surfaces why peers vanish / messages drop).
   function openLog() {
     Quickshell.execDetached(["xdg-open", Lanchat.logPath()])
-  }
-
-  // The absolute, universally-runnable setup command (works from any cwd).
-  function setupCommand() {
-    return "sudo bash " + Lanchat.setupScriptPath()
-  }
-
-  // Launch a terminal that SHOWS the setup command first, then lets the user
-  // press Enter to run it (sudo prompts for the password in that terminal).
-  function runSetup() {
-    var cmd = root.setupCommand()
-    // Pick the first installed terminal emulator via a shell command -v probe.
-    // Inside the terminal: print what's about to run, pause for Enter, run it,
-    // then pause again so the user can read the output before closing.
-    var inner = "echo; echo 'About to run: " + cmd + "'; echo; " +
-      "read -p 'Press Enter to run this command...'; " +
-      cmd + "; echo; read -p 'Press Enter to close...'"
-    Util.execArgv(["bash", "-lc",
-      'for t in foot alacritty kitty konsole gnome-terminal xterm x-terminal-emulator; do command -v "$t" >/dev/null 2>&1 && { exec "$t" -e bash -c ' +
-      JSON.stringify(inner) + '; break; }; done'])
   }
 
   // Last component of a path (folder name).
@@ -1040,92 +1016,6 @@ Panel {
                       Button { width: Style.space(24); height: Style.space(18); text: "L"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("large") }
                       Button { width: Style.space(28); height: Style.space(18); text: "XL"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("xl") }
                       Button { width: Style.space(24); height: Style.space(18); text: "F"; fontSize: Style.font.caption; onClicked: Lanchat.setPanelSize("full") }
-                    }
-                  }
-
-                  // Firewall setup dropdown — shown when a deny-inbound firewall
-                  // may block peers from reaching us. Collapsed by default so it
-                  // never takes up space or covers the UI.
-                  Item {
-                    width: parent.width
-                    height: Style.space(30)
-                    visible: Lanchat.needsSetup && !root.setupDismissed
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: root.setupExpanded ? "\u25BC Firewall notice" : "\u25B6 Firewall notice"
-                      color: Lanchat.needsSetup ? Color.urgent : Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    MouseArea {
-                      anchors.fill: parent
-                      onClicked: root.setupExpanded = !root.setupExpanded
-                    }
-                  }
-
-                  // Expanded setup details.
-                  Item {
-                    visible: Lanchat.needsSetup && root.setupExpanded
-                    width: parent.width
-                    height: setupDetailCol.implicitHeight
-                    anchors.leftMargin: Style.spacing.sm
-
-                    Column {
-                      id: setupDetailCol
-                      width: parent.width - Style.space(16)
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      spacing: Style.spacing.sm
-
-                      Text {
-                        width: parent.width
-                        text: "Lanchat can send but may not receive. Your firewall "
-                          + "(UFW/firewalld) blocks incoming connections. Open the "
-                          + "ports once so other machines can reach you:"
-                        color: Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        wrapMode: Text.Wrap
-                      }
-
-                      Text {
-                        width: parent.width
-                        text: root.setupCommand()
-                        color: Color.accent
-                        font.family: "monospace"
-                        font.pixelSize: Style.font.caption
-                        wrapMode: Text.Wrap
-                      }
-
-                      Row {
-                        spacing: Style.spacing.sm
-
-                        Button {
-                          text: "Open terminal"
-                          fontSize: Style.font.caption
-                          onClicked: root.runSetup()
-                        }
-                        Button {
-                          text: "Copy command"
-                          fontSize: Style.font.caption
-                          onClicked: root.copyToClipboard(root.setupCommand())
-                        }
-                        Button {
-                          text: "Re-check"
-                          fontSize: Style.font.caption
-                          onClicked: Lanchat.recheckSetup()
-                        }
-                        Button {
-                          text: "Dismiss"
-                          fontSize: Style.font.caption
-                          onClicked: root.setupDismissed = true
-                        }
-                      }
                     }
                   }
 
