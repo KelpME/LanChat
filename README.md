@@ -281,6 +281,7 @@ python3 test_friends.py      # friend/handshake + online-toggle over TLS
 python3 test_persistent.py   # persistent connections, reconnect/hold/dedupe
 python3 test_features.py     # lazy-load, clear/delete, attachment plumbing, config
 python3 test_attachments.py  # recipient file receipt: accept, checksum, auth pinning
+python3 test_discovery_visibility.py  # broadcast side of the private/open visibility flip
 ```
 
 > The plugin reloads QML but not always compiled types — after editing QML,
