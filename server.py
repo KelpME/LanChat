@@ -1531,11 +1531,22 @@ def tcp_loop() -> None:
     except OSError as e:
         _emit({"event": "error", "message": "lanchat TCP bind failed on port %d: %s" % (port(), e)})
         return
-    tls_ctx = ensure_tls()
+    # Always serve the CURRENT cert, never a stale one loaded once at boot.
+    # If the cert is regenerated while this daemon runs (e.g. a reinstall
+    # wiped + regenerated lanchat-certs), host_id() reads the new cert fresh
+    # but a cached tls_ctx would keep serving the old one — a fingerprint
+    # mismatch that silently breaks every peer connection. Reload per accept
+    # so the served cert always matches the announced identity.
+    def _current_tls_ctx() -> ssl.SSLContext:
+        ensure_tls()  # generate if missing
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(CERT_PEM, CERT_KEY)
+        return ctx
+
     while True:
         try:
             raw_conn, addr = srv.accept()
-            conn = tls_ctx.wrap_socket(raw_conn, server_side=True)
+            conn = _current_tls_ctx().wrap_socket(raw_conn, server_side=True)
         except (OSError, ssl.SSLError):
             continue
         if not _conn_slot_taken():
