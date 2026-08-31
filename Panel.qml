@@ -319,29 +319,15 @@ Panel {
     Lanchat.rejectFriend(id)
   }
 
-  // (1.3) Read the "Add friend by fingerprint" field (+ optional address) and
-  // add the friend. The address lets the daemon dial immediately even on a
-  // network where UDP discovery is blocked — without it, the peer's address
-  // must be learned from a broadcast hello (which may never arrive).
+  // (1.3) Read the "Add friend by fingerprint" field and add the friend.
+  // The friend's address is learned automatically from discovery; the
+  // fingerprint is the peer's verified identity, so no manual address is
+  // needed (and would be overkill / error-prone to enter by hand).
   function addFriendByFingerprint() {
     var fid = addFrInput ? addFrInput.text.trim() : ""
     if (!fid) return
-    var addr = addFrAddrInput ? addFrAddrInput.text.trim() : ""
-    // Split "IP:port" into address + port if provided.
-    var address = ""
-    var port = 0
-    if (addr) {
-      var c = addr.lastIndexOf(":")
-      if (c > 0 && addr.indexOf(":") === c) {
-        address = addr.slice(0, c).trim()
-        port = parseInt(addr.slice(c + 1), 10) || 0
-      } else {
-        address = addr
-      }
-    }
-    Lanchat.addFriendByFingerprint(fid, address, port)
+    Lanchat.addFriendByFingerprint(fid)
     addFrInput.text = ""
-    if (addFrAddrInput) addFrAddrInput.text = ""
   }
 
   // Path to the help document (HELP.html next to the panel). HTML is used so
@@ -1002,14 +988,13 @@ Panel {
                   // (1.3) Add a friend by fingerprint (private mode).
                   Item {
                     width: parent.width
-                    height: Style.space(58)
+                    height: Style.space(30)
 
                     Text {
                       id: addFrLabel
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
-                      anchors.top: parent.top
-                      anchors.topMargin: Style.space(2)
+                      anchors.verticalCenter: parent.verticalCenter
                       text: "Add friend"
                       color: Color.popups.text
                       font.family: Style.font.family
@@ -1023,8 +1008,7 @@ Panel {
                       anchors.leftMargin: Style.spacing.sm
                       anchors.right: addFrButton.left
                       anchors.rightMargin: Style.spacing.sm
-                      anchors.top: parent.top
-                      anchors.topMargin: Style.space(2)
+                      anchors.verticalCenter: parent.verticalCenter
                       maximumLength: 128
                       placeholderText: "cert fingerprint"
                       horizontalPadding: Style.space(8)
@@ -1036,29 +1020,9 @@ Panel {
                       id: addFrButton
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
-                      anchors.top: parent.top
-                      anchors.topMargin: Style.space(2)
+                      anchors.verticalCenter: parent.verticalCenter
                       text: "Add"
                       onClicked: root.addFriendByFingerprint()
-                    }
-
-                    // Optional address (IP or IP:port) so the daemon can dial
-                    // immediately on networks where UDP discovery is blocked.
-                    // Without it, the peer's address must be learned from a
-                    // broadcast hello (which may never arrive).
-                    TextField {
-                      id: addFrAddrInput
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.top: addFrInput.bottom
-                      anchors.topMargin: Style.spacing.xs
-                      maximumLength: 64
-                      placeholderText: "optional address (IP or IP:port) — needed if discovery is blocked"
-                      horizontalPadding: Style.space(8)
-                      verticalPadding: Style.space(4)
-                      onAccepted: root.addFriendByFingerprint()
                     }
                   }
 

@@ -355,15 +355,13 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setOnline", online: on }) + "\n")
   }
 
-  // (1.3) Add a confirmed friend directly by their cert fingerprint. Optional
-  // address/port help the daemon dial immediately; without them the friend's
-  // address is learned from their next hello (confirmed friends are accepted
-  // in private mode).
-  function addFriendByFingerprint(id, address, port) {
+  // (1.3) Add a confirmed friend directly by their cert fingerprint. The
+  // friend's address is learned automatically from discovery (confirmed
+  // friends are accepted in private mode), so only the fingerprint is needed.
+  function addFriendByFingerprint(id) {
     var fid = String(id || "").trim()
     if (!fid) return
-    daemon.write(JSON.stringify({ cmd: "setFriend", id: fid,
-      address: String(address || "").trim(), port: port || 0 }) + "\n")
+    daemon.write(JSON.stringify({ cmd: "setFriend", id: fid }) + "\n")
   }
 
   // Accept/reject an incoming friend request.
