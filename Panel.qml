@@ -134,8 +134,6 @@ Panel {
   // next send as an edit of that mid.
   property string editingMid: ""
   property bool diagExpanded: false
-  // First-run setup wizard step (shown when Lanchat.needsSetup is true).
-  property int setupStep: 1
   function editMsg(mid, text) {
     editingMid = mid
     input.text = text
@@ -1593,8 +1591,8 @@ Panel {
       }
 
       // ---- first-run setup overlay: a deny-inbound firewall is likely
-      // blocking LAN peers from reaching us. Guides the user through opening
-      // the ports, step by step, explaining what's happening.
+      // blocking LAN peers from reaching us. One screen: what's wrong, the
+      // fix, and the re-check button.
       Rectangle {
         visible: Lanchat.needsSetup
         anchors.fill: parent
@@ -1606,185 +1604,70 @@ Panel {
           width: parent.width - Style.space(48)
           spacing: Style.spacing.md
 
-          // Step indicator: 1/2/3
           Text {
             width: parent.width
-            text: "Step " + root.setupStep + " of 3"
-            color: Color.muted
+            text: "Lanchat needs a one-time firewall setup"
+            color: Color.foreground
             font.family: Style.font.family
-            font.pixelSize: Style.font.caption
+            font.pixelSize: Style.font.title
+            font.weight: Font.Bold
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+          }
+
+          Text {
+            width: parent.width
+            text: "Lanchat is peer-to-peer, so other machines must be able to "
+              + "reach this one. Your firewall (UFW/firewalld) is blocking "
+              + "incoming connections by default — lanchat can send but not "
+              + "receive. Open the ports once to fix it:"
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            wrapMode: Text.Wrap
             horizontalAlignment: Text.AlignHCenter
           }
 
-          // Step 1: what's going on.
-          Column {
-            visible: root.setupStep === 1
-            width: parent.width
-            spacing: Style.spacing.md
+          // The command in a selectable/copyable box.
+          Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width - Style.space(24)
+            height: Style.space(36)
+            radius: Style.cornerRadius
+            color: Style.selectedFill
 
             Text {
-              width: parent.width
-              text: "Why lanchat needs a moment of setup"
+              anchors.centerIn: parent
+              text: "sudo bash scripts/setup-firewall.sh"
               color: Color.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.title
-              font.weight: Font.Bold
-              horizontalAlignment: Text.AlignHCenter
-              wrapMode: Text.Wrap
-            }
-
-            Text {
-              width: parent.width
-              text: "Lanchat is peer-to-peer: every machine talks directly over "
-                + "your local network. That means other machines must be able to "
-                + "connect to this one — not just this one connecting to them."
-              color: Color.popups.text
-              font.family: Style.font.family
+              font.family: "monospace"
               font.pixelSize: Style.font.body
-              wrapMode: Text.Wrap
               horizontalAlignment: Text.AlignHCenter
-            }
-
-            Text {
-              width: parent.width
-              text: "Your firewall (UFW/firewalld) is set to block incoming "
-                + "connections by default. That's good for security — but it "
-                + "also stops your other machines from reaching you. Lanchat "
-                + "can still send, but it can't receive. That's the one-way "
-                + "problem you'd hit."
-              color: Color.popups.text
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              wrapMode: Text.Wrap
-              horizontalAlignment: Text.AlignHCenter
-            }
-
-            Button {
-              anchors.horizontalCenter: parent.horizontalCenter
-              text: "Next"
-              onClicked: root.setupStep = 2
+              elide: Text.ElideMiddle
             }
           }
 
-          // Step 2: the fix, with copy + explanation.
-          Column {
-            visible: root.setupStep === 2
-            width: parent.width
+          Row {
+            anchors.horizontalCenter: parent.horizontalCenter
             spacing: Style.spacing.md
 
-            Text {
-              width: parent.width
-              text: "Open the lanchat ports"
-              color: Color.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.title
-              font.weight: Font.Bold
-              horizontalAlignment: Text.AlignHCenter
-              wrapMode: Text.Wrap
-            }
-
-            Text {
-              width: parent.width
-              text: "Run this once (you'll be asked for your password). It lets "
-                + "machines on your local network reach lanchat's ports (4812 "
-                + "for messages, 4814 for the API). It's a one-time change and "
-                + "only opens them for your LAN subnet — not the internet."
-              color: Color.popups.text
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              wrapMode: Text.Wrap
-              horizontalAlignment: Text.AlignHCenter
-            }
-
-            // The command in a selectable/copyable box.
-            Rectangle {
-              anchors.horizontalCenter: parent.horizontalCenter
-              width: parent.width - Style.space(24)
-              height: Style.space(36)
-              radius: Style.cornerRadius
-              color: Style.selectedFill
-
-              Text {
-                anchors.centerIn: parent
-                text: "sudo bash scripts/setup-firewall.sh"
-                color: Color.foreground
-                font.family: "monospace"
-                font.pixelSize: Style.font.body
-                horizontalAlignment: Text.AlignHCenter
-                elide: Text.ElideMiddle
-              }
-            }
-
-            Row {
-              anchors.horizontalCenter: parent.horizontalCenter
-              spacing: Style.spacing.md
-
-              Button {
-                text: "\uF0C5 Copy command"  // nf-fa-copy
-                onClicked: root.copyToClipboard("sudo bash scripts/setup-firewall.sh")
-              }
-
-              Button {
-                text: "Next"
-                onClicked: root.setupStep = 3
-              }
-            }
-          }
-
-          // Step 3: run it, then re-check.
-          Column {
-            visible: root.setupStep === 3
-            width: parent.width
-            spacing: Style.spacing.md
-
-            Text {
-              width: parent.width
-              text: "Run it, then let lanchat re-check"
-              color: Color.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.title
-              font.weight: Font.Bold
-              horizontalAlignment: Text.AlignHCenter
-              wrapMode: Text.Wrap
-            }
-
-            Text {
-              width: parent.width
-              text: "Paste the command into a terminal and press Enter. Once it "
-                + "finishes, come back here and click the button below. Lanchat "
-                + "will re-check whether inbound connections now work."
-              color: Color.popups.text
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              wrapMode: Text.Wrap
-              horizontalAlignment: Text.AlignHCenter
-            }
-
             Button {
-              anchors.horizontalCenter: parent.horizontalCenter
-              text: "\uF0C5 Copy command"  // nf-fa-copy
-              onClicked: root.copyToClipboard("sudo bash scripts/setup-firewall.sh")
-            }
-
-            Button {
-              anchors.horizontalCenter: parent.horizontalCenter
               text: "\u2387 Open terminal"  // nf-fa-terminal
               onClicked: root.runSetup()
             }
 
             Button {
-              anchors.horizontalCenter: parent.horizontalCenter
-              text: "I've run it — re-check"
-              onClicked: {
-                // Ask the daemon to re-evaluate and re-emit ready with needsSetup.
-                Lanchat.recheckSetup()
-              }
+              text: "\uF0C5 Copy command"  // nf-fa-copy
+              onClicked: root.copyToClipboard("sudo bash scripts/setup-firewall.sh")
             }
+          }
 
-            Button {
-              anchors.horizontalCenter: parent.horizontalCenter
-              text: "Back"
-              onClicked: root.setupStep = 2
+          Button {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "I've run it — re-check"
+            onClicked: {
+              // Ask the daemon to re-evaluate and re-emit ready with needsSetup.
+              Lanchat.recheckSetup()
             }
           }
         }
