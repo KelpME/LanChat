@@ -1033,6 +1033,12 @@ def udp_loop() -> None:
     hidden = visibility() != "open"
     while True:
         now = time.time()
+        # (1.3) Recompute the visibility flag each tick — it is NOT a startup
+        # constant. setVisibility writes CONFIG live, so a device that starts
+        # private and later flips "Discoverable" on must START broadcasting
+        # immediately (same tick); if hidden were captured once here it would
+        # stay True forever and the device would remain undiscoverable.
+        hidden = visibility() != "open"
         # Only announce ourselves while online (appear offline otherwise) and
         # only when visible on discovery.
         if is_online() and not hidden and now - last_broadcast >= BROADCAST_INTERVAL_S:

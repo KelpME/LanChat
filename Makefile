@@ -11,7 +11,7 @@
 
 PY      ?= python3
 RUFF    ?= ruff
-TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py
+TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py
 PYFILES := server.py naming.py $(TESTS) test_peer.py
 
 # Bare `make` (no target) shows the help listing.
@@ -25,7 +25,7 @@ help: ## (default) show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 ## test: run the full offline test suite (all test_*.py)
-test: ## run every test_*.py suite (server, friends, persistent, attachments, features)
+test: ## run every test_*.py suite (server, friends, persistent, attachments, features, discovery-visibility)
 	@for t in $(TESTS); do \
 		printf "=== %s ===\n" "$$t"; \
 		$(PY) "$$t" || exit 1; \
@@ -50,6 +50,10 @@ test-attachments: ## run test_attachments.py (file transfer, sha256, path saniti
 ## test-features: just test_features.py
 test-features: ## run test_features.py (history, config, misc commands)
 	@$(PY) test_features.py
+
+## test-discovery-visibility: just test_discovery_visibility.py
+test-discovery-visibility: ## run test_discovery_visibility.py (broadcast side of the visibility flip)
+	@$(PY) test_discovery_visibility.py
 
 ## lint: ruff check on all Python
 lint: ## run `ruff check` (fast, no fix)
