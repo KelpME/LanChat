@@ -134,6 +134,8 @@ Panel {
   // next send as an edit of that mid.
   property string editingMid: ""
   property bool diagExpanded: false
+  // Dismissed the non-blocking firewall setup notice for this session.
+  property bool setupDismissed: false
   function editMsg(mid, text) {
     editingMid = mid
     input.text = text
@@ -1594,84 +1596,70 @@ Panel {
         }
       }
 
-      // ---- first-run setup overlay: a deny-inbound firewall is likely
-      // blocking LAN peers from reaching us. One screen: what's wrong, the
-      // fix, and the re-check button.
+      // ---- non-blocking setup notice: a deny-inbound firewall may block
+      // peers from reaching us. Dismissible; does not gate the app.
       Rectangle {
-        visible: Lanchat.needsSetup
-        anchors.fill: parent
-        color: Color.popups.background
-        z: 100
+        visible: Lanchat.needsSetup && !root.setupDismissed
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: Style.space(46)
+        anchors.leftMargin: Style.spacing.panelPadding
+        anchors.rightMargin: Style.spacing.panelPadding
+        z: 50
+        height: Math.max(Style.space(64), setupCol.implicitHeight + Style.space(12))
+        radius: Style.cornerRadius
+        color: Style.selectedAccentFill
+        border.color: Color.popups.border
+        border.width: 1
 
         Column {
-          anchors.centerIn: parent
-          width: parent.width - Style.space(48)
-          spacing: Style.spacing.md
+          id: setupCol
+          anchors.fill: parent
+          anchors.margins: Style.spacing.sm
+          spacing: Style.spacing.xs
 
           Text {
             width: parent.width
-            text: "Lanchat needs a one-time firewall setup"
+            text: "Firewall may block peers from reaching you"
             color: Color.foreground
             font.family: Style.font.family
-            font.pixelSize: Style.font.title
+            font.pixelSize: Style.font.caption
             font.weight: Font.Bold
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.Wrap
+            elide: Text.ElideRight
           }
 
           Text {
             width: parent.width
-            text: "Lanchat is peer-to-peer, so other machines must be able to "
-              + "reach this one. Your firewall (UFW/firewalld) is blocking "
-              + "incoming connections by default — lanchat can send but not "
-              + "receive. Open the ports once to fix it:"
+            text: "Lanchat can send but may not receive. Open the ports once:"
             color: Color.popups.text
             font.family: Style.font.family
-            font.pixelSize: Style.font.body
+            font.pixelSize: Style.font.caption
             wrapMode: Text.Wrap
-            horizontalAlignment: Text.AlignHCenter
-          }
-
-          // The command in a selectable/copyable box.
-          Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: parent.width - Style.space(24)
-            height: Style.space(36)
-            radius: Style.cornerRadius
-            color: Style.selectedFill
-
-            Text {
-              anchors.centerIn: parent
-              text: root.setupCommand()
-              color: Color.foreground
-              font.family: "monospace"
-              font.pixelSize: Style.font.caption
-              horizontalAlignment: Text.AlignHCenter
-              elide: Text.ElideMiddle
-            }
           }
 
           Row {
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: Style.spacing.md
+            spacing: Style.spacing.sm
 
             Button {
-              text: "\u2387 Open terminal"  // nf-fa-terminal
+              text: "Open terminal"
+              fontSize: Style.font.caption
               onClicked: root.runSetup()
             }
-
             Button {
-              text: "\uF0C5 Copy command"  // nf-fa-copy
+              text: "Copy command"
+              fontSize: Style.font.caption
               onClicked: root.copyToClipboard(root.setupCommand())
             }
-          }
-
-          Button {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "I've run it — re-check"
-            onClicked: {
-              // Ask the daemon to re-evaluate and re-emit ready with needsSetup.
-              Lanchat.recheckSetup()
+            Button {
+              text: "Re-check"
+              fontSize: Style.font.caption
+              onClicked: Lanchat.recheckSetup()
+            }
+            Button {
+              text: "Dismiss"
+              fontSize: Style.font.caption
+              onClicked: root.setupDismissed = true
             }
           }
         }
