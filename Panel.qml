@@ -163,6 +163,14 @@ Panel {
     onTriggered: root.confirmClearAll = false
   }
 
+  // Shows a brief checkmark next to the "Clear all chats" button after a
+  // successful clear, instead of a full-width banner.
+  property bool showClearAllCheck: false
+  property Timer clearAllCheckTimer: Timer {
+    interval: 2500
+    onTriggered: root.showClearAllCheck = false
+  }
+
   // Outgoing attachments staged in the compose area, NOT yet sent. Picking
   // files appends here; the user reviews each, removes any, then presses Send.
   // [{name, path}]
@@ -1282,10 +1290,23 @@ Panel {
                         else {
                           root.confirmClearAll = false
                           Lanchat.clearAllChats()
-                          Lanchat.statusMessage = "All chats cleared"
-                          Lanchat.statusTimer.restart()
+                          root.showClearAllCheck = true
+                          root.clearAllCheckTimer.restart()
                         }
                       }
+                    }
+
+                    // Brief checkmark feedback after a successful clear-all.
+                    Text {
+                      visible: root.showClearAllCheck
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(64)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "\u2713"
+                      color: Color.accent
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
                     }
                   }
 
