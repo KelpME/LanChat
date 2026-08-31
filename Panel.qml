@@ -136,6 +136,8 @@ Panel {
   property bool diagExpanded: false
   // Dismissed the non-blocking firewall setup notice for this session.
   property bool setupDismissed: false
+  // Whether the collapsible firewall setup dropdown is expanded.
+  property bool setupExpanded: false
   function editMsg(mid, text) {
     editingMid = mid
     input.text = text
@@ -1025,6 +1027,92 @@ Panel {
                     }
                   }
 
+                  // Firewall setup dropdown — shown when a deny-inbound firewall
+                  // may block peers from reaching us. Collapsed by default so it
+                  // never takes up space or covers the UI.
+                  Item {
+                    width: parent.width
+                    height: Style.space(30)
+                    visible: Lanchat.needsSetup && !root.setupDismissed
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: root.setupExpanded ? "\u25BC Firewall notice" : "\u25B6 Firewall notice"
+                      color: Lanchat.needsSetup ? Color.urgent : Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    MouseArea {
+                      anchors.fill: parent
+                      onClicked: root.setupExpanded = !root.setupExpanded
+                    }
+                  }
+
+                  // Expanded setup details.
+                  Item {
+                    visible: Lanchat.needsSetup && root.setupExpanded
+                    width: parent.width
+                    height: setupDetailCol.implicitHeight
+                    anchors.leftMargin: Style.spacing.sm
+
+                    Column {
+                      id: setupDetailCol
+                      width: parent.width - Style.space(16)
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      spacing: Style.spacing.sm
+
+                      Text {
+                        width: parent.width
+                        text: "Lanchat can send but may not receive. Your firewall "
+                          + "(UFW/firewalld) blocks incoming connections. Open the "
+                          + "ports once so other machines can reach you:"
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        wrapMode: Text.Wrap
+                      }
+
+                      Text {
+                        width: parent.width
+                        text: root.setupCommand()
+                        color: Color.accent
+                        font.family: "monospace"
+                        font.pixelSize: Style.font.caption
+                        wrapMode: Text.Wrap
+                      }
+
+                      Row {
+                        spacing: Style.spacing.sm
+
+                        Button {
+                          text: "Open terminal"
+                          fontSize: Style.font.caption
+                          onClicked: root.runSetup()
+                        }
+                        Button {
+                          text: "Copy command"
+                          fontSize: Style.font.caption
+                          onClicked: root.copyToClipboard(root.setupCommand())
+                        }
+                        Button {
+                          text: "Re-check"
+                          fontSize: Style.font.caption
+                          onClicked: Lanchat.recheckSetup()
+                        }
+                        Button {
+                          text: "Dismiss"
+                          fontSize: Style.font.caption
+                          onClicked: root.setupDismissed = true
+                        }
+                      }
+                    }
+                  }
+
                   // Diagnostics section — shows the daemon's diagnostic log
                   // lines inline (peer expiry, dropped messages, send failures).
                   Item {
@@ -1593,75 +1681,6 @@ Panel {
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
-        }
-      }
-
-      // ---- non-blocking setup notice: a deny-inbound firewall may block
-      // peers from reaching us. Dismissible; does not gate the app.
-      Rectangle {
-        visible: Lanchat.needsSetup && !root.setupDismissed
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: Style.space(46)
-        anchors.leftMargin: Style.spacing.panelPadding
-        anchors.rightMargin: Style.spacing.panelPadding
-        z: 50
-        height: Math.max(Style.space(64), setupCol.implicitHeight + Style.space(12))
-        radius: Style.cornerRadius
-        color: Style.selectedAccentFill
-        border.color: Color.popups.border
-        border.width: 1
-
-        Column {
-          id: setupCol
-          anchors.fill: parent
-          anchors.margins: Style.spacing.sm
-          spacing: Style.spacing.xs
-
-          Text {
-            width: parent.width
-            text: "Firewall may block peers from reaching you"
-            color: Color.foreground
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            font.weight: Font.Bold
-            elide: Text.ElideRight
-          }
-
-          Text {
-            width: parent.width
-            text: "Lanchat can send but may not receive. Open the ports once:"
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.Wrap
-          }
-
-          Row {
-            spacing: Style.spacing.sm
-
-            Button {
-              text: "Open terminal"
-              fontSize: Style.font.caption
-              onClicked: root.runSetup()
-            }
-            Button {
-              text: "Copy command"
-              fontSize: Style.font.caption
-              onClicked: root.copyToClipboard(root.setupCommand())
-            }
-            Button {
-              text: "Re-check"
-              fontSize: Style.font.caption
-              onClicked: Lanchat.recheckSetup()
-            }
-            Button {
-              text: "Dismiss"
-              fontSize: Style.font.caption
-              onClicked: root.setupDismissed = true
-            }
-          }
         }
       }
     }
