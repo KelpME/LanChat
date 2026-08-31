@@ -454,6 +454,7 @@ def edit_message(mid: str, new_text: str) -> bool:
 
 _peers = {}          # id -> {id, name, address, port, lastSeen}
 _peers_lock = threading.Lock()
+_inbound_proven = False  # set True once a peer successfully reaches us inbound
 
 
 def peer_snapshot() -> list:
@@ -795,6 +796,7 @@ def broadcast_now() -> None:
 # --------------------------------------------------------------------------
 
 def tcp_loop() -> None:
+    global _inbound_proven
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -811,6 +813,9 @@ def tcp_loop() -> None:
         except (OSError, ssl.SSLError) as e:
             _log("inbound-tls-failed addr=%s err=%s" % (addr, e))
             continue
+        # A successful inbound TLS connection proves other machines can reach
+        # us — clear the setup flag even if a firewall is still active.
+        _inbound_proven = True
         threading.Thread(target=_handle_client, args=(conn, addr), daemon=True).start()
 
 
@@ -1499,7 +1504,13 @@ def _inbound_blocked() -> bool:
     "need root", it's more likely active than not, and its default inbound
     policy is deny. We treat "installed + status not verifiably inactive" as
     needs-setup.
+
+    BUT: if a peer has already reached us inbound (proven by a successful TLS
+    accept), inbound clearly works, so we return False regardless of what the
+    firewall state suggests.
     """
+    if _inbound_proven:
+        return False
     import subprocess as _sp
     # UFW: active if its systemd unit is running, or status says active.
     try:
