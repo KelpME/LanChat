@@ -2,26 +2,36 @@
 
 Private messaging between your own machines on your local network, as an
 Omarchy Quattro shell plugin. Install it on each machine, enable it, and they
-find each other automatically — no accounts, no cloud, no shared secrets to
-copy.
+find each other — no accounts, no cloud, no shared secrets to copy.
 
 ## How it connects
 
-**Discovery is open on your LAN.** Any machine running Lanchat broadcasts its
-presence and shows up in everyone's peer list. No token or setup is needed to
-*see* other machines.
+Lanchat is **private by default** — safe on public networks out of the box.
+
+- **Private mode (default):** your machine is **invisible** on the network. It
+  doesn't broadcast its presence, doesn't reply to discovery probes, so
+  strangers on the same wifi can't find you or even confirm you exist.
+- **Open mode:** you broadcast your presence and are discoverable, and anyone
+  on the LAN can send you a friend request. Use this on **trusted networks**
+  (your own machines at home).
+
+To talk to someone:
+
+- **In private mode** — add them directly by their **cert fingerprint**. Get
+  their fingerprint from *their* Settings → **My ID**, paste it into
+  **Settings → Add friend**, and they're added as a confirmed friend.
+- **In open mode** — they show up in your peer list; click **+** on their card
+  to send a friend request, or they send one to you.
 
 **The friend handshake is the gate.** Seeing a machine doesn't mean it can
-message you. To actually talk:
+message you. A stranger can *ask* to be friends, but can't message you until
+you accept.
 
-1. Pick a peer and click the **+** on their card to send a **friend request**.
-2. They see it in the notifications banner (below the peer list) with
-   **Accept / Reject** buttons.
-3. Accepting completes the handshake — from then on you message freely.
-
-A stranger can send a friend request, but can't message you until you accept.
-Their identity is locked to their certificate fingerprint, so they can't
-impersonate a friend.
+**Verified friend requests.** Every incoming friend request shows the
+requester's **verified certificate fingerprint**. When you accept, you confirm
+the fingerprint matches the person you expect — so a stranger can't impersonate
+a friend by faking a name. Their identity is locked to their certificate, and
+they can't forge yours.
 
 ## Encrypted by default
 
@@ -35,19 +45,20 @@ for the fingerprint it claims (it signs a random challenge). Without the
 matching key a stranger can't forge messages from you. All your machines should
 run the same recent version.
 
-## Private by default (safe on public networks)
+## Settings explained
 
-Lanchat is **invisible on the network unless you switch to open mode**. In the
-default **private** mode you don't broadcast your presence or reply to
-discovery probes, so strangers on the same wifi can't find you or even confirm
-you're there. To connect to a friend in private mode, add their **cert
-fingerprint** directly (from Settings).
-
-- **Open mode** — for trusted LANs (your own machines at home): you broadcast
-  and are discoverable, and anyone can send you a friend request.
-- **Accept friend requests** — a separate toggle. When on, incoming requests
-  show the requester's **verified fingerprint**; confirm it matches before
-  accepting. Turn it off to reject all incoming requests.
+- **Discoverable (open mode)** — the visibility switch. **Off** (the default)
+  keeps you invisible on the network; **on** makes you discoverable for trusted
+  LANs. Existing friends keep working either way — visibility only controls how
+  *new* people find you.
+- **Accept friend requests** — whether incoming friend requests are shown to
+  you at all. **On** (the default): requests appear in the notifications banner
+  with the requester's verified fingerprint to confirm. **Off**: all incoming
+  requests are rejected silently.
+- **Add friend** — paste a cert fingerprint here to add a confirmed friend
+  directly (how you connect in private mode).
+- **Agent full access** — for the optional HTTP API. On = an agent can read
+  your chats/peers/files; off = send-only. The API itself is loopback-only.
 
 ## The bar icon
 

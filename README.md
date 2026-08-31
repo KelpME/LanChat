@@ -104,6 +104,9 @@ agents) — it is not needed for peer messaging.
 | `displayName` | friendly name      | Cosmetic name shown to peers (re-rollable)   |
 | `httpEnabled` | `false`            | On/off for the HTTP API (toggle in the UI)   |
 | `httpPort`    | `4814`             | Port the HTTPS API listens on                |
+| `httpBind`    | `127.0.0.1`        | HTTP API bind: loopback-only by default      |
+| `visibility`  | `private`          | `private` (invisible on discovery) or `open` (broadcast, discoverable) |
+| `acceptRequests` | `true`          | Whether inbound friend requests are accepted |
 | `online`      | `true`             | Presence toggle (stop receiving while off)   |
 | `friends`     | `[]`               | Your confirmed/pending friends               |
 | `downloadDir` | `~/Downloads`      | Where accepted attachments are saved         |
@@ -121,12 +124,19 @@ agents) — it is not needed for peer messaging.
 
 ## Using the app
 
-1. **Add a friend / start a conversation** — pick a peer from the list and
-   click the **+** on their card to send a friend request. Once they accept,
-   pick them and type a message.
+Lanchat is **private by default**: your machine is invisible on the network.
+How you connect depends on your mode:
+
+1. **Add a friend (private mode)** — get the friend's **cert fingerprint** from
+   *their* Settings → **My ID**, then paste it into **Settings → Add friend**.
+   They're added as a confirmed friend and you can message them.
+   **In open mode** (switch on "Discoverable (open mode)" for a trusted LAN)
+   friends show up in the peer list — click the **+** on their card to send a
+   friend request.
 2. **Accept a friend request** — requests appear in the notifications banner
-   pinned below the peer list, with **Accept** / **Reject**. Accepting
-   completes the handshake; from then on you message freely.
+   pinned below the peer list, showing the requester's **verified fingerprint**.
+   Click **Accept**, then **Confirm** to accept after checking the fingerprint
+   matches, or **Reject**.
 3. **Send a file** — click the paperclip in the compose box, pick one or more
    files. The receiver sees an **"Incoming file"** bar at the bottom of the
    conversation with a **Save** button; accepting streams the transfer with
@@ -140,7 +150,7 @@ agents) — it is not needed for peer messaging.
    revise it; it's marked "(edited)".
 8. **Unfriend** — click **Unfriend** in the thread header to remove a friend.
 9. **Help** — the **?** button in the Settings header opens the built-in help
-   document (`HELP.md`). Hover any setting for a short explanation.
+   page (`HELP.html`). Hover any setting for a short explanation.
 
 ## HTTP API (optional)
 

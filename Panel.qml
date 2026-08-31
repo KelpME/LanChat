@@ -155,6 +155,12 @@ Panel {
   // Whether the friend-request notifications banner is expanded (dropdown).
   property bool notifExpanded: true
 
+  // (1.3) First-run onboarding: shows a dismissible banner below the peer list
+  // explaining that Lanchat is invisible by default. Dismissed state is local
+  // to this session (not persisted) — keeps the first use obvious without a
+  // permanent config flag.
+  property bool showOnboarding: true
+
   // (1.3) Option-B friend-request accept: when non-empty, the banner row for
   // this peer shows its verified fingerprint and a "Confirm" button instead of
   // a blind Accept — the user must confirm the fingerprint matches what they
@@ -318,9 +324,11 @@ Panel {
     addFrInput.text = ""
   }
 
-  // Path to the help document (HELP.md next to the panel).
+  // Path to the help document (HELP.html next to the panel). HTML is used so
+  // the default browser handles it — .md has no reliable xdg handler, which is
+  // why the help button used to do nothing on some systems.
   function helpPath() {
-    var url = Qt.resolvedUrl("HELP.md").toString()
+    var url = Qt.resolvedUrl("HELP.html").toString()
     if (url.indexOf("file://") === 0) url = url.slice(7)
     return decodeURIComponent(url)
   }
@@ -654,6 +662,51 @@ Panel {
                 }
               }
 
+              // ---- (1.3) First-run onboarding: a dismissible banner below the
+              // peer list explaining the private-by-default model. Shown until
+              // the user dismisses it (session-local).
+              Item {
+                id: onboardingBanner
+                width: parent.width
+                height: root.showOnboarding ? Style.space(56) : 0
+                anchors.bottom: notifBanner.top
+                visible: root.showOnboarding
+                clip: true
+
+                Rectangle {
+                  anchors.fill: parent
+                  color: Style.background
+                  Rectangle {
+                    anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+                    height: 1; color: Color.popups.border
+                  }
+                }
+
+                Text {
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.spacing.sm
+                  anchors.top: parent.top
+                  anchors.topMargin: Style.space(6)
+                  width: parent.width - Style.space(80)
+                  text: "You're invisible on the network. To connect, add a friend's "
+                        + "My ID (fingerprint) in Settings, or switch on Discoverable for a trusted LAN."
+                  color: Color.popups.text
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+
+                Button {
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.spacing.sm
+                  anchors.top: parent.top
+                  anchors.topMargin: Style.space(6)
+                  text: "\u2715"  // ✕ dismiss
+                  fontSize: Style.font.caption
+                  onClicked: root.showOnboarding = false
+                }
+              }
+
               // ---- friend-request notifications: pinned below the peer
               // list so an incoming request is always in view -------------
               Item {
@@ -934,6 +987,47 @@ Panel {
                       anchors.verticalCenter: parent.verticalCenter
                       text: "Add"
                       onClicked: root.addFriendByFingerprint()
+                    }
+                  }
+
+                  // (1.3) My ID row: this device's cert fingerprint — share it
+                  // with a friend so they can add you by fingerprint.
+                  Item {
+                    width: parent.width
+                    height: Style.space(30)
+
+                    Text {
+                      id: myIdLabel
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "My ID"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Text {
+                      anchors.left: myIdLabel.right
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.right: myIdCopy.left
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: (Lanchat.myId || "…").slice(0, 20) + "…"
+                      color: Color.popups.mutedText
+                      font.family: Style.font.mono || Style.font.family
+                      font.pixelSize: Style.font.micro
+                      elide: Text.ElideRight
+                    }
+
+                    Button {
+                      id: myIdCopy
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "\uF0C5"  // copy icon
+                      onClicked: root.copyToClipboard(Lanchat.myId)
                     }
                   }
 

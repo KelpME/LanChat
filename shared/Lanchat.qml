@@ -35,6 +35,9 @@ QtObject {
 
   property bool panelOpen: false
   property string version: ""
+  // This device's cert fingerprint (stable identity) — shown as "My ID" in
+  // Settings and used to add friends by fingerprint in private mode.
+  property string myId: ""
 
   property bool httpEnabled: false
   property int httpPort: 4814
@@ -479,6 +482,7 @@ QtObject {
     case "ready":
       lanchat.myName = obj.name
       lanchat.myPort = obj.port
+      lanchat.myId = obj.id || ""
       lanchat.daemonReady = true
       if (obj.version) lanchat.version = obj.version
       if (obj.httpEnabled !== undefined) lanchat.httpEnabled = obj.httpEnabled

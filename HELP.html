@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lanchat Help</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    max-width: 760px; margin: 2rem auto; padding: 0 1.25rem;
+    line-height: 1.6; color: #222;
+  }
+  h1 { border-bottom: 2px solid #444; padding-bottom: .3rem; }
+  h2 { margin-top: 1.8rem; border-bottom: 1px solid #999; padding-bottom: .2rem; }
+  h1,h2,h3 { line-height: 1.25; }
+  code { background: rgba(0,0,0,.08); padding: .1em .35em; border-radius: 4px; }
+  pre { background: rgba(0,0,0,.06); padding: .8rem; border-radius: 6px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th,td { border: 1px solid #999; padding: .4rem .6rem; text-align: left; }
+  th { background: rgba(0,0,0,.06); }
+  li { margin: .25rem 0; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e8e8e8; }
+    code, pre { background: rgba(255,255,255,.1); }
+    th { background: rgba(255,255,255,.1); }
+    h1,h2 { border-color: #777; }
+  }
+</style>
+</head>
+<body>
+<h1>Lanchat Help</h1>
+<p>Private messaging between your own machines on your local network, as an
+Omarchy Quattro shell plugin. Install it on each machine, enable it, and they
+find each other — no accounts, no cloud, no shared secrets to copy.</p>
+<h2>How it connects</h2>
+<p>Lanchat is <strong>private by default</strong> — safe on public networks out of the box.</p>
+<ul>
+<li><strong>Private mode (default):</strong> your machine is <strong>invisible</strong> on the network. It
+  doesn't broadcast its presence, doesn't reply to discovery probes, so
+  strangers on the same wifi can't find you or even confirm you exist.</li>
+<li><strong>Open mode:</strong> you broadcast your presence and are discoverable, and anyone
+  on the LAN can send you a friend request. Use this on <strong>trusted networks</strong>
+  (your own machines at home).</li>
+</ul>
+<p>To talk to someone:</p>
+<ul>
+<li><strong>In private mode</strong> — add them directly by their <strong>cert fingerprint</strong>. Get
+  their fingerprint from <em>their</em> Settings → <strong>My ID</strong>, paste it into
+  <strong>Settings → Add friend</strong>, and they're added as a confirmed friend.</li>
+<li><strong>In open mode</strong> — they show up in your peer list; click <strong>+</strong> on their card
+  to send a friend request, or they send one to you.</li>
+</ul>
+<p><strong>The friend handshake is the gate.</strong> Seeing a machine doesn't mean it can
+message you. A stranger can <em>ask</em> to be friends, but can't message you until
+you accept.</p>
+<p><strong>Verified friend requests.</strong> Every incoming friend request shows the
+requester's <strong>verified certificate fingerprint</strong>. When you accept, you confirm
+the fingerprint matches the person you expect — so a stranger can't impersonate
+a friend by faking a name. Their identity is locked to their certificate, and
+they can't forge yours.</p>
+<h2>Encrypted by default</h2>
+<p>Every message and file transfer runs over TLS with a per-install self-signed
+certificate. Your device's identity is that cert's fingerprint — permanent and
+independent of your display name, so you can re-roll your name without breaking
+anything.</p>
+<p>When another machine connects to you, it must prove it holds the private key
+for the fingerprint it claims (it signs a random challenge). Without the
+matching key a stranger can't forge messages from you. All your machines should
+run the same recent version.</p>
+<h2>Settings explained</h2>
+<ul>
+<li><strong>Discoverable (open mode)</strong> — the visibility switch. <strong>Off</strong> (the default)
+  keeps you invisible on the network; <strong>on</strong> makes you discoverable for trusted
+  LANs. Existing friends keep working either way — visibility only controls how
+  <em>new</em> people find you.</li>
+<li><strong>Accept friend requests</strong> — whether incoming friend requests are shown to
+  you at all. <strong>On</strong> (the default): requests appear in the notifications banner
+  with the requester's verified fingerprint to confirm. <strong>Off</strong>: all incoming
+  requests are rejected silently.</li>
+<li><strong>Add friend</strong> — paste a cert fingerprint here to add a confirmed friend
+  directly (how you connect in private mode).</li>
+<li><strong>Agent full access</strong> — for the optional HTTP API. On = an agent can read
+  your chats/peers/files; off = send-only. The API itself is loopback-only.</li>
+</ul>
+<h2>The bar icon</h2>
+<p>Click the chat icon in the bar to open Lanchat. An <strong>unread-count badge</strong> shows
+new messages (the icon also lights up when peers are online). The <strong>icon's
+color reflects your status</strong>: white = Available, red = Do Not Disturb, orange
+= Away, yellow = Be Right Back. <strong>Right-click</strong> the icon for a menu: toggle
+online/offline, or pick a status.</p>
+<h2>The chat panel</h2>
+<ul>
+<li><strong>Left column</strong> — your peers (each with a status dot; friends stay visible
+  even when offline, shown grayed out), the peer count, and Settings.</li>
+<li><strong>Right column</strong> — the selected peer's conversation and the compose box.</li>
+<li><strong>Draggable divider</strong> — drag the thin bar between the peer list and the chat
+  to resize the columns.</li>
+<li><strong>Paperclip</strong> — attach and send one or more files. The receiver gets an
+  <strong>Incoming file</strong> bar with a <strong>Save</strong> button; accepting streams the transfer
+  with progress, verifies it, and saves it to your download folder. Transfers
+  are pinned to the sender's certificate, so the file comes from who you think
+  it does.</li>
+<li><strong>Copy button</strong> (hover a message) — copies that message to the clipboard.</li>
+<li><strong>Edit a message</strong> (hover an outgoing message) — click the pencil to revise
+  it; it's marked "(edited)".</li>
+<li><strong>Unfriend</strong> — the <strong>Unfriend</strong> button in the thread header removes a friend.</li>
+<li><strong>Typing / read state</strong> — see "… is typing" and a ✓ when a message is read
+  (both toggleable).</li>
+<li><strong>Lazy-load</strong> — long conversations load older messages as you scroll, so the
+  panel stays fluid.</li>
+</ul>
+<h2>Settings</h2>
+<ul>
+<li><strong>Name</strong> — your display name, with a re-roll button for a fresh friendly
+  name.</li>
+<li><strong>Online</strong> — go offline to stop broadcasting and drop inbound messages.</li>
+<li><strong>Status</strong> — set your status: <strong>Available</strong>, <strong>DND</strong>, <strong>Away</strong>, or <strong>BRB</strong>.
+  Shown to friends on their peer list and via the bar icon color.</li>
+<li><strong>Message sound</strong> — play a soft chime when a new message arrives.</li>
+<li><strong>Let friends see me typing</strong> — when on, your friends see "typing…" while you type.</li>
+<li><strong>Show when friends are typing</strong> — when on, you see "[friend] is typing…".</li>
+<li><strong>Let friends see when I've read</strong> — when on, friends see a ✓ on read messages.</li>
+<li><strong>Show when friends have read</strong> — when on, you see a ✓ on read messages.</li>
+<li><strong>API</strong> — the HTTP API for scripts/agents (see below).</li>
+<li><strong>Agent full access</strong> — when the API is on, whether the agent can <em>read</em> your
+  chat data or only <em>send</em>.</li>
+<li><strong>Undo delay</strong> — hold messages for N seconds so you can undo them before they
+  send.</li>
+<li><strong>Save to</strong> — the folder accepted files go to (default <code>~/Downloads</code>).</li>
+<li><strong>Panel size</strong> — choose <strong>S</strong>, <strong>M</strong>, <strong>L</strong>, <strong>XL</strong>, or <strong>F</strong> (full-screen)
+  for the panel window size. S/M/L/XL scale as independent fractions of each
+  screen axis — width vs height grow separately. Width goes 1/2 → 2/3 → 4/5 →
+  9/10 of screen width, height goes 0.45 → 3/5 → 3/4 → 0.85 of screen height,
+  growing incrementally. <strong>F</strong> fills the whole screen.</li>
+<li><strong>Version</strong> — the installed version.</li>
+</ul>
+<h2>The API (for scripts / agents)</h2>
+<p>An HTTPS server (default port 4814) so tools or agents can send messages and
+read state. <strong>Off by default</strong> — toggle <strong>API</strong> in Settings. All endpoints
+except <code>/health</code> require the token in <code>~/.config/omarchy/lanchat.json</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Auth</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/health</code></td>
+<td>—</td>
+<td>Liveness probe</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/peers?token=…</code></td>
+<td>token</td>
+<td>List online peers</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/messages?token=…</code></td>
+<td>token</td>
+<td>Message history</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/send</code></td>
+<td>token (body)</td>
+<td>Send a message to a peer</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>The peer id is its cert fingerprint (not a hostname).</li>
+<li>The agent can only message <strong>friends</strong> — the friend gate applies to the API
+  too.</li>
+<li>With <strong>Agent full access</strong> off, <code>/peers</code> and <code>/messages</code> return 403
+  (send-only). The agent can still send to friends. (Serving an accepted file
+  transfer is peer-to-peer, not script read-access, so downloads work
+  regardless of this toggle.)</li>
+<li>HTTPS uses the self-signed cert, so scripts skip verification (<code>curl -k</code>).</li>
+</ul>
+<h2>Files &amp; privacy</h2>
+<ul>
+<li>Config: <code>~/.config/omarchy/lanchat.json</code></li>
+<li>TLS identity: <code>~/.config/omarchy/lanchat-certs/</code></li>
+<li>Message history: <code>~/.local/state/lanchat/history.json</code> (per machine)</li>
+</ul>
+<p>History stays per-machine and is never synced to a server.</p>
+</body>
+</html>

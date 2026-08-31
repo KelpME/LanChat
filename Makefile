@@ -17,7 +17,7 @@ PYFILES := server.py naming.py $(TESTS) test_peer.py
 # Bare `make` (no target) shows the help listing.
 .DEFAULT_GOAL := help
 
-.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info
+.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info help-html
 
 ## help: list all targets and what they do
 help: ## (default) show this help
@@ -64,6 +64,10 @@ fmt: ## check formatting with `ruff format --check` (does NOT rewrite)
 ## qml: structural QML check (braces/parens/brackets)
 qml: ## run scripts/check_qml.py on Panel.qml, BarWidget.qml, shared/Lanchat.qml, Service.qml
 	@$(PY) scripts/check_qml.py
+
+## help-html: regenerate HELP.html from HELP.md (needs python-markdown)
+help-html: ## rebuild the built-in help page from HELP.md
+	@$(PY) scripts/gen_help_html.py
 
 ## syntax: py_compile all Python files (fast syntax gate)
 syntax: ## python-compile everything (catches syntax errors)
