@@ -87,6 +87,15 @@ def main():
         assert ce and ce["peer"] == "beta"
         print("OK  clearChat emits chat-cleared")
 
+        # clear ALL chats: seed some history, then clearAllChats wipes it
+        a.cmd(cmd="clearAllChats")
+        ce = a.wait_event("chat-cleared")
+        assert ce and ce["peer"] == "" and ce.get("removed", 0) >= 0, "clearAllChats should emit chat-cleared with empty peer"
+        a.cmd(cmd="history", peer="", offset=0, limit=100)
+        he = a.wait_event("history")
+        assert he is not None and len(he.get("messages", [])) == 0, "history should be empty after clearAllChats"
+        print("OK  clearAllChats wipes all history")
+
         # ---- config: download-dir + send-delay --------------------------
         a.cmd(cmd="setDownloadDir", dir="/tmp/lnc-dl")
         de = a.wait_event("download-dir")

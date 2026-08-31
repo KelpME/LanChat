@@ -214,6 +214,20 @@ QtObject {
     lanchat.heldQueue = still
   }
 
+  // Self-healing flush: send every held message whose peer is now reachable,
+  // regardless of whether we saw the status-transition event. The old code
+  // only flushed on a one-shot transition, so held messages could stay stuck
+  // forever while the peer was plainly online. Runs on a short timer and on
+  // daemon ready so the "held" state can never go stale.
+  function flushReadyHeld() {
+    var flush = {}
+    for (var i = 0; i < lanchat.heldQueue.length; i++) {
+      var h = lanchat.heldQueue[i]
+      if (lanchat.canDeliver(h.to)) flush[h.to] = true
+    }
+    for (var pid in flush) lanchat.flushHeld(pid)
+  }
+
   // Cancel a held (undelivered) message.
   function undo(mid) {
     pendingSends = pendingSends.filter(function(s) { return s.mid !== mid })
@@ -246,6 +260,11 @@ QtObject {
 
   function clearChat(peer) {
     daemon.write(JSON.stringify({ cmd: "clearChat", peer: peer }) + "\n")
+  }
+
+  // Clear every conversation at once.
+  function clearAllChats() {
+    daemon.write(JSON.stringify({ cmd: "clearAllChats" }) + "\n")
   }
 
   function deleteMessage(mid) {
@@ -448,6 +467,10 @@ QtObject {
       lanchat.rebuildDisplayPeers()
       lanchat.refreshHistory()
       lanchat.refreshPeers()
+      // Ensure the self-healing held flush is running, then clear any
+      // messages stuck flagged as "held" for a now-reachable peer.
+      lanchat.heldFlushTimer.start()
+      lanchat.flushReadyHeld()
       break
 
     case "show-typing":
@@ -537,10 +560,11 @@ QtObject {
       break
 
     case "chat-cleared":
-      // Remove all messages with this peer from the UI list.
-      lanchat.messages = lanchat.messages.filter(function(m) {
-        return !(m.to === obj.peer || m.from === obj.peer)
-      })
+      // Remove messages for this peer from the UI list. An empty peer means
+      // every conversation was cleared.
+      lanchat.messages = obj.peer
+        ? lanchat.messages.filter(function(m) { return !(m.to === obj.peer || m.from === obj.peer) })
+        : []
       break
 
     case "message-deleted":
@@ -728,6 +752,15 @@ QtObject {
   property Timer restartTimer: Timer {
     interval: 2000
     onTriggered: lanchat.startDaemon()
+  }
+
+  // Self-healing held-message flush: periodically re-checks deliverability so
+  // a held message is sent as soon as its peer is reachable, even if the
+  // status-transition event was missed.
+  property Timer heldFlushTimer: Timer {
+    interval: 1500
+    repeat: true
+    onTriggered: lanchat.flushReadyHeld()
   }
 
   // Drives the send-delay countdown; releases held messages when their time

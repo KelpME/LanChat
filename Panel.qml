@@ -55,10 +55,13 @@ Panel {
       var theirs = !m.outgoing && m.from === selectedPeerId
       if (mine || theirs) out.push(m)
     }
-    // Append held messages (queued because the peer was DND/offline).
+    // Append held messages (queued because the peer was DND/offline) — but
+    // only while the peer is STILL undeliverable. If they've come back online,
+    // the message should be shown as delivered (the self-healing flush sends
+    // it), never left as a stale "held" alert.
     var held = Lanchat.heldQueue
     for (var j = 0; j < held.length; j++) {
-      if (held[j].to === selectedPeerId) {
+      if (held[j].to === selectedPeerId && !Lanchat.canDeliver(held[j].to)) {
         out.push({ to: selectedPeerId, from: "", fromName: "You", text: held[j].text || "", held: true, outgoing: true, ts: Date.now() })
       }
     }
@@ -92,21 +95,36 @@ Panel {
 
   function send() {
     var text = input.text.trim()
-    if (!text || !selectedPeerId) return
+    // Allow sending attachments with no text when any are staged.
+    if (!text && root.pendingCount === 0) return
+    if (!selectedPeerId) return
     if (editingMid !== "") {
       Lanchat.editMessage(editingMid, text)
       editingMid = ""
+    } else if (root.pendingCount > 0) {
+      // Send each staged file as its own attachment message; the typed text
+      // rides on the first one.
+      for (var i = 0; i < root.pendingAttachments.length; i++) {
+        var attach = root.pendingAttachments[i]
+        Lanchat.send(selectedPeerId, i === 0 ? text : "", attach)
+      }
     } else {
       Lanchat.send(selectedPeerId, text)
     }
     input.text = ""
+    root.pendingAttachments = []
     list.positionViewAtEnd()
   }
 
-  // Pick a file to attach and send it.
+  // Pick a file to attach and send it. The panel is a full-screen
+  // dismiss-on-outside-click popup (KeyboardPanel), so an external picker
+  // window would never receive a click — the overlay swallows it and closes
+  // the panel. Close the panel first so zenity runs without an overlay above
+  // it, then reopen (and send) when the picker returns.
   function attachAndSend() {
     if (!selectedPeerId) return
-    attachProc.command = ["zenity", "--file-selection", "--title", "Choose file to send"]
+    attachProc.command = ["zenity", "--file-selection", "--multiple", "--separator", "|", "--title", "Choose files to send"]
+    root.close()
     attachProc.running = true
   }
 
@@ -136,6 +154,65 @@ Panel {
   property bool diagExpanded: false
   // Whether the friend-request notifications banner is expanded (dropdown).
   property bool notifExpanded: true
+
+  // Two-step confirm for the "Clear all chats" action. Resets after a couple
+  // of seconds so the button doesn't stay armed.
+  property bool confirmClearAll: false
+  property Timer clearConfirmTimer: Timer {
+    interval: 2500
+    onTriggered: root.confirmClearAll = false
+  }
+
+  // Outgoing attachments staged in the compose area, NOT yet sent. Picking
+  // files appends here; the user reviews each, removes any, then presses Send.
+  // [{name, path}]
+  property var pendingAttachments: []
+
+  // True if an attachment path looks like an image by extension, so the
+  // compose preview can show a thumbnail.
+  function isImagePath(p) {
+    if (!p) return false
+    var ext = String(p).split(".").pop().toLowerCase()
+    return ["png","jpg","jpeg","gif","bmp","webp","svg","avif"].indexOf(ext) >= 0
+  }
+  readonly property int pendingCount: root.pendingAttachments.length
+
+  // Preview geometry: a header row (count + Send/Cancel) plus a scrollable
+  // list of removable rows, capped at a few visible before it scrolls.
+  readonly property real pendingHeaderH: Style.space(40)
+  readonly property real pendingRowH: Style.space(44)
+  readonly property int pendingMaxVisible: 4
+  readonly property real pendingListH: Math.min(root.pendingCount, root.pendingMaxVisible) * root.pendingRowH
+
+  // Append one or more picked paths to the staged list, skipping duplicates.
+  // `paths` may be a single path string or an array.
+  function stagePaths(paths) {
+    var list = root.pendingAttachments.slice()
+    if (typeof paths === "string") paths = [paths]
+    for (var i = 0; i < paths.length; i++) {
+      var p = String(paths[i] || "").trim()
+      if (!p) continue
+      var dup = false
+      for (var j = 0; j < list.length; j++) {
+        if (list[j].path === p) { dup = true; break }
+      }
+      if (!dup) list.push({ name: p.split("/").pop(), path: p })
+    }
+    root.pendingAttachments = list
+  }
+
+  // Remove one staged file from the preview (before sending).
+  function removeAttachment(index) {
+    var list = root.pendingAttachments.slice()
+    list.splice(index, 1)
+    root.pendingAttachments = list
+  }
+
+  // Clear all staged attachments (cancel).
+  function cancelAttachments() {
+    root.pendingAttachments = []
+  }
+
   function editMsg(mid, text) {
     editingMid = mid
     input.text = text
@@ -144,6 +221,7 @@ Panel {
 
   function pickDownloadDir() {
     dirProc.command = ["zenity", "--file-selection", "--directory", "--title", "Choose download folder"]
+    root.close()
     dirProc.running = true
   }
 
@@ -285,10 +363,16 @@ Panel {
     stdout: SplitParser {
       splitMarker: "\n"
       onRead: function(data) {
-        var path = String(data).trim()
-        if (!path || path === "") return
-        root.sendFile(path)
+        var line = String(data).trim()
+        if (!line || line === "") return
+        // zenity --multiple returns paths joined by "|".
+        root.stagePaths(line.split("|"))
       }
+    }
+    // Reopen the panel once the picker is done (file chosen OR cancelled) so
+    // the user lands back in the chat either way.
+    onExited: function(exitCode) {
+      root.open()
     }
   }
 
@@ -303,12 +387,14 @@ Panel {
         Lanchat.setDownloadDir(dir)
       }
     }
+    onExited: function(exitCode) {
+      root.open()
+    }
   }
 
   // Register an attachment and send it to the selected peer.
   function sendFile(path) {
-    if (!selectedPeerId) return
-    Lanchat.send(selectedPeerId, "", { name: path.split("/").pop(), path: path })
+    root.stagePaths(path)
   }
 
   // Panel dimensions by size setting, as INDEPENDENT fractions of each screen
@@ -611,7 +697,7 @@ Panel {
               // ---- settings: collapsible ------------------------------
               Column {
                 id: settings
-                property bool expanded: true
+                property bool expanded: false
                 width: parent.width
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -1158,6 +1244,51 @@ Panel {
                     }
                   }
 
+                  // Clear all conversations. Two-step confirm so an accidental
+                  // click can't wipe the whole history.
+                  Item {
+                    width: parent.width
+                    height: Style.space(30)
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Clear all chats"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: clearAllHover.containsMouse
+                      text: "Deletes every conversation on this machine."
+                    }
+                    MouseArea {
+                      id: clearAllHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Button {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: root.confirmClearAll ? "Confirm?" : "Clear"
+                      fontSize: Style.font.caption
+                      onClicked: {
+                        if (!root.confirmClearAll) { root.confirmClearAll = true; root.clearConfirmTimer.restart() }
+                        else {
+                          root.confirmClearAll = false
+                          Lanchat.clearAllChats()
+                          Lanchat.statusMessage = "All chats cleared"
+                          Lanchat.statusTimer.restart()
+                        }
+                      }
+                    }
+                  }
+
                   // Diagnostics section — shows the daemon's diagnostic log
                   // lines inline (peer expiry, dropped messages, send failures).
                   Item {
@@ -1296,41 +1427,63 @@ Panel {
             width: parent.width - root.peerColW - 1
             height: parent.height
 
-            ListView {
-              id: list
+            // Pinned thread header: stays fixed at the top while messages
+            // scroll beneath. Holds the typing indicator and per-chat
+            // actions (Clear chat, Unfriend).
+            Rectangle {
+              id: threadHeader
               width: parent.width
-              height: parent.height - composeBox.height
-              clip: true
-              spacing: Style.spacing.sm
-              model: root.thread
+              height: root.selectedPeerId ? Style.space(30) : 0
+              visible: root.selectedPeerId !== ""
+              color: Style.normalFill
 
-              header: Item {
-                width: parent.width
-                height: root.selectedPeerId ? Style.space(26) : Style.spacing.md
-                visible: root.selectedPeerId !== ""
-
-                Text {
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: root.typingForPeer !== ""
-                  text: root.typingForPeer + " is typing…"
-                  color: Color.muted
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  font.italic: true
-                }
-
-                Button {
-                  anchors.right: parent.right
-                  anchors.rightMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: "Unfriend"
-                  fontSize: Style.font.caption
-                  visible: root.selectedPeerId !== ""
-                  onClicked: root.unfriendSelected()
-                }
+              Rectangle {
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 1
+                color: Color.popups.border
               }
+
+              Text {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.typingForPeer !== ""
+                text: root.typingForPeer + " is typing…"
+                color: Color.muted
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.italic: true
+              }
+
+              Button {
+                id: unfriendBtn
+                anchors.right: parent.right
+                anchors.rightMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Unfriend"
+                fontSize: Style.font.caption
+                onClicked: root.unfriendSelected()
+              }
+              Button {
+                anchors.right: unfriendBtn.left
+                anchors.rightMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Clear chat"
+                fontSize: Style.font.caption
+                onClicked: root.clearChat()
+              }
+            }
+
+          ListView {
+            id: list
+            width: parent.width
+            height: parent.height - composeBox.height - threadHeader.height
+            clip: true
+            spacing: Style.spacing.sm
+            model: root.thread
+            header: Item { width: parent.width; height: Style.spacing.md }
               footer: Item { width: parent.width; height: Style.spacing.lg }
 
               onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
@@ -1611,7 +1764,9 @@ Panel {
             Rectangle {
               id: composeBox
               width: parent.width
-              height: Style.space(58)
+              // Grows to fit the staged-attachment preview (header + list)
+              // above the input when files are staged.
+              height: Style.space(58) + (root.pendingCount > 0 ? root.pendingHeaderH + root.pendingListH : 0)
               color: "transparent"
               Rectangle {
                 anchors.top: parent.top
@@ -1621,47 +1776,181 @@ Panel {
                 color: Color.popups.border
               }
 
-              Item {
+              Column {
                 anchors.fill: parent
-                anchors.leftMargin: Style.spacing.sm
-                anchors.rightMargin: Style.spacing.sm
 
-                // Attachment button.
-                Button {
-                  id: attachBtn
-                  width: Style.space(34)
-                  anchors.left: parent.left
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: "\uF0C6"  // nf-fa-paperclip
-                  onClicked: root.attachAndSend()
-                  enabled: root.selectedPeer !== null
+                // ---- staged-attachments preview (not yet sent) ----------
+                Rectangle {
+                  visible: root.pendingCount > 0
+                  width: parent.width
+                  height: root.pendingHeaderH + root.pendingListH
+                  color: Style.normalFill
+                  Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 1
+                    color: Color.popups.border
+                  }
+
+                  Column {
+                    anchors.fill: parent
+
+                    // Header: count + actions.
+                    Row {
+                      width: parent.width
+                      height: root.pendingHeaderH
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.rightMargin: Style.spacing.sm
+                      spacing: Style.spacing.sm
+
+                      Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.pendingCount + (root.pendingCount === 1 ? " file ready" : " files ready")
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        font.weight: Font.DemiBold
+                      }
+
+                      Item { width: 1; height: 1 }
+
+                      Button {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "\u2795 Add more"
+                        onClicked: root.attachAndSend()
+                      }
+                      Button {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "\u2713 Send"
+                        onClicked: root.send()
+                        enabled: root.selectedPeer !== null
+                      }
+                      Button {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "\u2715 Clear"
+                        onClicked: root.cancelAttachments()
+                      }
+                    }
+
+                    // Removable file list (scrolls if more than a few staged).
+                    ListView {
+                      width: parent.width
+                      height: root.pendingListH
+                      clip: true
+                      model: root.pendingAttachments
+                      interactive: root.pendingCount > root.pendingMaxVisible
+
+                      delegate: Item {
+                        required property var modelData
+                        required property int index
+                        width: parent.width
+                        height: root.pendingRowH
+
+                        Row {
+                          anchors.left: parent.left
+                          anchors.right: parent.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          anchors.leftMargin: Style.spacing.sm
+                          anchors.rightMargin: Style.spacing.sm
+                          spacing: Style.spacing.sm
+
+                          // Image thumbnail (only for image files).
+                          Rectangle {
+                            width: root.isImagePath(modelData.path) ? Style.space(36) : Style.space(36)
+                            height: Style.space(32)
+                            radius: Style.space(4)
+                            color: root.isImagePath(modelData.path) ? "transparent" : Style.pressedFill
+                            border.width: root.isImagePath(modelData.path) ? 1 : 0
+                            border.color: Color.popups.border
+                            clip: true
+
+                            Image {
+                              visible: root.isImagePath(modelData.path)
+                              anchors.fill: parent
+                              source: "file://" + modelData.path
+                              fillMode: Image.PreserveAspectFit
+                              layer.enabled: true
+                              layer.smooth: true
+                            }
+                            Text {
+                              visible: !root.isImagePath(modelData.path)
+                              anchors.centerIn: parent
+                              text: "\uF0C6"  // nf-fa-paperclip
+                              color: Color.muted
+                              font.family: Style.font.family
+                              font.pixelSize: Style.font.caption
+                            }
+                          }
+
+                          Text {
+                            width: parent.width - Style.space(36) - Style.space(56)
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.name
+                            color: Color.popups.text
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.caption
+                            elide: Text.ElideMiddle
+                          }
+
+                          Item { width: 1; height: 1 }
+
+                          // Remove this file from the staging list.
+                          Button {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "\u2715"
+                            onClicked: root.removeAttachment(index)
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
 
-                TextField {
-                  id: input
-                  anchors.left: attachBtn.right
+                // Input row (attach button + text field).
+                Item {
+                  width: parent.width
+                  height: Style.space(58)
                   anchors.leftMargin: Style.spacing.sm
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  anchors.topMargin: Style.spacing.md
-                  anchors.bottomMargin: Style.spacing.md
-                  placeholderText: root.selectedPeer
-                    ? "Message " + root.selectedPeer.name + "…"
-                    : "Select a peer to chat"
-                  enabled: root.selectedPeer !== null
-                  onAccepted: root.send()
-                  onTextChanged: {
-                    if (root.selectedPeerId && text.length > 0) {
-                      Lanchat.sendTyping(root.selectedPeerId)
-                      typingTimer.restart()
-                    } else {
+                  anchors.rightMargin: Style.spacing.sm
+
+                  // Attachment button.
+                  Button {
+                    id: attachBtn
+                    width: Style.space(34)
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "\uF0C6"  // nf-fa-paperclip
+                    onClicked: root.attachAndSend()
+                    enabled: root.selectedPeer !== null
+                  }
+
+                  TextField {
+                    id: input
+                    anchors.left: attachBtn.right
+                    anchors.leftMargin: Style.spacing.sm
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.topMargin: Style.spacing.md
+                    anchors.bottomMargin: Style.spacing.md
+                    placeholderText: root.selectedPeer
+                      ? "Message " + root.selectedPeer.name + "\u2026"
+                      : "Select a peer to chat"
+                    enabled: root.selectedPeer !== null
+                    onAccepted: root.send()
+                    onTextChanged: {
+                      if (root.selectedPeerId && text.length > 0) {
+                        Lanchat.sendTyping(root.selectedPeerId)
+                        typingTimer.restart()
+                      } else {
+                        if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
+                        typingTimer.stop()
+                      }
+                    }
+                    onEditingFinished: {
                       if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
                       typingTimer.stop()
                     }
-                  }
-                  onEditingFinished: {
-                    if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
-                    typingTimer.stop()
                   }
                 }
               }

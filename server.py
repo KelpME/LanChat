@@ -435,6 +435,16 @@ def clear_history_for_peer(peer_id: str) -> int:
     return removed
 
 
+def clear_all_history() -> int:
+    """Clear every conversation (both sent and received messages)."""
+    global _history
+    with _hist_lock:
+        removed = len(_history)
+        _history = []
+        _save_history_locked()
+    return removed
+
+
 def delete_message(mid: str) -> bool:
     global _history
     with _hist_lock:
@@ -1538,6 +1548,9 @@ def stdin_loop() -> None:
         elif kind == "clearChat":
             removed = clear_history_for_peer(str(cmd.get("peer", "")))
             _emit({"event": "chat-cleared", "peer": str(cmd.get("peer", "")), "removed": removed})
+        elif kind == "clearAllChats":
+            removed = clear_all_history()
+            _emit({"event": "chat-cleared", "peer": "", "removed": removed})
         elif kind == "deleteMessage":
             ok = delete_message(str(cmd.get("mid", "")))
             _emit({"event": "message-deleted", "mid": str(cmd.get("mid", "")), "ok": ok})
