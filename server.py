@@ -1170,7 +1170,10 @@ def _handle_incoming(msg: dict, addr) -> None:
               friend=is_friend(pid), pending=is_pending(pid))
         return
     text = str(msg.get("text", ""))
-    if not text.strip():
+    att = msg.get("attachment")
+    # Allow an attachment-only message with no text (the UI sends those); only
+    # drop truly empty messages.
+    if not text.strip() and not att:
         _log("inbound-dropped from=%s reason=empty" % pid[:12])
         return
     # Use the sender's broadcast name if present; otherwise fall back to a
@@ -1188,6 +1191,10 @@ def _handle_incoming(msg: dict, addr) -> None:
     }
     if msg.get("mid"):
         message["mid"] = msg["mid"]
+    # Carry the attachment metadata (name/size/mime/fileId/sha256) through so
+    # the receiver can present the accept bar and download the file.
+    if att:
+        message["attachment"] = att
     # A friend request from a stranger is a legitimate inbound channel: it's
     # how they ask to talk. Record them as a pending-request peer so their
     # replies (accept) are trusted. Hold EVERY friend request from a
@@ -1231,6 +1238,30 @@ def _file_sha256(path: str) -> str:
     return h.hexdigest()
 
 
+def _remove_file(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _safe_filename(name: str) -> str:
+    """Reduce an untrusted attachment name to a safe basename.
+
+    The name arrives inside a peer's message and is joined straight into the
+    download directory, so it must never carry a path separator, dot-dot, or
+    control character (blocks path-traversal writes outside downloadDir).
+    """
+    if not name:
+        return "download"
+    # Normalize both separator styles, then keep only the final component.
+    name = str(name).replace("\\", "/").rsplit("/", 1)[-1]
+    # Drop control characters and leading/trailing dots + whitespace.
+    name = "".join(c for c in name if c.isprintable() and ord(c) >= 0x20)
+    name = name.strip(" .")
+    return name or "download"
+
+
 def register_attachment(file_id: str, path: str, name: str, ttl: float = 600.0) -> None:
     with _att_lock:
         _attachments[file_id] = {"path": path, "name": name, "expires": time.time() + ttl}
@@ -1244,8 +1275,16 @@ def get_attachment(file_id: str):
         return None
 
 
-def _download_attachment(peer: dict, file_id: str, save_to: str) -> bool:
-    """Receiver fetches a file from a peer's HTTPS server and saves it."""
+def _download_attachment(peer: dict, file_id: str, save_to: str,
+                         expected_sha256: str = "", mid: str = "") -> bool:
+    """Receiver fetches a file from a peer's HTTPS server and saves it.
+
+    Streams in chunks (never buffers the whole file in memory), writes to a
+    temp file that is atomically renamed on success, verifies the sender's
+    sha256 when provided, and emits progress/saved events from the calling
+    thread. The acceptAttachment handler runs this in a background thread so a
+    large transfer never blocks the daemon's message/presence loop.
+    """
     import urllib.error
     import urllib.request
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -1253,13 +1292,42 @@ def _download_attachment(peer: dict, file_id: str, save_to: str) -> bool:
     ctx.verify_mode = ssl.CERT_NONE  # fingerprint-verified peer already
     url = "https://%s:%d/attachment?fileId=%s&token=%s" % (
         peer["address"], peer.get("httpPort") or http_port(), file_id, CONFIG.get("token"))
+    tmp = save_to + ".part"
     try:
+        os.makedirs(os.path.dirname(save_to) or ".", exist_ok=True)
+        h = hashlib.sha256()
+        got = 0
+        total = 0
         with urllib.request.urlopen(url, timeout=60, context=ctx) as resp:
-            os.makedirs(os.path.dirname(save_to) or ".", exist_ok=True)
-            with open(save_to, "wb") as f:
-                f.write(resp.read())
+            total = int(resp.headers.get("Content-Length") or 0)
+            with open(tmp, "wb") as f:
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    h.update(chunk)
+                    got += len(chunk)
+                    _emit({"event": "attachment-progress", "fileId": file_id, "mid": mid,
+                           "bytes": got, "total": total})
+        digest = h.hexdigest()
+        if expected_sha256 and digest != expected_sha256:
+            _remove_file(tmp)
+            _log("attachment-checksum-mismatch file=%s expected=%s got=%s"
+                 % (os.path.basename(save_to), expected_sha256, digest))
+            _emit({"event": "attachment-saved", "ok": False, "path": save_to,
+                   "mid": mid, "fileId": file_id, "error": "checksum mismatch"})
+            return False
+        os.replace(tmp, save_to)  # atomic: never a truncated final file
+        _emit({"event": "attachment-saved", "ok": True, "path": save_to,
+               "mid": mid, "fileId": file_id})
         return True
-    except Exception:
+    except Exception as e:
+        _remove_file(tmp)
+        _log("attachment-download-failed peer=%s file=%s err=%s"
+             % (peer.get("name"), os.path.basename(save_to), e))
+        _emit({"event": "attachment-saved", "ok": False, "path": save_to,
+               "mid": mid, "fileId": file_id, "error": str(e)})
         return False
 
 
@@ -1424,8 +1492,9 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
                 return self._send_json(403, {"ok": False, "error": "read access disabled"})
             return self._send_json(200, {"ok": True, "messages": history_snapshot()})
         if parsed.path == "/attachment":
-            if not api_full_access():
-                return self._send_json(403, {"ok": False, "error": "read access disabled"})
+            # Serving a registered file to a confirmed friend (token in the
+            # query) is peer-to-peer file transfer, not script read-access — so
+            # it must NOT be gated behind apiFullAccess. Auth is enforced above.
             file_id = (qs.get("fileId") or [""])[0]
             att = get_attachment(file_id)
             if not att:
@@ -1571,10 +1640,18 @@ def stdin_loop() -> None:
                 _emit({"event": "error", "message": "attachment sender not found"})
                 continue
             file_id = str(cmd.get("fileId", ""))
-            name = str(cmd.get("name", "download"))
+            name = _safe_filename(str(cmd.get("name", "download")))
+            mid = str(cmd.get("mid", ""))
+            sha256 = str(cmd.get("sha256", ""))
             save_to = os.path.join(CONFIG.get("downloadDir", os.path.expanduser("~/Downloads")), name)
-            ok = _download_attachment(peer, file_id, save_to)
-            _emit({"event": "attachment-saved", "ok": ok, "path": save_to})
+            # Run the transfer off the stdin loop so a large file never blocks
+            # message processing / presence. Progress + completion events come
+            # back from the download thread.
+            threading.Thread(
+                target=_download_attachment,
+                args=(peer, file_id, save_to, sha256, mid),
+                daemon=True,
+            ).start()
         elif kind == "list":
             _emit({"event": "peers", "peers": peer_snapshot()})
         elif kind == "setHttp":

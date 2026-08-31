@@ -37,6 +37,13 @@ QtObject {
   property var friends: []        // [{id,address,name,confirmed}]
 
   property string downloadDir: ""
+
+  // Live state of the in-flight attachment download (idle when dlFileId is "").
+  property string dlFileId: ""
+  property string dlName: ""
+  property double dlBytes: 0
+  property double dlTotal: 0
+  readonly property bool dlActive: lanchat.dlFileId !== ""
   property int sendDelay: 0
   property var pendingSends: []  // [{mid, to, text, remaining, total}] undo-window
   property var friendRequests: [] // [{peerId, name, outgoing, ts, mid}] pending friend requests (notifications)
@@ -251,8 +258,16 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setSendDelay", seconds: seconds }) + "\n")
   }
 
-  function acceptAttachment(from, fileId, name) {
-    daemon.write(JSON.stringify({ cmd: "acceptAttachment", from: from, fileId: fileId, name: name }) + "\n")
+  // Accept an incoming file: ask the daemon to pull it from the sender and
+  // save it. mid + sha256 let the daemon echo the right completion and verify
+  // the download. Sets live download state so the UI can show progress.
+  function acceptAttachment(from, fileId, name, mid, sha256) {
+    dlFileId = fileId
+    dlName = name || ""
+    dlBytes = 0
+    dlTotal = 0
+    daemon.write(JSON.stringify({ cmd: "acceptAttachment", from: from, fileId: fileId, name: name,
+      mid: mid || "", sha256: sha256 || "" }) + "\n")
   }
 
   // Toggle the optional HTTP API (start/stop the daemon's HTTP server).
@@ -549,8 +564,33 @@ QtObject {
       }
       break
 
+    case "attachment-progress":
+      if (obj.fileId && obj.fileId === lanchat.dlFileId) {
+        lanchat.dlBytes = obj.bytes || 0
+        lanchat.dlTotal = obj.total || 0
+      }
+      break
+
     case "attachment-saved":
-      lanchat.statusMessage = obj.ok ? ("Saved to " + obj.path) : ("Failed to save attachment: " + obj.path)
+      lanchat.dlFileId = ""
+      lanchat.dlBytes = 0
+      lanchat.dlTotal = 0
+      if (obj.ok && obj.mid) {
+        // Mark the matching message accepted so the pending accept bar clears.
+        var upd = lanchat.messages.slice()
+        for (var ai = 0; ai < upd.length; ai++) {
+          if (upd[ai].mid === obj.mid && upd[ai].attachment) {
+            upd[ai].attachment.accepted = true
+            break
+          }
+        }
+        lanchat.messages = upd
+        lanchat.statusMessage = "Saved to " + obj.path
+      } else {
+        lanchat.statusMessage = obj.error
+          ? ("Failed to save attachment: " + obj.error)
+          : "Failed to save attachment"
+      }
       lanchat.statusTimer.restart()
       break
 

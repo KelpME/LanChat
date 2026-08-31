@@ -26,14 +26,23 @@ Panel {
   property string selectedPeerId: ""
 
   // The most recent un-accepted incoming attachment for the selected peer.
+  // Returns the whole message (carries `mid` + the attachment metadata) so the
+  // accept bar can echo the message id back for accepted-marking.
   readonly property var pendingAttachment: {
     var all = Lanchat.messages
     for (var i = all.length - 1; i >= 0; i--) {
       var m = all[i]
       if (!m.outgoing && m.from === selectedPeerId && m.attachment && !m.attachment.accepted)
-        return m.attachment
+        return m
     }
     return null
+  }
+
+  // True while the in-flight download matches THIS pending attachment (so a
+  // download in another conversation can't light up this peer's Save bar).
+  readonly property bool pendingDownloading: {
+    var p = root.pendingAttachment
+    return Lanchat.dlActive && !!p && Lanchat.dlFileId === p.attachment.fileId
   }
 
   readonly property var selectedPeer: {
@@ -1643,9 +1652,19 @@ Panel {
 
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
-                  text: root.pendingAttachment
-                    ? "Incoming file: " + root.pendingAttachment.name
-                    : ""
+                  width: Math.max(10, parent.width - Style.space(84))
+                  text: {
+                    var p = root.pendingAttachment
+                    if (!p) return ""
+                    if (root.pendingDownloading) {
+                      if (Lanchat.dlTotal > 0) {
+                        var pct = Math.min(99, Math.floor(100 * Lanchat.dlBytes / Lanchat.dlTotal))
+                        return "Saving " + p.attachment.name + "\u2026 " + pct + "%"
+                      }
+                      return "Saving " + p.attachment.name + "\u2026"
+                    }
+                    return "Incoming file: " + p.attachment.name
+                  }
                   color: Color.popups.text
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
@@ -1655,10 +1674,12 @@ Panel {
                 Item { width: Style.space(10); height: 1 }
 
                 Button {
-                  text: "Save"
+                  text: root.pendingDownloading ? "Saving\u2026" : "Save"
+                  enabled: !root.pendingDownloading
                   onClicked: {
-                    if (root.pendingAttachment)
-                      Lanchat.acceptAttachment(root.pendingAttachment.from, root.pendingAttachment.fileId, root.pendingAttachment.name)
+                    var p = root.pendingAttachment
+                    if (p)
+                      Lanchat.acceptAttachment(p.from, p.attachment.fileId, p.attachment.name, p.mid, p.attachment.sha256 || "")
                   }
                 }
               }
