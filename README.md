@@ -203,6 +203,9 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 - **Optional HTTP API** — token-authenticated, **loopback-only by default**
   (1.2.1+; `httpBind: "0.0.0.0"` opts into LAN exposure), with rate limits on
   `/send` and a brute-force guard on failed auth, plus a request-body cap.
+- **Transport hardening** (1.2.2) — per-connection buffered input is bounded
+  (512 KB) and concurrent inbound connections are capped (64), so a flooding
+  LAN peer can't exhaust memory or threads.
 
 > The cert is self-signed (no CA), which is appropriate for LAN peer-to-peer.
 > Because discovery is open, any machine on your LAN can see you and send a

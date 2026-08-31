@@ -58,12 +58,21 @@ PEER_TIMEOUT_S = 6.0       # drop a peer after this long without a hello
 BROADCAST_INTERVAL_S = 3.0
 HISTORY_LIMIT = 500
 
+# Transport hardening (1.2.2): bound an individual connection's buffered input
+# and the number of concurrent inbound connections, so a malicious/flooding LAN
+# peer can't exhaust memory or threads.
+MAX_FRAME_BUF = 512 * 1024   # a peer must send a newline within this many bytes
+MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
+
 # Version of the plugin/daemon. Keep in sync with manifest.json "version".
 # Bump when behaviour changes; breaking changes should bump the major number.
 # The reported version derives from the checked-out git commit (short hash) so
 # both machines can verify they're running the same code; falls back to the
 # manifest version when git isn't available (e.g. a bare copy).
 #
+# 1.2.2 — transport hardening: bound per-connection buffered input (512KB) and
+#   concurrent inbound connections (64) so a flooding LAN peer can't exhaust
+#   memory or threads.
 # 1.2.1 — security hardening of the HTTP API: it now binds loopback-only by
 #   default (httpBind; set "0.0.0.0" for LAN exposure), and adds rate limits
 #   (/send, failed-auth brute-force guard -> 429) plus a 256KB body cap.
@@ -79,7 +88,7 @@ HISTORY_LIMIT = 500
 #   socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
 #   over the existing socket). Old and new transports do not interoperate; both
 #   machines must run >= 1.1.0.
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 
 
 def _git_version() -> str:
@@ -1074,6 +1083,10 @@ def _reader_outbound(pid: str, c: dict, sock) -> None:
             if not chunk:
                 break
             buf += chunk
+            if len(buf) > MAX_FRAME_BUF:
+                # Peer flooded without a newline — drop it to bound memory.
+                _log("outbound-buffer-overflow peer=%s" % pid[:12])
+                return
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
                 if line.strip():
@@ -1107,6 +1120,15 @@ def _reader_outbound(pid: str, c: dict, sock) -> None:
         _close_sock(sock)
 
 
+def _reader_inbound_wrapper(sock) -> None:
+    """Run _reader_inbound and always release the connection slot (also on
+    the buffer-overflow / identity-reject early-return paths)."""
+    try:
+        _reader_inbound(sock)
+    finally:
+        _conn_slot_release()
+
+
 def _reader_inbound(sock) -> None:
     """Reader for a socket the PEER dialed. Identity is NOT taken on faith: the
     peer must first prove it owns the private key for its claimed cert
@@ -1135,6 +1157,10 @@ def _reader_inbound(sock) -> None:
             if not chunk:
                 break
             buf += chunk
+            if len(buf) > MAX_FRAME_BUF:
+                # Peer flooded without a newline — drop it to bound memory.
+                _log("inbound-buffer-overflow addr=%s" % addr)
+                return
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
                 if not line.strip():
@@ -1255,6 +1281,29 @@ def conn_loop() -> None:
 # TCP listener (accepts the peer's outbound dials)
 # --------------------------------------------------------------------------
 
+# Cap concurrent inbound connections so a connection-flooding peer can't spawn
+# unbounded reader threads. Guarded by a lock; decremented when the reader exits.
+_inbound_conns = 0
+_inbound_conns_lock = threading.Lock()
+
+
+def _conn_slot_taken() -> bool:
+    """Try to take an inbound-connection slot. True if under the cap; False if full."""
+    global _inbound_conns
+    with _inbound_conns_lock:
+        if _inbound_conns >= MAX_INBOUND_CONNS:
+            return False
+        _inbound_conns += 1
+        return True
+
+
+def _conn_slot_release() -> None:
+    global _inbound_conns
+    with _inbound_conns_lock:
+        if _inbound_conns > 0:
+            _inbound_conns -= 1
+
+
 def tcp_loop() -> None:
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1271,7 +1320,12 @@ def tcp_loop() -> None:
             conn = tls_ctx.wrap_socket(raw_conn, server_side=True)
         except (OSError, ssl.SSLError):
             continue
-        threading.Thread(target=_reader_inbound, args=(conn,), daemon=True).start()
+        if not _conn_slot_taken():
+            # Over the connection cap — refuse and drop.
+            _log("inbound-conn-limit addr=%s conns=%d" % (addr[0], MAX_INBOUND_CONNS))
+            _close_sock(conn)
+            continue
+        threading.Thread(target=_reader_inbound_wrapper, args=(conn,), daemon=True).start()
 
 
 # Handshake hold: pid -> list of held messages awaiting the recipient's accept.

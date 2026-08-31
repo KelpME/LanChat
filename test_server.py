@@ -202,6 +202,31 @@ def main():
         assert not _has_message(b, "SPOOF2"), "message with a bogus identity signature leaked through"
         print("OK  inbound spoof dropped (friend cert but wrong signature)")
 
+        # --- Transport hardening (1.2.2): a peer flooding bytes without a
+        # newline is dropped (bounded buffer), not buffered unboundedly.
+        flood = _ctx.wrap_socket(socket.create_connection(("127.0.0.1", b.port), timeout=3))
+        flood.settimeout(5)
+        # Send > MAX_FRAME_BUF (512KB) of no-newline bytes.
+        try:
+            flood.sendall(b"A" * (600 * 1024))
+        except OSError:
+            pass
+        # The reader should hit the cap and close the connection.
+        closed = False
+        try:
+            flood.recv(1)
+        except Exception:
+            closed = True
+        flood.close()
+        assert closed, "flooding peer connection was not dropped (buffer not bounded)"
+        print("OK  oversized no-newline flood dropped (buffer cap)")
+
+        # Still functional after the flood.
+        a.cmd(cmd="send", to=idb, text="after flood")
+        m = b.wait_event("message")
+        assert m and m["message"]["text"] == "after flood", "message after flood not delivered"
+        print("OK  transport still delivers after flood dropped")
+
         # Persistence: B's history file contains the delivered message.
         hist_path = os.path.join(home_b, ".local", "state", "lanchat", "history.json")
         with open(hist_path) as f:
