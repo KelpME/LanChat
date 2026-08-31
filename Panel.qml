@@ -871,10 +871,11 @@ Panel {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                // Cap height to the column so the body scrolls instead of
-                // overflowing off the app when the panel is short/narrow.
+                // Cap height so the expanded body stops at the top-pinned
+                // alert flow (peers bar) — it can never grow into/behind it.
+                // peersOnlineBar.y is its top-anchored, fixed position.
                 height: settingsHeader.height + (settings.expanded
-                  ? Math.min(settingsBody.contentHeight, Math.max(0, parent.height - settingsHeader.height - Style.space(30)))
+                  ? Math.min(settingsBody.contentHeight, Math.max(0, peersOnlineBar.y - settingsHeader.height - Style.space(12)))
                   : 0)
 
                 // header
@@ -913,7 +914,7 @@ Panel {
                 Flickable {
                   id: settingsBody
                   width: parent.width
-                  height: Math.min(bodyCol.implicitHeight, parent.height - settingsHeader.height - Style.space(30))
+                  height: Math.min(bodyCol.implicitHeight, Math.max(0, peersOnlineBar.y - settingsHeader.height - Style.space(12)))
                   visible: settings.expanded
                   contentWidth: width
                   contentHeight: bodyCol.implicitHeight
