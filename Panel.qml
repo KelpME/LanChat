@@ -1687,11 +1687,14 @@ Panel {
 
             // ---- pending message undo (countdown ring) -----------------
             Rectangle {
+              id: pendingBar
               visible: root.pendingForPeer.length > 0
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.bottom: composeBox.top
-              height: Style.space(40)
+              // Grows to show each held message (capped) so the user can see
+              // exactly what they sent while the countdown runs.
+              height: Math.min(root.pendingForPeer.length, 3) * Style.space(42) + Style.space(6)
               color: Style.pressedFill
               Rectangle {
                 anchors.top: parent.top
@@ -1701,47 +1704,77 @@ Panel {
                 color: Color.popups.border
               }
 
-              Repeater {
-                model: root.pendingForPeer
-                delegate: Row {
-                  required property var modelData
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.spacing.sm
+              Column {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: Style.space(3)
+                anchors.leftMargin: Style.spacing.sm
+                anchors.rightMargin: Style.spacing.sm
+                spacing: Style.space(2)
 
-                  // Undo button with countdown ring.
-                  Rectangle {
-                    width: Style.space(26)
-                    height: Style.space(26)
-                    radius: width / 2
-                    color: "transparent"
-                    border.width: 2
-                    border.color: Color.accent
-                    // countdown ring: arc via a Canvas is heavy; use opacity as a
-                    // simple visual proxy of remaining fraction.
-                    opacity: 0.5 + 0.5 * (modelData.remaining / modelData.total)
+                Repeater {
+                  model: root.pendingForPeer
+                  delegate: Row {
+                    required property var modelData
+                    width: parent.width
+                    height: Style.space(38)
+                    spacing: Style.spacing.sm
 
+                    // Undo button with countdown ring.
+                    Rectangle {
+                      width: Style.space(26)
+                      height: Style.space(26)
+                      anchors.verticalCenter: parent.verticalCenter
+                      radius: width / 2
+                      color: "transparent"
+                      border.width: 2
+                      border.color: Color.accent
+                      // countdown ring: arc via a Canvas is heavy; use opacity as a
+                      // simple visual proxy of remaining fraction.
+                      opacity: 0.5 + 0.5 * (modelData.remaining / modelData.total)
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: "\u21A9"
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.undoPending(modelData.mid)
+                      }
+                    }
+
+                    // The message content the user is about to send: text
+                    // (if any) and the attachment name (if any), so it's
+                    // reviewable while the countdown runs.
                     Text {
-                      anchors.centerIn: parent
-                      text: "\u21A9"
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Math.max(10, parent.width - Style.space(120))
+                      text: {
+                        var parts = []
+                        if (modelData.text) parts.push(String(modelData.text))
+                        if (modelData.attachment && modelData.attachment.name)
+                          parts.push("\uD83D\uDCCE " + modelData.attachment.name)
+                        return parts.length ? parts.join("  ·  ") : "(attachment)"
+                      }
                       color: Color.popups.text
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
+                      elide: Text.ElideRight
                     }
 
-                    MouseArea {
-                      anchors.fill: parent
-                      onClicked: root.undoPending(modelData.mid)
+                    Text {
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: Math.ceil(modelData.remaining) + "s"
+                      color: Color.accent
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
                     }
-                  }
-
-                  Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "Pending… " + Math.ceil(modelData.remaining) + "s"
-                    color: Color.popups.text
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
                   }
                 }
               }
