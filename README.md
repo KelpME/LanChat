@@ -88,6 +88,25 @@ wiring is unchanged. If the daemon is down, the bridge exits and the UI shows a
 clear **"Daemon not running"** warning (bar icon turns red) instead of a
 misleading "0 peers online".
 
+### Uninstalling
+
+The plugin and the systemd unit are removed in two steps — **the systemd unit
+must be removed first**, because `omarchy plugin remove` alone would leave the
+daemon running under systemd:
+
+```bash
+# 1. Stop + remove the systemd unit (daemon stops, no longer auto-starts)
+cd ~/.config/omarchy/plugins/KelpME.lanchat && make systemd-uninstall
+
+# 2. Remove the plugin itself
+omarchy plugin remove KelpME.lanchat --yes
+```
+
+Your **config, TLS certs, and message history are not touched** by either step —
+they live outside the plugin (`~/.config/omarchy/lanchat.json`,
+`~/.config/omarchy/lanchat-certs/`, `~/.local/state/lanchat/`). To fully wipe
+them too, delete those files/dirs yourself after removing the plugin.
+
 ## First-run setup
 
 On first run the daemon generates its config and TLS certificate automatically —

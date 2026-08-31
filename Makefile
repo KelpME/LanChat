@@ -17,7 +17,7 @@ PYFILES := server.py naming.py $(TESTS) test_peer.py
 # Bare `make` (no target) shows the help listing.
 .DEFAULT_GOAL := help
 
-.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info help-html test-systemd-control systemd-install systemd-status
+.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info help-html test-systemd-control systemd-install systemd-status systemd-uninstall
 
 ## help: list all targets and what they do
 help: ## (default) show this help
@@ -70,6 +70,14 @@ systemd-install: ## copy systemd/lanchat.service to ~/.config/systemd/user and e
 ## systemd-status: show the daemon's systemd state
 systemd-status: ## systemctl --user status lanchat (is the daemon running?)
 	@systemctl --user status lanchat --no-pager || true
+
+## systemd-uninstall: stop + disable + remove the lanchat systemd user unit
+systemd-uninstall: ## remove the daemon from systemd (run BEFORE omarchy plugin remove)
+	@-systemctl --user disable --now lanchat.service 2>/dev/null || true
+	@-rm -f $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.service
+	@systemctl --user daemon-reload
+	@echo "Lanchat systemd unit removed. Now remove the plugin itself: omarchy plugin remove KelpME.lanchat --yes"
+	@echo "NOTE: your config/certs/history are NOT touched (they live outside the plugin)."
 
 ## lint: ruff check on all Python
 lint: ## run `ruff check` (fast, no fix)
