@@ -2,8 +2,8 @@
 
 Private messaging between your own machines on your local network, as an
 [Omarchy Quattro](https://github.com/omacom/omarchy/tree/quattro) shell plugin.
-Install it on every computer you own, set them all to the same shared secret,
-and they find each other automatically — no IP addresses, no accounts, no cloud.
+Install it on every computer you own and they find each other automatically —
+no IP addresses, no accounts, no cloud, no shared keys to copy.
 
 ## Features
 
@@ -14,16 +14,19 @@ and they find each other automatically — no IP addresses, no accounts, no clou
   cert's SHA-256 fingerprint, and peers verify each other's fingerprint when
   connecting — an imposter can't impersonate a friend.
 - **Friend/handshake gate** — a stranger on the LAN can't message you.
-  Starting a conversation sends a friend request; the other side accepts or
-  rejects it in the chat. Only confirmed friends (or peers you've requested)
-  can reach you.
+  You add a friend with the **+** button on their peer card; the other side
+  accepts or rejects the request in a notifications banner. Only confirmed
+  friends (or peers you've requested) can reach you.
 - **Online/offline toggle** — go invisible: stop broadcasting and drop all
   inbound messages until you're back.
 - **Undoable sends** — an optional send-delay window holds a message with a
   countdown so you can undo it before it goes out.
-- **LocalSend-style file attachments** — send single files over the encrypted
-  transport; the receiver accepts them and they're saved to your chosen folder
-  (default `~/Downloads`).
+- **LocalSend-style file attachments** — stage and send one or more files over
+  the encrypted, authenticated transport. The receiver sees an incoming-file
+  bar with a **Save** button; accepting streams the transfer with live
+  progress, verifies the file's checksum, and saves it to your chosen folder
+  (default `~/Downloads`). Downloads are pinned to the sender's cert
+  fingerprint, so the file comes from who you think it does.
 - **Lazy-loaded conversations** — long threads page in as you scroll, keeping
   the panel fluid.
 - **Unfriend** — remove a friend from the thread header.
@@ -32,8 +35,9 @@ and they find each other automatically — no IP addresses, no accounts, no clou
 - **Read receipts** — see when a friend has read your message (toggleable).
 - **Per-machine history** — each machine keeps its own copy of its threads in
   `~/.local/state/lanchat/history.json`, so messages survive reboots.
-- **A native bar UI** — one chat icon in the bar, an online-peer + unread
-  badge, and a click opens the chat panel (peer list + thread + compose box).
+- **A native bar UI** — one chat icon in the bar whose color reflects your
+  status, an unread-count badge, and a click opens the chat panel (peer list +
+  thread + compose box). Right-click toggles online/offline or sets your status.
 
 ## Requirements
 
@@ -83,9 +87,10 @@ nothing to configure:
 
 Install Lanchat on each machine, enable it, and the daemons start themselves.
 **There's no shared secret to copy.** Discovery is open on your LAN — any
-machine running Lanchat sees the others automatically. To actually chat, send
-a message and the other side **accepts your friend request** — that handshake
-is the gate that lets you talk.
+machine running Lanchat sees the others automatically. To actually chat, add
+the other machine as a friend (the **+** button on their peer card); they
+accept your request in the notifications banner — that handshake is the gate
+that lets you talk.
 
 The `token` in the config is now **only** for the optional HTTPS API (scripts,
 agents) — it is not needed for peer messaging.
@@ -103,6 +108,7 @@ agents) — it is not needed for peer messaging.
 | `friends`     | `[]`               | Your confirmed/pending friends               |
 | `downloadDir` | `~/Downloads`      | Where accepted attachments are saved         |
 | `sendDelay`   | `0`                | Undo window in seconds (`0` = off)           |
+| `apiFullAccess` | `false`          | Whether the HTTP API can read chat data      |
 | `panelSize`   | `medium`           | Panel size: `small`, `medium`, `large`, `xl`, `full` |
 | `status`      | `available`        | Your status: `available`, `dnd`, `away`, `brb`       |
 | `soundEnabled`| `true`             | Play a chime when a new message arrives              |
@@ -113,14 +119,16 @@ agents) — it is not needed for peer messaging.
 
 ## Using the app
 
-1. **Start a conversation** — pick a peer from the list and type a message.
-   If they're not a friend yet, your first message is a friend request.
-2. **Accept a friend request** — it appears as a banner in the thread with
-   **Accept** / **Reject**. Accepting completes the handshake; from then on you
-   message freely.
-3. **Send a file** — click the paperclip in the compose box, pick a file. The
-   receiver sees an **"Incoming file"** bar at the bottom of the conversation
-   with a **Save** button; accepting saves it to the download folder.
+1. **Add a friend / start a conversation** — pick a peer from the list and
+   click the **+** on their card to send a friend request. Once they accept,
+   pick them and type a message.
+2. **Accept a friend request** — requests appear in the notifications banner
+   pinned below the peer list, with **Accept** / **Reject**. Accepting
+   completes the handshake; from then on you message freely.
+3. **Send a file** — click the paperclip in the compose box, pick one or more
+   files. The receiver sees an **"Incoming file"** bar at the bottom of the
+   conversation with a **Save** button; accepting streams the transfer with
+   progress, verifies it, and saves it to the download folder.
 4. **Undo a send** — turn on **Undo delay** in Settings (seconds). Sent
    messages are held with a countdown; hit undo before it hits zero and the
    message is cancelled.
@@ -136,7 +144,7 @@ agents) — it is not needed for peer messaging.
 
 Lanchat ships a small HTTPS API for scripts, agents, or curl. **Off by default**;
 toggle it from the **API** switch in Settings. All endpoints except `/health`
-require the shared token.
+require this machine's token (from `lanchat.json`).
 
 | Method | Path                | Auth        | What it does                                   |
 |--------|---------------------|-------------|------------------------------------------------|
@@ -147,10 +155,11 @@ require the shared token.
 
 **API access mode** — the **Agent full access** toggle in Settings controls
 whether the API can *read* chat data:
-- **On:** `/peers`, `/messages`, and file downloads work (full access).
+- **On:** `/peers` and `/messages` work (full read access).
 - **Off (default):** the API is **send-only** — the agent can send messages to
-  your friends but cannot read history, list peers, or download files. Read
-  endpoints return `403`.
+  your friends but cannot read history or list peers; those read endpoints
+  return `403`. (Serving an accepted file transfer is peer-to-peer, not script
+  read-access, so downloads are not gated by this toggle.)
 
 Send a message:
 
@@ -178,7 +187,8 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 - **Identity** — the cert's SHA-256 fingerprint is the device's true identity,
   decoupled from the cosmetic display name. Renaming never breaks a friend link.
 - **Peer verification** — when connecting, the peer's cert fingerprint is
-  checked against the one you friended, preventing impersonation.
+  checked against the one you friended, preventing impersonation. The same
+  check pins file downloads to the sender's identity.
 - **Access** — discovery is open (any LAN machine is visible); the
   friend/handshake gates messaging. Only confirmed friends (or peers you've
   requested) can reach you.
@@ -203,10 +213,11 @@ The plugin is three pieces:
 - **`Service.qml` / `BarWidget.qml` / `Panel.qml`** — the always-on service,
   the bar icon + badge, and the chat panel.
 
-Discovery: each machine broadcasts a signed `hello` every five seconds and
-listens on the same port. Peers reply with a `pong`, and both sides track each
-other until heartbeats stop (15s timeout). Messaging is a TLS connection to the
-peer, authenticated with the shared token and verified by cert fingerprint.
+Discovery: each machine broadcasts a `hello` every three seconds and listens on
+the same port. Peers reply with a `pong`, and both sides track each other until
+heartbeats stop (a peer expires after ~6 seconds). Messaging is a TLS connection
+to the peer, authenticated by the peer's cert fingerprint (the shared token is
+used only by the optional HTTPS API).
 
 The QML and the daemon talk over newline-delimited JSON — commands on stdin,
 events on stdout:
@@ -230,9 +241,11 @@ exits. Run the offline end-to-end suites (two isolated instances):
 
 ```bash
 python3 server.py
-python3 test_server.py     # core: discovery, TLS delivery, auth, HTTPS API
-python3 test_friends.py    # friend/handshake + online-toggle over TLS
-python3 test_features.py   # lazy-load, clear/delete, attachment plumbing, config
+python3 test_server.py       # core: discovery, TLS delivery, auth, HTTPS API
+python3 test_friends.py      # friend/handshake + online-toggle over TLS
+python3 test_persistent.py   # persistent connections, reconnect/hold/dedupe
+python3 test_features.py     # lazy-load, clear/delete, attachment plumbing, config
+python3 test_attachments.py  # recipient file receipt: accept, checksum, auth pinning
 ```
 
 > The plugin reloads QML but not always compiled types — after editing QML,

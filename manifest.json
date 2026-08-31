@@ -5,7 +5,7 @@
   "version": "1.1.0",
   "author": "KelpME",
   "license": "MIT",
-  "description": "Private LAN messaging between your own machines. Automatic discovery over UDP, shared-secret auth, message history per machine.",
+  "description": "Private LAN messaging between your own machines. Automatic discovery over UDP, cert-fingerprint peer auth, message history per machine.",
   "kinds": ["service", "bar-widget"],
   "entryPoints": {
     "service": "Service.qml",

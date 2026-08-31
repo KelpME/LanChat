@@ -14,9 +14,9 @@ presence and shows up in everyone's peer list. No token or setup is needed to
 **The friend handshake is the gate.** Seeing a machine doesn't mean it can
 message you. To actually talk:
 
-1. Pick a peer and send a message. Your first message to them is a **friend
-   request**.
-2. They see it in their chat with **Accept / Reject** buttons.
+1. Pick a peer and click the **+** on their card to send a **friend request**.
+2. They see it in the notifications banner (below the peer list) with
+   **Accept / Reject** buttons.
 3. Accepting completes the handshake — from then on you message freely.
 
 A stranger can send a friend request, but can't message you until you accept.
@@ -32,21 +32,24 @@ anything.
 
 ## The bar icon
 
-Click the chat icon in the bar to open Lanchat. The badge shows unread messages
-and how many peers are online. The **icon's color reflects your status**:
-white = Available, red = Do Not Disturb, orange = Away, yellow = Be Right Back.
-**Right-click** the icon for a menu: toggle online/offline, or pick a status.
+Click the chat icon in the bar to open Lanchat. An **unread-count badge** shows
+new messages (the icon also lights up when peers are online). The **icon's
+color reflects your status**: white = Available, red = Do Not Disturb, orange
+= Away, yellow = Be Right Back. **Right-click** the icon for a menu: toggle
+online/offline, or pick a status.
 
 ## The chat panel
 
-- **Left column** — your online peers (each with a status dot), the peer count,
-  and Settings.
+- **Left column** — your peers (each with a status dot; friends stay visible
+  even when offline, shown grayed out), the peer count, and Settings.
 - **Right column** — the selected peer's conversation and the compose box.
 - **Draggable divider** — drag the thin bar between the peer list and the chat
   to resize the columns.
-- **Paperclip** — attach and send a file. The receiver gets an **Incoming
-  file** bar with a **Save** button; accepting saves it to your download
-  folder.
+- **Paperclip** — attach and send one or more files. The receiver gets an
+  **Incoming file** bar with a **Save** button; accepting streams the transfer
+  with progress, verifies it, and saves it to your download folder. Transfers
+  are pinned to the sender's certificate, so the file comes from who you think
+  it does.
 - **Copy button** (hover a message) — copies that message to the clipboard.
 - **Edit a message** (hover an outgoing message) — click the pencil to revise
   it; it's marked "(edited)".
@@ -76,9 +79,9 @@ white = Available, red = Do Not Disturb, orange = Away, yellow = Be Right Back.
 - **Save to** — the folder accepted files go to (default `~/Downloads`).
 - **Panel size** — choose **S**, **M**, **L**, **XL**, or **F** (full-screen)
   for the panel window size. S/M/L/XL scale as independent fractions of each
-  screen axis — width vs height grow separately (e.g. **S** = 1/3 of screen
-  width × 1/4 of screen height, **XL** = 5/6 × 3/4), widening and growing
-  incrementally. **F** fills the whole screen.
+  screen axis — width vs height grow separately. Width goes 1/2 → 2/3 → 4/5 →
+  9/10 of screen width, height goes 0.45 → 3/5 → 3/4 → 0.85 of screen height,
+  growing incrementally. **F** fills the whole screen.
 - **Version** — the installed version.
 
 ## The API (for scripts / agents)
@@ -97,8 +100,10 @@ except `/health` require the token in `~/.config/omarchy/lanchat.json`.
 - The peer id is its cert fingerprint (not a hostname).
 - The agent can only message **friends** — the friend gate applies to the API
   too.
-- With **Agent full access** off, `/peers`, `/messages`, and file downloads
-  return 403 (send-only). The agent can still send to friends.
+- With **Agent full access** off, `/peers` and `/messages` return 403
+  (send-only). The agent can still send to friends. (Serving an accepted file
+  transfer is peer-to-peer, not script read-access, so downloads work
+  regardless of this toggle.)
 - HTTPS uses the self-signed cert, so scripts skip verification (`curl -k`).
 
 ## Files & privacy
