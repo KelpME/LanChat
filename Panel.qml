@@ -859,8 +859,14 @@ Panel {
                   anchors.left: parent.left
                   anchors.leftMargin: Style.spacing.sm
                   anchors.verticalCenter: parent.verticalCenter
-                  text: (Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online"
-                  color: Lanchat.onlineCount > 0 ? Color.accent : Color.muted
+                  text: Lanchat.daemonState === "running"
+                    ? ((Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online")
+                    : (Lanchat.daemonState === "starting"
+                       ? "Starting daemon…"
+                       : "⚠ Daemon not running — lanchat is offline")
+                  color: Lanchat.daemonState === "running"
+                    ? (Lanchat.onlineCount > 0 ? Color.accent : Color.muted)
+                    : Color.urgent
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                 }

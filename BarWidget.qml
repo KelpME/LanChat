@@ -72,10 +72,14 @@ BarWidget {
     text: "\uF086" // nf-fa-comments
     active: Lanchat.onlineCount > 0
     useActiveColor: false
-    foreground: Lanchat.online ? root.statusColor : Qt.darker(root.statusColor, 1.4)
-    tooltipText: "Lanchat — " + root.statusLabel +
-      (Lanchat.online ? "" : " (offline)") +
-      (Lanchat.onlineCount > 0 ? " · " + Lanchat.onlineCount + " online" : "")
+    foreground: Lanchat.daemonState === "running"
+      ? (Lanchat.online ? root.statusColor : Qt.darker(root.statusColor, 1.4))
+      : Color.urgent
+    tooltipText: Lanchat.daemonState !== "running"
+      ? "Lanchat daemon not running" + (Lanchat.daemonState === "starting" ? " (starting…)" : "")
+      : "Lanchat — " + root.statusLabel +
+        (Lanchat.online ? "" : " (offline)") +
+        (Lanchat.onlineCount > 0 ? " · " + Lanchat.onlineCount + " online" : "")
     onPressed: function(b) {
       if (b === Qt.LeftButton) root.togglePanel()
       else if (b === Qt.RightButton) root.menuOpen = !root.menuOpen

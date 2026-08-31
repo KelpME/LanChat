@@ -18,6 +18,10 @@ QtObject {
   property string myName: ""
   property int myPort: 0
   property bool daemonReady: false
+  // Human-readable daemon lifecycle state for the UI. "starting" = process is
+  // up but not yet ready; "running" = ready event received; "down" = process
+  // exited or was never started (so the user can tell when the daemon died).
+  property string daemonState: "down"
 
   // Transient chat alert shown in the thread's alert bar: save results,
   // add-friend prompt, and server notices. chatAlertPeerId scopes it to a
@@ -102,6 +106,7 @@ QtObject {
 
   function startDaemon() {
     if (daemon.running) return
+    lanchat.daemonState = "starting"
     daemon.command = ["python3", lanchat.serverPath()]
     daemon.running = true
   }
@@ -480,6 +485,7 @@ QtObject {
 
     switch (obj.event) {
     case "ready":
+      lanchat.daemonState = "running"
       lanchat.myName = obj.name
       lanchat.myPort = obj.port
       lanchat.myId = obj.id || ""
@@ -812,6 +818,7 @@ QtObject {
 
   function onDaemonExit(code) {
     lanchat.daemonReady = false
+    lanchat.daemonState = "down"
     // Dev-facing crash alert → diagnostics log (the restart message is the
     // important part; the user sees the daemon come back).
     lanchat.pushDiagnostic("Lanchat daemon stopped (exit " + code + ") — restarting…")
