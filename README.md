@@ -75,12 +75,11 @@ systemctl --user status lanchat        # is the daemon running?
 systemctl --user restart lanchat       # restart it
 ```
 
-Install the unit once per machine (the plugin ships it at
-`systemd/lanchat.service`):
-
-```bash
-make systemd-install    # copies the unit, daemon-reload, enable --now
-```
+**Install is fully automatic — no manual step, no sudo.** On first run the
+shell runs `lanchat-ensure-systemd.py`, which installs the unit (shipped at
+`systemd/lanchat.service`) into `~/.config/systemd/user/`, enables it, and
+starts it. All user-level, so no root is needed. (If you ever need to do it by
+hand: `make systemd-install`.)
 
 The shell no longer spawns `server.py` directly. Instead it runs a tiny
 `lanchat-bridge.py` that connects to the daemon's unix-socket control channel

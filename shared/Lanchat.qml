@@ -116,8 +116,29 @@ QtObject {
     return lanchat.logPathValue
   }
 
+  // Path to the systemd-ensure helper (installs/enables the daemon's systemd
+  // unit on first run so a fresh plugin install is fully automatic).
+  function ensureSystemdPath() {
+    var url = Qt.resolvedUrl("../lanchat-ensure-systemd.py").toString()
+    if (url.indexOf("file://") === 0) url = url.slice(7)
+    return decodeURIComponent(url)
+  }
+
+  // True once the systemd unit has been confirmed installed+enabled this
+  // session. Reset on shell restart (Component.onCompleted re-runs ensure).
+  property bool systemdEnsured: false
+
   function startDaemon() {
     if (daemon.running) return
+    if (!lanchat.systemdEnsured) {
+      // First run (or first run after a fresh install): make sure the daemon's
+      // systemd unit is installed, enabled, and started before we spawn the
+      // bridge. The ensure helper is idempotent and needs no sudo.
+      lanchat.daemonState = "starting"
+      ensureProcess.command = ["python3", lanchat.ensureSystemdPath()]
+      ensureProcess.running = true
+      return
+    }
     lanchat.daemonState = "starting"
     daemon.command = ["python3", lanchat.bridgePath()]
     daemon.running = true
@@ -892,6 +913,24 @@ QtObject {
     }
 
     onExited: function(code) { lanchat.onDaemonExit(code) }
+  }
+
+  // One-shot: installs/enables the daemon's systemd unit on first run. Runs
+  // before the bridge is spawned; on success it marks systemdEnsured and
+  // starts the bridge. On failure it reports the daemon down and retries via
+  // restartTimer (the unit may need a moment, or systemd isn't available).
+  property Process ensureProcess: Process {
+    id: ensureProcess
+    onExited: function(code) {
+      if (code === 0) {
+        lanchat.systemdEnsured = true
+        lanchat.startDaemon()
+      } else {
+        lanchat.daemonState = "down"
+        lanchat.pushDiagnostic("Lanchat systemd unit not ready (exit " + code + ") — retrying…")
+        lanchat.restartTimer.restart()
+      }
+    }
   }
 
   Component.onCompleted: lanchat.startDaemon()
