@@ -22,6 +22,9 @@ Panel {
   // Width of the left peer column (draggable via the divider). Not persisted.
   property real peerColW: Style.space(280)
 
+  // Peer-list row height — single source of truth for the delegate rendering.
+  property real peerRowH: Style.space(40)
+
   // The conversation currently on screen ("" = none selected).
   property string selectedPeerId: ""
 
@@ -536,8 +539,8 @@ Panel {
                 anchors.topMargin: Style.spacing.sm
                 anchors.leftMargin: Style.spacing.sm
                 anchors.rightMargin: Style.spacing.sm
+                anchors.bottom: onboardingBanner.top
                 anchors.bottomMargin: Style.spacing.xs
-                anchors.bottom: settings.top
                 clip: true
                 model: Lanchat.displayPeers
                 spacing: Style.spacing.xs
@@ -545,7 +548,7 @@ Panel {
                 delegate: Rectangle {
                   required property var modelData
                   width: peerList.width
-                  height: Style.space(40)
+                  height: root.peerRowH
                   radius: Style.cornerRadius
                   color: modelData.id === root.selectedPeerId
                     ? Style.selectedFill : "transparent"
@@ -670,8 +673,8 @@ Panel {
                 id: onboardingBanner
                 width: parent.width
                 height: root.showOnboarding ? onbContent.implicitHeight + Style.space(12) : 0
-                anchors.top: parent.top
-                anchors.topMargin: Style.spacing.xs
+                anchors.bottom: notifBanner.top
+                anchors.bottomMargin: Style.spacing.xs
                 visible: root.showOnboarding
                 clip: true
 
@@ -723,8 +726,8 @@ Panel {
                 height: Lanchat.friendRequests.length === 0 ? 0
                        : root.notifExpanded ? Style.space(24) + notifRows.implicitHeight + Style.spacing.xs
                        : Style.space(24)
-                anchors.top: onboardingBanner.bottom
-                anchors.topMargin: Style.spacing.xs
+                anchors.bottom: settings.top
+                anchors.bottomMargin: Style.spacing.xs
                 visible: Lanchat.friendRequests.length > 0
                 clip: true
 
@@ -849,7 +852,7 @@ Panel {
                 height: Style.space(26)
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.top: notifBanner.bottom
+                anchors.top: parent.top
                 anchors.topMargin: Style.spacing.xs
 
                 Text {
@@ -872,10 +875,11 @@ Panel {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 // Cap height so the expanded body stops at the top-pinned
-                // alert flow (peers bar) — it can never grow into/behind it.
-                // peersOnlineBar.y is its top-anchored, fixed position.
+                // peers bar — it can never grow into/behind it. As settings
+                // grows it rides the friend-request/onboarding banners (which
+                // anchor to its top) upward, crushing only the peer list above.
                 height: settingsHeader.height + (settings.expanded
-                  ? Math.min(settingsBody.contentHeight, Math.max(0, peersOnlineBar.y - settingsHeader.height - Style.space(12)))
+                  ? Math.min(settingsBody.contentHeight, Math.max(0, settings.parent.height - peersOnlineBar.y - settingsHeader.height - Style.space(12)))
                   : 0)
 
                 // header
@@ -914,7 +918,7 @@ Panel {
                 Flickable {
                   id: settingsBody
                   width: parent.width
-                  height: Math.min(bodyCol.implicitHeight, Math.max(0, peersOnlineBar.y - settingsHeader.height - Style.space(12)))
+                  height: Math.min(bodyCol.implicitHeight, Math.max(0, settings.parent.height - peersOnlineBar.y - settingsHeader.height - Style.space(12)))
                   visible: settings.expanded
                   contentWidth: width
                   contentHeight: bodyCol.implicitHeight
