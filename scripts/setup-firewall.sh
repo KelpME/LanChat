@@ -11,11 +11,23 @@
 #   sudo bash scripts/setup-firewall.sh
 set -euo pipefail
 
-# Derive the local subnet from the default route's interface (e.g. 192.168.1.0/24).
-SUBNET="$(ip -o -4 addr show scope global 2>/dev/null | awk '$2 !~ /^(docker|br-|veth|virbr|tailscale|wg|tun|tap)/ {print $4}' | grep -vE '^127\.' | head -1 || true)"
+# Derive the LAN subnet from the interface that carries the default route
+# (the real network uplink). Prefer that over the first global interface so a
+# VPN/tunnel that happens to enumerate first can't be picked. Falls back to the
+# first non-virtual, non-/32 global IPv4 subnet.
+SUBNET="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}' \
+  | xargs -r -I{} ip -o -4 addr show to {}/32 2>/dev/null \
+  | awk '{print $4}' | head -1)"
 if [ -z "$SUBNET" ]; then
-  SUBNET="192.168.1.0/24"
-  echo "! Could not auto-detect subnet; defaulting to $SUBNET. Edit this script if wrong."
+  # No default-route source: take the first usable (non-/32,/31) global subnet,
+  # excluding virtual interfaces.
+  SUBNET="$(ip -o -4 addr show scope global 2>/dev/null \
+    | awk '$2 !~ /^(docker|br-|veth|virbr|vmnet|vboxnet|tailscale|wg|tun|tap)/ {print $4}' \
+    | grep -vE '^127\.' | grep -vE '/3[12]$' | head -1)"
+fi
+if [ -z "$SUBNET" ]; then
+  echo "! Could not auto-detect your LAN subnet. Please edit this script and set SUBNET manually." >&2
+  exit 1
 fi
 
 echo "Opening lanchat ports for subnet: $SUBNET"
@@ -37,7 +49,15 @@ elif command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active firewalld >/
   echo "  firewalld rules added. Verify: sudo firewall-cmd --list-ports"
 elif command -v nft >/dev/null 2>&1; then
   echo "[nftables]"
-  echo "  nftables detected. Add rules manually for ports 4812/4814 (TCP+UDP) from $SUBNET."
+  # Add real rules. Requires a base chain named 'input' that accepts; if the
+  # user's nftables setup differs, this may need adjusting.
+  for port in 4812 4814; do
+    nft add rule inet filter input ip saddr "$SUBNET" tcp dport "$port" accept 2>/dev/null \
+      || nft add rule ip filter input ip saddr "$SUBNET" tcp dport "$port" accept 2>/dev/null
+    nft add rule inet filter input ip saddr "$SUBNET" udp dport "$port" accept 2>/dev/null \
+      || nft add rule ip filter input ip saddr "$SUBNET" udp dport "$port" accept 2>/dev/null
+  done
+  echo "  nftables rules added (inet/ip filter input). Verify: sudo nft list ruleset"
 else
   echo "! No supported firewall detected. If you use one (iptables/nftables), allow"
   echo "  inbound TCP+UDP on ports 4812 and 4814 from your LAN subnet ($SUBNET)."
