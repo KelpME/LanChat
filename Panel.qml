@@ -664,46 +664,53 @@ Panel {
 
               // ---- (1.3) First-run onboarding: a dismissible banner below the
               // peer list explaining the private-by-default model. Shown until
-              // the user dismisses it (session-local).
+              // the user dismisses it (session-local). Styled to match the
+              // friend-request banner and auto-sized so text never overflows.
               Item {
                 id: onboardingBanner
                 width: parent.width
-                height: root.showOnboarding ? Style.space(56) : 0
+                height: root.showOnboarding ? onbContent.implicitHeight + Style.space(12) : 0
                 anchors.bottom: notifBanner.top
                 visible: root.showOnboarding
                 clip: true
 
                 Rectangle {
                   anchors.fill: parent
-                  color: Style.background
+                  color: Style.selectedAccentFill
                   Rectangle {
                     anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
                     height: 1; color: Color.popups.border
                   }
                 }
 
-                Text {
-                  anchors.left: parent.left
+                Row {
+                  id: onbContent
+                  anchors.fill: parent
                   anchors.leftMargin: Style.spacing.sm
-                  anchors.top: parent.top
-                  anchors.topMargin: Style.space(6)
-                  width: parent.width - Style.space(80)
-                  text: "You're invisible on the network. To connect, add a friend's "
-                        + "My ID (fingerprint) in Settings, or switch on Discoverable for a trusted LAN."
-                  color: Color.popups.text
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
-                }
-
-                Button {
-                  anchors.right: parent.right
                   anchors.rightMargin: Style.spacing.sm
-                  anchors.top: parent.top
                   anchors.topMargin: Style.space(6)
-                  text: "\u2715"  // ✕ dismiss
-                  fontSize: Style.font.caption
-                  onClicked: root.showOnboarding = false
+                  anchors.bottomMargin: Style.space(6)
+                  spacing: Style.spacing.sm
+
+                  Text {
+                    id: onbText
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - Style.space(40)
+                    text: "You're invisible on the network. To connect, add a friend's "
+                          + "My ID (fingerprint) in Settings, or switch on Discoverable for a trusted LAN."
+                    color: Color.popups.text
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                  }
+
+                  Button {
+                    id: onbDismiss
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "\u2715"  // ✕ dismiss
+                    fontSize: Style.font.caption
+                    onClicked: root.showOnboarding = false
+                  }
                 }
               }
 
@@ -760,61 +767,73 @@ Panel {
 
                   Repeater {
                     model: Lanchat.friendRequests
-                    Row {
+                    Column {
                       required property var modelData
                       width: notifBanner.width - Style.space(16)
                       anchors.horizontalCenter: parent.horizontalCenter
-                      spacing: Style.spacing.sm
+                      spacing: Style.spacing.xs
 
-                      Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - Style.space(96)
-                        text: modelData.outgoing
-                          ? "Waiting for " + (modelData.name || "them") + " to accept"
-                          : "Friend request from " + (modelData.name || "someone")
-                        color: Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        elide: Text.ElideRight
-                      }
-                      Item { width: Style.space(4) }
-                      // (1.3) Option B: confirm the verified fingerprint before
-                      // accepting. First click on Accept reveals the fingerprint
-                      // + a Confirm button; only Confirm accepts.
-                      Text {
-                        visible: !modelData.outgoing && root.confirmFrPeerId === modelData.peerId
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "Fingerprint:\n" + (root.confirmFrFingerprint || modelData.peerId || "").slice(0, 16) + "…"
-                        color: Color.popups.mutedText
-                        font.family: Style.font.mono || Style.font.family
-                        font.pixelSize: Style.font.micro
-                      }
-                      Button {
-                        visible: !modelData.outgoing && root.confirmFrPeerId === modelData.peerId
-                        text: "Confirm"
-                        fontSize: Style.font.caption
-                        onClicked: {
-                          root.acceptFriend(modelData.peerId)
-                          root.cancelConfirmFriend()
+                      // Line 1: who + Accept/Reject.
+                      Row {
+                        width: parent.width
+                        spacing: Style.spacing.sm
+
+                        Text {
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: parent.width - Style.space(96)
+                          text: modelData.outgoing
+                            ? "Waiting for " + (modelData.name || "them") + " to accept"
+                            : "Friend request from " + (modelData.name || "someone")
+                          color: Color.popups.text
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.caption
+                          elide: Text.ElideRight
+                        }
+                        Item { width: Style.space(4) }
+                        Button {
+                          visible: !modelData.outgoing && root.confirmFrPeerId !== modelData.peerId
+                          text: "Accept"
+                          fontSize: Style.font.caption
+                          onClicked: root.beginConfirmFriend(modelData.peerId, modelData.fingerprint)
+                        }
+                        Button {
+                          visible: !modelData.outgoing
+                          text: "Reject"
+                          fontSize: Style.font.caption
+                          onClicked: root.rejectFriend(modelData.peerId)
                         }
                       }
-                      Button {
+
+                      // (1.3) Line 2 (only when confirming): verified fingerprint
+                      // + Confirm/Back. Shown on its own row so it never
+                      // overflows the banner width.
+                      Row {
                         visible: !modelData.outgoing && root.confirmFrPeerId === modelData.peerId
-                        text: "Back"
-                        fontSize: Style.font.caption
-                        onClicked: root.cancelConfirmFriend()
-                      }
-                      Button {
-                        visible: !modelData.outgoing && root.confirmFrPeerId !== modelData.peerId
-                        text: "Accept"
-                        fontSize: Style.font.caption
-                        onClicked: root.beginConfirmFriend(modelData.peerId, modelData.fingerprint)
-                      }
-                      Button {
-                        visible: !modelData.outgoing
-                        text: "Reject"
-                        fontSize: Style.font.caption
-                        onClicked: root.rejectFriend(modelData.peerId)
+                        width: parent.width
+                        spacing: Style.spacing.sm
+
+                        Text {
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: parent.width - Style.space(150)
+                          text: "Fingerprint: " + (root.confirmFrFingerprint || modelData.peerId || "")
+                          color: Color.popups.mutedText
+                          font.family: Style.font.mono || Style.font.family
+                          font.pixelSize: Style.font.micro
+                          elide: Text.ElideRight
+                        }
+                        Button {
+                          text: "Confirm"
+                          fontSize: Style.font.caption
+                          onClicked: {
+                            root.acceptFriend(modelData.peerId)
+                            root.cancelConfirmFriend()
+                          }
+                        }
+                        Button {
+                          text: "Back"
+                          fontSize: Style.font.caption
+                          onClicked: root.cancelConfirmFriend()
+                        }
                       }
                     }
                   }
