@@ -40,6 +40,7 @@ QtObject {
   property int sendDelay: 0
   property var pendingSends: []  // [{mid, to, text, remaining, total}] undo-window
   property var heldQueue: []     // [{mid, to, text, attachment}] held for DND/offline peer
+  property var friendRequests: [] // [{peerId, name, outgoing, ts, mid}] pending friend requests (notifications)
   property var typing: ({})      // peerId -> name currently typing
   property var readReceipts: {}  // mid -> true (peer confirmed reading)
 
@@ -102,10 +103,37 @@ QtObject {
     return false
   }
 
-  // The daemon's send cmd; a non-friend target becomes a friend request.
+  // A friend request is outstanding in one direction (we requested them or they
+  // requested us), but they haven't accepted yet.
+  function isPending(id) {
+    var list = lanchat.friends
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id && !list[i].confirmed) return true
+    }
+    return false
+  }
+
+  // Display name of a discovered peer (fallback: their id).
+  function peerName(id) {
+    var list = lanchat.peers
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) return list[i].name
+    }
+    return id
+  }
+
+  // Explicit "add a friend" action — decoupled from messaging. Sends a friend
+  // request to a peer; they accept/reject it in the notifications banner.
+  function requestFriend(id) {
+    daemon.write(JSON.stringify({ cmd: "send", to: id,
+      text: "wants to add you as a friend", friend_request: true }) + "\n")
+  }
+
+  // The daemon's send cmd. Friendship is its own action (requestFriend), so a
+  // message is never silently turned into a friend request.
   function sendPayload(to, text, attachment) {
     return JSON.stringify({ cmd: "send", to: to, text: text || "", attachment: attachment || null,
-      friend_request: !lanchat.isConfirmedFriend(to) }) + "\n"
+      friend_request: false }) + "\n"
   }
 
   // Send a message. If the peer is DND or offline, hold it in the queue with a
@@ -118,6 +146,14 @@ QtObject {
     if (!canDeliver(to)) {
       // Peer is offline or DND: hold the message.
       heldQueue = heldQueue.concat([{ mid: mid, to: to, text: text || "", attachment: attachment || null, held: true }])
+      return
+    }
+    // A stranger can't be messaged yet — adding a friend is a separate action
+    // (the peer-card button). Prompt, don't silently turn the message into a
+    // friend request.
+    if (!lanchat.isConfirmedFriend(to) && !lanchat.isPending(to)) {
+      statusMessage = "Add " + lanchat.peerName(to) + " as a friend to start chatting"
+      statusTimer.restart()
       return
     }
     if (sendDelay > 0) {
@@ -316,6 +352,36 @@ QtObject {
     lanchat.messages = msgs
   }
 
+  // ---- friend request notifications (decoupled from the chat thread) -----
+
+  // Add or update a pending friend request in the notifications list.
+  function upsertFriendRequest(r) {
+    var list = lanchat.friendRequests.slice()
+    var idx = -1
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].peerId === r.peerId) { idx = i; break }
+    }
+    if (idx >= 0) list[idx] = r
+    else list.push(r)
+    lanchat.friendRequests = list
+  }
+
+  // Drop any notification whose peer is no longer pending (accepted, rejected,
+  // or removed). Called whenever the friend list changes.
+  function reconcileFriendRequests() {
+    var friends = lanchat.friends
+    var kept = []
+    for (var i = 0; i < lanchat.friendRequests.length; i++) {
+      var r = lanchat.friendRequests[i]
+      var still = false
+      for (var j = 0; j < friends.length; j++) {
+        if (friends[j].id === r.peerId) { still = !friends[j].confirmed; break }
+      }
+      if (still) kept.push(r)
+    }
+    lanchat.friendRequests = kept
+  }
+
   function onDaemonLine(raw) {
     var obj
     try { obj = JSON.parse(raw) } catch (e) { return }
@@ -342,6 +408,7 @@ QtObject {
       if (obj.readReceiptsEnabled !== undefined) lanchat.readReceiptsEnabled = obj.readReceiptsEnabled
       if (obj.showReadReceipts !== undefined) lanchat.showReadReceipts = obj.showReadReceipts
       if (obj.logPath) lanchat.logPathValue = obj.logPath
+      lanchat.reconcileFriendRequests()
       lanchat.refreshHistory()
       lanchat.refreshPeers()
       break
@@ -391,6 +458,7 @@ QtObject {
 
     case "friends":
       lanchat.friends = obj.friends || []
+      lanchat.reconcileFriendRequests()
       break
 
     case "friend-accepted":
@@ -404,23 +472,17 @@ QtObject {
       break
 
     case "friend-request": {
-      // A handshake is pending. Show it as a held message (the banner
-      // renders Accept/Reject for inbound; an outgoing request shows as
-      // "waiting"). Outgoing means WE sent the request and are holding our
-      // own message until they accept.
+      // A handshake is pending. Surface it in the notifications banner (not the
+      // chat thread): inbound -> Accept/Reject, outbound -> waiting. Adding a
+      // friend is its own flow, separate from messaging.
       var fr = {
-        from: obj.from || "",
-        fromName: obj.fromName || "",
-        to: obj.to || "",
-        toName: obj.toName || "",
-        text: obj.text || "",
-        ts: obj.ts || Date.now(),
-        mid: obj.mid || "",
+        peerId: obj.outgoing ? (obj.to || "") : (obj.from || ""),
+        name: obj.outgoing ? (obj.toName || obj.to || "") : (obj.fromName || obj.from || ""),
         outgoing: !!obj.outgoing,
-        friendRequest: true,
-        held: true
+        ts: obj.ts || Date.now(),
+        mid: obj.mid || ""
       }
-      lanchat.upsertMessage(fr)
+      lanchat.upsertFriendRequest(fr)
       break
     }
 

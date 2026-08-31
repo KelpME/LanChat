@@ -134,6 +134,8 @@ Panel {
   // next send as an edit of that mid.
   property string editingMid: ""
   property bool diagExpanded: false
+  // Whether the friend-request notifications banner is expanded (dropdown).
+  property bool notifExpanded: true
   function editMsg(mid, text) {
     editingMid = mid
     input.text = text
@@ -432,20 +434,38 @@ Panel {
                     elide: Text.ElideRight
                   }
 
-                  // Friend indicator: shows when this peer is a confirmed friend
-                  // or has a pending request. Collapses to nothing for strangers.
-                  Text {
+                  // Friend control on the peer card: an "add friend" button for
+                  // strangers, or a friend/pending badge once a request is in.
+                  Item {
                     id: friendBadge
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.right: statusText.left
                     anchors.rightMargin: Style.spacing.sm
-                    width: visible ? implicitWidth : 0
-                    visible: root.friendState(modelData.id) !== ""
-                    text: root.friendState(modelData.id) === "friend" ? "\u2713 Friend" : "\u2026 requested"
-                    color: root.friendState(modelData.id) === "friend" ? Color.accent : Color.muted
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    font.weight: Font.DemiBold
+                    width: root.friendState(modelData.id) === "" ? Style.space(30)
+                         : root.friendState(modelData.id) === "friend" ? Style.space(44)
+                         : Style.space(16)
+                    height: Style.space(20)
+
+                    // Stranger -> "+" button to send a friend request.
+                    Button {
+                      anchors.fill: parent
+                      visible: root.friendState(modelData.id) === ""
+                      text: "\uFF0B"   // ＋
+                      fontSize: Style.font.caption
+                      tooltipText: "Send friend request to " + modelData.name
+                      onClicked: Lanchat.requestFriend(modelData.id)
+                    }
+
+                    // Pending / friend -> state badge.
+                    Text {
+                      anchors.centerIn: parent
+                      visible: root.friendState(modelData.id) !== ""
+                      text: root.friendState(modelData.id) === "friend" ? "\u2713 Friend" : "\u2026"
+                      color: root.friendState(modelData.id) === "friend" ? Color.accent : Color.muted
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.DemiBold
+                    }
                   }
 
                   Text {
@@ -1184,10 +1204,97 @@ Panel {
             width: parent.width - root.peerColW - 1
             height: parent.height
 
+            // ---- friend-request notifications banner (moved out of the
+            // thread; the "add a friend" flow is separate from messaging) ----
+            Item {
+              id: notifBanner
+              width: parent.width
+              height: Lanchat.friendRequests.length === 0 ? 0
+                     : root.notifExpanded ? Style.space(24) + notifRows.implicitHeight + Style.spacing.xs
+                     : Style.space(24)
+              visible: Lanchat.friendRequests.length > 0
+              clip: true
+
+              Rectangle {
+                anchors.fill: parent
+                color: Style.selectedAccentFill
+                Rectangle {
+                  anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+                  height: 1; color: Color.popups.border
+                }
+              }
+
+              // Header row: summary + expand/collapse chevron.
+              Item {
+                anchors.top: parent.top
+                anchors.left: parent.left; anchors.right: parent.right
+                height: Style.space(24)
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.left: parent.left; anchors.leftMargin: Style.spacing.sm
+                  text: (root.notifExpanded ? "\u25BC " : "\u25B6 ") + Lanchat.friendRequests.length
+                        + (Lanchat.friendRequests.length === 1 ? " friend request" : " friend requests")
+                  color: Color.accent
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                  font.weight: Font.Bold
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  onClicked: root.notifExpanded = !root.notifExpanded
+                }
+              }
+
+              Column {
+                id: notifRows
+                anchors.top: parent.top
+                anchors.topMargin: Style.space(24)
+                width: parent.width
+                visible: root.notifExpanded
+                spacing: Style.spacing.xs
+
+                Repeater {
+                  model: Lanchat.friendRequests
+                  Row {
+                    required property var modelData
+                    width: notifBanner.width - Style.space(16)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: Style.spacing.sm
+
+                    Text {
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: parent.width - Style.space(96)
+                      text: modelData.outgoing
+                        ? "Waiting for " + (modelData.name || "them") + " to accept"
+                        : "Friend request from " + (modelData.name || "someone")
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      elide: Text.ElideRight
+                    }
+                    Item { width: Style.space(4) }
+                    Button {
+                      visible: !modelData.outgoing
+                      text: "Accept"
+                      fontSize: Style.font.caption
+                      onClicked: root.acceptFriend(modelData.peerId)
+                    }
+                    Button {
+                      visible: !modelData.outgoing
+                      text: "Reject"
+                      fontSize: Style.font.caption
+                      onClicked: root.rejectFriend(modelData.peerId)
+                    }
+                  }
+                }
+              }
+            }
+
             ListView {
               id: list
               width: parent.width
-              height: parent.height - composeBox.height
+              height: parent.height - composeBox.height - notifBanner.height
               clip: true
               spacing: Style.spacing.sm
               model: root.thread
@@ -1368,42 +1475,6 @@ Panel {
                     id: copyReset
                     interval: 1500
                     onTriggered: bubble.copied = false
-                  }
-                }
-
-                // Friend request banner (pending handshake, both directions).
-                Rectangle {
-                  visible: modelData.friendRequest && modelData.held
-                  anchors.left: parent.left
-                  width: list.width * 0.8
-                  height: Style.space(38)
-                  radius: Style.cornerRadius
-                  color: Style.selectedAccentFill
-
-                  Row {
-                    anchors.centerIn: parent
-                    spacing: Style.spacing.sm
-
-                    Text {
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: modelData.outgoing
-                        ? "Friend request sent — waiting for " + (modelData.toName || "them") + " to accept"
-                        : "Friend request from " + modelData.fromName
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    Button {
-                      visible: !modelData.outgoing
-                      text: "Accept"
-                      onClicked: root.acceptFriend(modelData.from)
-                    }
-                    Button {
-                      visible: !modelData.outgoing
-                      text: "Reject"
-                      onClicked: root.rejectFriend(modelData.from)
-                    }
                   }
                 }
               }
