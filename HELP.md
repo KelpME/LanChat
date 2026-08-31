@@ -142,4 +142,31 @@ except `/health` require the token in `~/.config/omarchy/lanchat.json`.
 - TLS identity: `~/.config/omarchy/lanchat-certs/`
 - Message history: `~/.local/state/lanchat/history.json` (per machine)
 
+## The daemon & troubleshooting
+
+Lanchat's daemon runs as a **systemd user service** (not a child of the shell),
+so it starts at login, restarts automatically if it crashes, and survives shell
+restarts. If it's ever down, the bar icon turns **red** and the peer list shows
+**"⚠ Daemon not running — lanchat is offline"** instead of a misleading
+"0 peers online".
+
+Check or restart it from a terminal:
+
+```bash
+systemctl --user status lanchat     # is it running? (active = yes)
+systemctl --user restart lanchat    # restart it
+```
+
+If a machine isn't showing up in your peer list:
+
+1. **Is its daemon running?** `systemctl --user status lanchat` on that machine
+   (or look for the red bar icon). A machine that's "Discoverable" but whose
+   daemon is down won't broadcast at all.
+2. **Is it on the same network?** Both machines must be on the same LAN
+   (same subnet) for discovery broadcasts to reach each other.
+3. **Is Discoverable on?** In **Settings**, switch on **Discoverable (open
+   mode)** — it's off by default. Peers appear within ~3 seconds of it being on.
+4. **Both on the same version?** Update each machine with
+   `omarchy plugin update KelpME.lanchat --yes`, then restart the shell.
+
 History stays per-machine and is never synced to a server.
