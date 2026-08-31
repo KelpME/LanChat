@@ -208,14 +208,20 @@ Panel {
     Quickshell.execDetached(["xdg-open", Lanchat.logPath()])
   }
 
-  // Launch a terminal running the firewall setup command, so the user just
-  // presses Enter (sudo will prompt for their password in that terminal).
+  // Launch a terminal that SHOWS the setup command first, then lets the user
+  // press Enter to run it (sudo prompts for the password in that terminal).
   function runSetup() {
-    var cmd = "sudo bash " + Lanchat.setupScriptPath()
+    var script = Lanchat.setupScriptPath()
+    var cmd = "sudo bash " + script
     // Pick the first installed terminal emulator via a shell command -v probe.
+    // Inside the terminal: print what's about to run, pause for Enter, run it,
+    // then pause again so the user can read the output before closing.
+    var inner = "echo; echo 'About to run: " + cmd + "'; echo; " +
+      "read -p 'Press Enter to run this command...'; " +
+      cmd + "; echo; read -p 'Press Enter to close...'"
     Util.execArgv(["bash", "-lc",
-      'for t in foot alacritty kitty konsole gnome-terminal xterm x-terminal-emulator; do command -v "$t" >/dev/null 2>&1 && { exec "$t" -e bash -c "' +
-      cmd + '; echo; read -p \'Press Enter to close...\'"; break; }; done'])
+      'for t in foot alacritty kitty konsole gnome-terminal xterm x-terminal-emulator; do command -v "$t" >/dev/null 2>&1 && { exec "$t" -e bash -c ' +
+      JSON.stringify(inner) + '; break; }; done'])
   }
 
   // Last component of a path (folder name).
