@@ -855,6 +855,13 @@ def _conn(pid: str) -> dict:
 
 
 def _close_sock(sock) -> None:
+    # shutdown() before close() reliably wakes a concurrent recv() blocked in
+    # another thread's reader — a bare close() does NOT on Linux, which left
+    # "loser" sockets open forever (the ESTAB socket leak that stalled delivery).
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
     try:
         sock.close()
     except OSError:
