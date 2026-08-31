@@ -120,6 +120,14 @@ CONFIG = {}
 _out_lock = threading.Lock()
 _stdout = sys.stdout
 
+# Unix-socket control channel (systemd mode). When the daemon runs under
+# systemd there is no stdin/stdout pipe to the shell; the QML talks to a
+# bridge process that connects here. Events are broadcast to every connected
+# client; if none are connected we fall back to stdout (legacy stdin mode,
+# used by the test harness).
+_socket_clients = set()
+_socket_clients_lock = threading.Lock()
+
 NAME_MAX = 32  # maximum length of a display name (generated or custom)
 
 
@@ -143,15 +151,39 @@ def atomic_write(path: str, text: str) -> None:
 
 
 def _emit(event: dict) -> None:
-    """Write one newline-delimited JSON event to stdout (thread-safe)."""
-    line = json.dumps(event, separators=(",", ":"))
+    """Write one newline-delimited JSON event to every connected control client.
+
+    In socket mode (systemd) this broadcasts to all connected QML bridges. If
+    no socket clients are connected we fall back to stdout — the legacy
+    stdin/stdout mode used by the test harness. Thread-safe.
+    """
+    line = json.dumps(event, separators=(",", ":")) + "\n"
+    with _socket_clients_lock:
+        clients = list(_socket_clients)
+    if clients:
+        for f in clients:
+            try:
+                f.write(line)
+                f.flush()
+            except (BrokenPipeError, OSError):
+                _drop_socket_client(f)
+        return
     with _out_lock:
         try:
-            _stdout.write(line + "\n")
+            _stdout.write(line)
             _stdout.flush()
         except (BrokenPipeError, OSError):
             # The shell went away; nothing more we can do.
             os._exit(0)
+
+
+def _drop_socket_client(f) -> None:
+    with _socket_clients_lock:
+        _socket_clients.discard(f)
+    try:
+        f.close()
+    except OSError:
+        pass
 
 
 # --------------------------------------------------------------------------
@@ -2086,7 +2118,247 @@ def _stop_http() -> None:
 # stdin command loop
 # --------------------------------------------------------------------------
 
+def handle_command(cmd: dict) -> None:
+    kind = cmd.get("cmd")
+    if kind == "send":
+        att = cmd.get("attachment")
+        if att and att.get("path"):
+            # Local file: register it for the receiver to fetch, build metadata.
+            path = str(att["path"])
+            file_id = secrets.token_hex(8)
+            name = str(att.get("name") or os.path.basename(path))
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            register_attachment(file_id, path, name)
+            att = {"name": name, "size": size, "mime": "application/octet-stream",
+                   "fileId": file_id, "sha256": _file_sha256(path)}
+        send_message(
+            str(cmd.get("to", "")),
+            str(cmd.get("text", "")),
+            bool(cmd.get("friend_request")),
+            att,
+        )
+    elif kind == "history":
+        peer = str(cmd.get("peer", ""))
+        if peer:
+            _emit({"event": "history", "peer": peer,
+                   "total": history_for_peer(peer)["total"],
+                   "messages": history_for_peer(peer, int(cmd.get("offset", 0)), int(cmd.get("limit", 100)))["messages"]})
+        else:
+            _emit({"event": "history", "messages": history_snapshot()})
+    elif kind == "clearChat":
+        removed = clear_history_for_peer(str(cmd.get("peer", "")))
+        _emit({"event": "chat-cleared", "peer": str(cmd.get("peer", "")), "removed": removed})
+    elif kind == "clearAllChats":
+        removed = clear_all_history()
+        _emit({"event": "chat-cleared", "peer": "", "removed": removed})
+    elif kind == "deleteMessage":
+        ok = delete_message(str(cmd.get("mid", "")))
+        _emit({"event": "message-deleted", "mid": str(cmd.get("mid", "")), "ok": ok})
+    elif kind == "editMessage":
+        ok = edit_message(str(cmd.get("mid", "")), str(cmd.get("text", "")))
+        _emit({"event": "message-edited", "mid": str(cmd.get("mid", "")), "text": str(cmd.get("text", "")), "ok": ok})
+    elif kind == "setDownloadDir":
+        CONFIG["downloadDir"] = str(cmd.get("dir", ""))
+        _save_config()
+        _emit({"event": "download-dir", "dir": CONFIG["downloadDir"]})
+    elif kind == "setSendDelay":
+        CONFIG["sendDelay"] = int(cmd.get("seconds", 0))
+        _save_config()
+        _emit({"event": "send-delay", "seconds": CONFIG["sendDelay"]})
+    elif kind == "acceptAttachment":
+        peer = find_peer(str(cmd.get("from", "")))
+        if not peer:
+            _emit({"event": "error", "message": "attachment sender not found"})
+            return
+        file_id = str(cmd.get("fileId", ""))
+        name = _safe_filename(str(cmd.get("name", "download")))
+        mid = str(cmd.get("mid", ""))
+        sha256 = str(cmd.get("sha256", ""))
+        # The sender's `from` id is their cert fingerprint — the same
+        # identity the message transport verifies against. Use it to pin
+        # the download's TLS cert too (closes the unauthenticated gap).
+        fingerprint = str(cmd.get("from", ""))
+        save_to = os.path.join(CONFIG.get("downloadDir", os.path.expanduser("~/Downloads")), name)
+        # Run the transfer off the stdin loop so a large file never blocks
+        # message processing / presence. Progress + completion events come
+        # back from the download thread.
+        threading.Thread(
+            target=_download_attachment,
+            args=(peer, file_id, save_to, sha256, mid, fingerprint),
+            daemon=True,
+        ).start()
+    elif kind == "list":
+        _emit({"event": "peers", "peers": peer_snapshot()})
+    elif kind == "setHttp":
+        enabled = bool(cmd.get("enabled"))
+        if enabled:
+            _start_http()
+        else:
+            _stop_http()
+        CONFIG["httpEnabled"] = enabled
+        _save_config()
+    elif kind == "setHttpBind":
+        # Bind address for the HTTP API: "127.0.0.1" (default, loopback-only)
+        # or "0.0.0.0" (LAN exposure). Applies on the next enable/restart.
+        bind = str(cmd.get("bind") or "127.0.0.1")
+        CONFIG["httpBind"] = bind
+        _save_config()
+        _emit({"event": "http-bind", "bind": bind})
+    elif kind == "setApiFullAccess":
+        CONFIG["apiFullAccess"] = bool(cmd.get("enabled"))
+        _save_config()
+        _emit({"event": "api-full-access", "enabled": bool(cmd.get("enabled"))})
+    elif kind == "setVisibility":
+        # "open" (discoverable) or "private" (invisible). Re-reads the flag
+        # in the UDP loop each tick, so it takes effect immediately.
+        vis = str(cmd.get("visibility") or "private")
+        CONFIG["visibility"] = "open" if vis == "open" else "private"
+        _save_config()
+        _emit({"event": "visibility", "visibility": CONFIG["visibility"]})
+    elif kind == "setAcceptRequests":
+        CONFIG["acceptRequests"] = bool(cmd.get("enabled", True))
+        _save_config()
+        _emit({"event": "accept-requests", "enabled": bool(CONFIG["acceptRequests"])})
+    elif kind == "setPanelSize":
+        size = str(cmd.get("size", "medium"))
+        if size in ("small", "medium", "large", "xl", "full"):
+            CONFIG["panelSize"] = size
+            _save_config()
+            _emit({"event": "panel-size", "size": size})
+    elif kind == "setCustomSize":
+        try:
+            w = max(0, int(cmd.get("w", 0)))
+            h = max(0, int(cmd.get("h", 0)))
+        except (TypeError, ValueError):
+            w, h = 0, 0
+        CONFIG["customW"] = w
+        CONFIG["customH"] = h
+        _save_config()
+        _emit({"event": "custom-size", "w": w, "h": h})
+    elif kind == "setStatus":
+        s = str(cmd.get("status", "available"))
+        if s in STATUSES:
+            CONFIG["status"] = s
+            _save_config()
+            broadcast_now()  # peers see the new status right away
+            _emit({"event": "status", "status": s})
+    elif kind == "setSoundEnabled":
+        CONFIG["soundEnabled"] = bool(cmd.get("enabled"))
+        _save_config()
+        _emit({"event": "sound-enabled", "enabled": bool(cmd.get("enabled"))})
+    elif kind == "setTypingEnabled":
+        CONFIG["typingEnabled"] = bool(cmd.get("enabled"))
+        _save_config()
+        _emit({"event": "typing-enabled", "enabled": bool(cmd.get("enabled"))})
+    elif kind == "setShowTyping":
+        CONFIG["showTyping"] = bool(cmd.get("enabled"))
+        _save_config()
+        _emit({"event": "show-typing", "enabled": bool(cmd.get("enabled"))})
+    elif kind == "setReadReceiptsEnabled":
+        CONFIG["readReceiptsEnabled"] = bool(cmd.get("enabled"))
+        _save_config()
+        _emit({"event": "read-receipts-enabled", "enabled": bool(cmd.get("enabled"))})
+    elif kind == "setShowReadReceipts":
+        CONFIG["showReadReceipts"] = bool(cmd.get("enabled"))
+        _save_config()
+        _emit({"event": "show-read-receipts", "enabled": bool(cmd.get("enabled"))})
+    elif kind == "setName":
+        name = str(cmd.get("name", "")).strip()[:NAME_MAX]
+        if name:
+            CONFIG["displayName"] = name
+            _save_config()
+            broadcast_now()
+            _emit(_ready_event())
+    elif kind == "regenerateName":
+        # Pick a fresh random friendly {modifier}{trick} name. Seed the
+        # RNG from the current time so a re-roll usually differs from the
+        # previous one.
+        rng = random.Random()
+        rng.seed(time.time_ns())
+        trick = rng.choice(_SKATE_TRICKS)
+        modifier = rng.choice(_TRICK_MODIFIERS)
+        name = f"{modifier}{trick}"[:NAME_MAX]
+        CONFIG["displayName"] = name
+        _save_config()
+        broadcast_now()
+        _emit(_ready_event())
+    elif kind == "setOnline":
+        on = bool(cmd.get("online"))
+        CONFIG["online"] = on
+        _save_config()
+        _emit({"event": "online", "online": on})
+        if on:
+            broadcast_now()
+        else:
+            # Going offline: drop all persistent sockets and stop dialing
+            # (conn_loop also gates on is_online).
+            _drop_all_conns()
+    elif kind == "acceptFriend":
+        pid = str(cmd.get("id", ""))
+        peer = find_peer(pid)
+        pname = peer["name"] if peer else friendly_name(pid)
+        # Accept is LOCAL and unconditional: confirm the friend and reveal
+        # the held messages right away. The notify-back to the sender is
+        # just a courtesy — if they're momentarily unreachable (vanishing
+        # peer), retry in the background until it lands so the handshake
+        # completes on both sides.
+        add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
+        _emit({"event": "friend-accepted", "id": pid, "name": pname})
+        with _pending_lock:
+            held = _pending_first.pop(pid, [])
+        _diag("accepted-friend-request", peer=pid[:12], name=pname, revealed=len(held))
+        _reveal(held)
+        if not _notify_accept(pid):
+            _diag("accept-notify-failed", peer=pid[:12], name=pname, retrying=True)
+    elif kind == "setFriend":
+        # (1.3) Add a confirmed friend directly by cert fingerprint (the
+        # private-mode "add by fingerprint" path). Optional address/port
+        # lets conn_loop dial immediately; without them we learn the
+        # friend's address when their hello arrives (they're a confirmed
+        # friend, so private-mode discovery accepts it).
+        pid = str(cmd.get("id", "")).strip()
+        if not pid:
+            _emit({"event": "error", "message": "setFriend requires an id (cert fingerprint)"})
+        else:
+            peer = find_peer(pid)
+            addr = str(cmd.get("address") or (peer or {}).get("address") or "")
+            pname = str(cmd.get("name") or (peer or {}).get("name") or friendly_name(pid))
+            add_friend(pid, addr, pname, confirmed=True)
+            if addr:
+                upsert_peer(pid, pname, addr, int(cmd.get("port") or (peer or {}).get("port") or DEFAULT_PORT))
+            _emit({"event": "friend-added", "id": pid, "name": pname})
+            _diag("friend-added-by-fingerprint", peer=pid[:12], name=pname, addr=addr)
+    elif kind == "rejectFriend":
+        pid = str(cmd.get("id", ""))
+        # Rejecting = declining the relationship: send the reject notice and
+        # REMOVE the peer from our friend list (no lingering pending record),
+        # which emits a friends event so the UI reconciles the notification
+        # banner and drops the request.
+        send_control(pid, "friendReject")
+        with _pending_lock:
+            _pending_first.pop(pid, None)
+        unfriend(pid)
+        _emit({"event": "friend-rejected", "id": pid})
+        _diag("rejected-friend-request", peer=pid[:12])
+    elif kind == "unfriend":
+        pid = str(cmd.get("id", ""))
+        if unfriend(pid):
+            _emit({"event": "friend-removed", "id": pid})
+    elif kind == "typing":
+        send_control(str(cmd.get("to", "")), "typing")
+    elif kind == "typingStopped":
+        send_control(str(cmd.get("to", "")), "typingStopped")
+    elif kind == "readReceipt":
+        send_control(str(cmd.get("to", "")), "read", str(cmd.get("mid", "")))
+
+
 def stdin_loop() -> None:
+    """Legacy stdin command loop (no --socket). Reads JSON commands from stdin
+    and dispatches them. Kept for the test harness and manual runs; the
+    production/systemd path uses the unix-socket control channel instead."""
     for raw in sys.stdin:
         raw = raw.strip()
         if not raw:
@@ -2095,240 +2367,78 @@ def stdin_loop() -> None:
             cmd = json.loads(raw)
         except ValueError:
             continue
-        kind = cmd.get("cmd")
-        if kind == "send":
-            att = cmd.get("attachment")
-            if att and att.get("path"):
-                # Local file: register it for the receiver to fetch, build metadata.
-                path = str(att["path"])
-                file_id = secrets.token_hex(8)
-                name = str(att.get("name") or os.path.basename(path))
-                try:
-                    size = os.path.getsize(path)
-                except OSError:
-                    size = 0
-                register_attachment(file_id, path, name)
-                att = {"name": name, "size": size, "mime": "application/octet-stream",
-                       "fileId": file_id, "sha256": _file_sha256(path)}
-            send_message(
-                str(cmd.get("to", "")),
-                str(cmd.get("text", "")),
-                bool(cmd.get("friend_request")),
-                att,
-            )
-        elif kind == "history":
-            peer = str(cmd.get("peer", ""))
-            if peer:
-                _emit({"event": "history", "peer": peer,
-                       "total": history_for_peer(peer)["total"],
-                       "messages": history_for_peer(peer, int(cmd.get("offset", 0)), int(cmd.get("limit", 100)))["messages"]})
-            else:
-                _emit({"event": "history", "messages": history_snapshot()})
-        elif kind == "clearChat":
-            removed = clear_history_for_peer(str(cmd.get("peer", "")))
-            _emit({"event": "chat-cleared", "peer": str(cmd.get("peer", "")), "removed": removed})
-        elif kind == "clearAllChats":
-            removed = clear_all_history()
-            _emit({"event": "chat-cleared", "peer": "", "removed": removed})
-        elif kind == "deleteMessage":
-            ok = delete_message(str(cmd.get("mid", "")))
-            _emit({"event": "message-deleted", "mid": str(cmd.get("mid", "")), "ok": ok})
-        elif kind == "editMessage":
-            ok = edit_message(str(cmd.get("mid", "")), str(cmd.get("text", "")))
-            _emit({"event": "message-edited", "mid": str(cmd.get("mid", "")), "text": str(cmd.get("text", "")), "ok": ok})
-        elif kind == "setDownloadDir":
-            CONFIG["downloadDir"] = str(cmd.get("dir", ""))
-            _save_config()
-            _emit({"event": "download-dir", "dir": CONFIG["downloadDir"]})
-        elif kind == "setSendDelay":
-            CONFIG["sendDelay"] = int(cmd.get("seconds", 0))
-            _save_config()
-            _emit({"event": "send-delay", "seconds": CONFIG["sendDelay"]})
-        elif kind == "acceptAttachment":
-            peer = find_peer(str(cmd.get("from", "")))
-            if not peer:
-                _emit({"event": "error", "message": "attachment sender not found"})
-                continue
-            file_id = str(cmd.get("fileId", ""))
-            name = _safe_filename(str(cmd.get("name", "download")))
-            mid = str(cmd.get("mid", ""))
-            sha256 = str(cmd.get("sha256", ""))
-            # The sender's `from` id is their cert fingerprint — the same
-            # identity the message transport verifies against. Use it to pin
-            # the download's TLS cert too (closes the unauthenticated gap).
-            fingerprint = str(cmd.get("from", ""))
-            save_to = os.path.join(CONFIG.get("downloadDir", os.path.expanduser("~/Downloads")), name)
-            # Run the transfer off the stdin loop so a large file never blocks
-            # message processing / presence. Progress + completion events come
-            # back from the download thread.
-            threading.Thread(
-                target=_download_attachment,
-                args=(peer, file_id, save_to, sha256, mid, fingerprint),
-                daemon=True,
-            ).start()
-        elif kind == "list":
-            _emit({"event": "peers", "peers": peer_snapshot()})
-        elif kind == "setHttp":
-            enabled = bool(cmd.get("enabled"))
-            if enabled:
-                _start_http()
-            else:
-                _stop_http()
-            CONFIG["httpEnabled"] = enabled
-            _save_config()
-        elif kind == "setHttpBind":
-            # Bind address for the HTTP API: "127.0.0.1" (default, loopback-only)
-            # or "0.0.0.0" (LAN exposure). Applies on the next enable/restart.
-            bind = str(cmd.get("bind") or "127.0.0.1")
-            CONFIG["httpBind"] = bind
-            _save_config()
-            _emit({"event": "http-bind", "bind": bind})
-        elif kind == "setApiFullAccess":
-            CONFIG["apiFullAccess"] = bool(cmd.get("enabled"))
-            _save_config()
-            _emit({"event": "api-full-access", "enabled": bool(cmd.get("enabled"))})
-        elif kind == "setVisibility":
-            # "open" (discoverable) or "private" (invisible). Re-reads the flag
-            # in the UDP loop each tick, so it takes effect immediately.
-            vis = str(cmd.get("visibility") or "private")
-            CONFIG["visibility"] = "open" if vis == "open" else "private"
-            _save_config()
-            _emit({"event": "visibility", "visibility": CONFIG["visibility"]})
-        elif kind == "setAcceptRequests":
-            CONFIG["acceptRequests"] = bool(cmd.get("enabled", True))
-            _save_config()
-            _emit({"event": "accept-requests", "enabled": bool(CONFIG["acceptRequests"])})
-        elif kind == "setPanelSize":
-            size = str(cmd.get("size", "medium"))
-            if size in ("small", "medium", "large", "xl", "full"):
-                CONFIG["panelSize"] = size
-                _save_config()
-                _emit({"event": "panel-size", "size": size})
-        elif kind == "setCustomSize":
+        handle_command(cmd)
+
+
+def _socket_control_path() -> str:
+    """Unix-socket path for the control channel (systemd mode)."""
+    base = os.environ.get("XDG_RUNTIME_DIR") or os.path.join(
+        os.path.expanduser("~"), ".config", "omarchy")
+    return os.path.join(base, "lanchat.sock")
+
+
+def _socket_control_server() -> None:
+    """Accept control-channel connections from QML bridge processes.
+
+    Each client is registered for event broadcast and gets a fresh `ready`
+    event on connect (so a bridge that connects after boot syncs state), then
+    feeds every line it sends into handle_command — the same dispatch stdin
+    used, so the command surface is identical across both transports.
+    """
+    path = _socket_control_path()
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        srv.bind(path)
+        os.chmod(path, 0o600)
+    except OSError as e:
+        _emit({"event": "error", "message": "lanchat control socket bind failed: %s" % e})
+        return
+    srv.listen(8)
+    while True:
+        try:
+            conn, _ = srv.accept()
+        except OSError:
+            continue
+        f = conn.makefile("rw", encoding="utf-8", newline="\n")
+        with _socket_clients_lock:
+            _socket_clients.add(f)
+        try:
+            f.write(json.dumps(_ready_event(), separators=(",", ":")) + "\n")
+            f.flush()
+        except OSError:
+            _drop_socket_client(f)
             try:
-                w = max(0, int(cmd.get("w", 0)))
-                h = max(0, int(cmd.get("h", 0)))
-            except (TypeError, ValueError):
-                w, h = 0, 0
-            CONFIG["customW"] = w
-            CONFIG["customH"] = h
-            _save_config()
-            _emit({"event": "custom-size", "w": w, "h": h})
-        elif kind == "setStatus":
-            s = str(cmd.get("status", "available"))
-            if s in STATUSES:
-                CONFIG["status"] = s
-                _save_config()
-                broadcast_now()  # peers see the new status right away
-                _emit({"event": "status", "status": s})
-        elif kind == "setSoundEnabled":
-            CONFIG["soundEnabled"] = bool(cmd.get("enabled"))
-            _save_config()
-            _emit({"event": "sound-enabled", "enabled": bool(cmd.get("enabled"))})
-        elif kind == "setTypingEnabled":
-            CONFIG["typingEnabled"] = bool(cmd.get("enabled"))
-            _save_config()
-            _emit({"event": "typing-enabled", "enabled": bool(cmd.get("enabled"))})
-        elif kind == "setShowTyping":
-            CONFIG["showTyping"] = bool(cmd.get("enabled"))
-            _save_config()
-            _emit({"event": "show-typing", "enabled": bool(cmd.get("enabled"))})
-        elif kind == "setReadReceiptsEnabled":
-            CONFIG["readReceiptsEnabled"] = bool(cmd.get("enabled"))
-            _save_config()
-            _emit({"event": "read-receipts-enabled", "enabled": bool(cmd.get("enabled"))})
-        elif kind == "setShowReadReceipts":
-            CONFIG["showReadReceipts"] = bool(cmd.get("enabled"))
-            _save_config()
-            _emit({"event": "show-read-receipts", "enabled": bool(cmd.get("enabled"))})
-        elif kind == "setName":
-            name = str(cmd.get("name", "")).strip()[:NAME_MAX]
-            if name:
-                CONFIG["displayName"] = name
-                _save_config()
-                broadcast_now()
-                _emit(_ready_event())
-        elif kind == "regenerateName":
-            # Pick a fresh random friendly {modifier}{trick} name. Seed the
-            # RNG from the current time so a re-roll usually differs from the
-            # previous one.
-            rng = random.Random()
-            rng.seed(time.time_ns())
-            trick = rng.choice(_SKATE_TRICKS)
-            modifier = rng.choice(_TRICK_MODIFIERS)
-            name = f"{modifier}{trick}"[:NAME_MAX]
-            CONFIG["displayName"] = name
-            _save_config()
-            broadcast_now()
-            _emit(_ready_event())
-        elif kind == "setOnline":
-            on = bool(cmd.get("online"))
-            CONFIG["online"] = on
-            _save_config()
-            _emit({"event": "online", "online": on})
-            if on:
-                broadcast_now()
-            else:
-                # Going offline: drop all persistent sockets and stop dialing
-                # (conn_loop also gates on is_online).
-                _drop_all_conns()
-        elif kind == "acceptFriend":
-            pid = str(cmd.get("id", ""))
-            peer = find_peer(pid)
-            pname = peer["name"] if peer else friendly_name(pid)
-            # Accept is LOCAL and unconditional: confirm the friend and reveal
-            # the held messages right away. The notify-back to the sender is
-            # just a courtesy — if they're momentarily unreachable (vanishing
-            # peer), retry in the background until it lands so the handshake
-            # completes on both sides.
-            add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
-            _emit({"event": "friend-accepted", "id": pid, "name": pname})
-            with _pending_lock:
-                held = _pending_first.pop(pid, [])
-            _diag("accepted-friend-request", peer=pid[:12], name=pname, revealed=len(held))
-            _reveal(held)
-            if not _notify_accept(pid):
-                _diag("accept-notify-failed", peer=pid[:12], name=pname, retrying=True)
-        elif kind == "setFriend":
-            # (1.3) Add a confirmed friend directly by cert fingerprint (the
-            # private-mode "add by fingerprint" path). Optional address/port
-            # lets conn_loop dial immediately; without them we learn the
-            # friend's address when their hello arrives (they're a confirmed
-            # friend, so private-mode discovery accepts it).
-            pid = str(cmd.get("id", "")).strip()
-            if not pid:
-                _emit({"event": "error", "message": "setFriend requires an id (cert fingerprint)"})
-            else:
-                peer = find_peer(pid)
-                addr = str(cmd.get("address") or (peer or {}).get("address") or "")
-                pname = str(cmd.get("name") or (peer or {}).get("name") or friendly_name(pid))
-                add_friend(pid, addr, pname, confirmed=True)
-                if addr:
-                    upsert_peer(pid, pname, addr, int(cmd.get("port") or (peer or {}).get("port") or DEFAULT_PORT))
-                _emit({"event": "friend-added", "id": pid, "name": pname})
-                _diag("friend-added-by-fingerprint", peer=pid[:12], name=pname, addr=addr)
-        elif kind == "rejectFriend":
-            pid = str(cmd.get("id", ""))
-            # Rejecting = declining the relationship: send the reject notice and
-            # REMOVE the peer from our friend list (no lingering pending record),
-            # which emits a friends event so the UI reconciles the notification
-            # banner and drops the request.
-            send_control(pid, "friendReject")
-            with _pending_lock:
-                _pending_first.pop(pid, None)
-            unfriend(pid)
-            _emit({"event": "friend-rejected", "id": pid})
-            _diag("rejected-friend-request", peer=pid[:12])
-        elif kind == "unfriend":
-            pid = str(cmd.get("id", ""))
-            if unfriend(pid):
-                _emit({"event": "friend-removed", "id": pid})
-        elif kind == "typing":
-            send_control(str(cmd.get("to", "")), "typing")
-        elif kind == "typingStopped":
-            send_control(str(cmd.get("to", "")), "typingStopped")
-        elif kind == "readReceipt":
-            send_control(str(cmd.get("to", "")), "read", str(cmd.get("mid", "")))
+                conn.close()
+            except OSError:
+                pass
+            continue
+        threading.Thread(target=_socket_client_reader, args=(f, conn), daemon=True).start()
+
+
+def _socket_client_reader(f, conn) -> None:
+    """Read one control-channel client's command lines until it disconnects."""
+    try:
+        for raw in f:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                cmd = json.loads(raw)
+            except ValueError:
+                continue
+            handle_command(cmd)
+    except (OSError, ValueError):
+        pass
+    finally:
+        _drop_socket_client(f)
+        try:
+            conn.close()
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------
@@ -2366,14 +2476,31 @@ def _ready_event() -> dict:
 
 
 def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser(description="Lanchat daemon")
+    ap.add_argument("--socket", action="store_true",
+                    help="run under systemd: serve the unix-socket control channel "
+                         "instead of reading commands from stdin")
+    args = ap.parse_args()
+
     load_config()
     load_history()
+    if args.socket:
+        # systemd mode: the control channel is a unix socket, not stdin. Start
+        # the socket server first so the ready event below reaches a connected
+        # bridge (and any client that connects later gets its own ready event).
+        threading.Thread(target=_socket_control_server, daemon=True).start()
     _emit(_ready_event())
     if http_enabled():
         _start_http()
     threading.Thread(target=tcp_loop, daemon=True).start()
     threading.Thread(target=udp_loop, daemon=True).start()
     threading.Thread(target=conn_loop, daemon=True).start()
+    if args.socket:
+        # Keep the process alive; systemd supervises it. If every control
+        # client drops and none reconnects, still run (network daemon).
+        while True:
+            time.sleep(3600)
     stdin_loop()  # blocks until the shell closes stdin; also supervises the process lifetime
 
 

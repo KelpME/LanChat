@@ -98,6 +98,18 @@ QtObject {
     return decodeURIComponent(url)
   }
 
+  // The daemon runs under systemd (systemd/lanchat.service), so this shell
+  // spawns a bridge instead of server.py directly. The bridge connects to the
+  // daemon's unix-socket control channel and proxies stdin<->socket and
+  // socket->stdout, keeping the Process-based command/event wiring below
+  // unchanged. It exits when the daemon is down; onDaemonExit reports that and
+  // restartTimer respawns the bridge.
+  function bridgePath() {
+    var url = Qt.resolvedUrl("../lanchat-bridge.py").toString()
+    if (url.indexOf("file://") === 0) url = url.slice(7)
+    return decodeURIComponent(url)
+  }
+
   // Path to the daemon's diagnostic log (set from the daemon's ready event).
   property string logPathValue: ""
   function logPath() {
@@ -107,7 +119,7 @@ QtObject {
   function startDaemon() {
     if (daemon.running) return
     lanchat.daemonState = "starting"
-    daemon.command = ["python3", lanchat.serverPath()]
+    daemon.command = ["python3", lanchat.bridgePath()]
     daemon.running = true
   }
 

@@ -11,13 +11,13 @@
 
 PY      ?= python3
 RUFF    ?= ruff
-TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py
+TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py test_systemd_control.py
 PYFILES := server.py naming.py $(TESTS) test_peer.py
 
 # Bare `make` (no target) shows the help listing.
 .DEFAULT_GOAL := help
 
-.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info help-html
+.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info help-html test-systemd-control systemd-install systemd-status
 
 ## help: list all targets and what they do
 help: ## (default) show this help
@@ -25,7 +25,7 @@ help: ## (default) show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 ## test: run the full offline test suite (all test_*.py)
-test: ## run every test_*.py suite (server, friends, persistent, attachments, features, discovery-visibility)
+test: ## run every test_*.py suite (server, friends, persistent, attachments, features, discovery-visibility, systemd-control)
 	@for t in $(TESTS); do \
 		printf "=== %s ===\n" "$$t"; \
 		$(PY) "$$t" || exit 1; \
@@ -54,6 +54,22 @@ test-features: ## run test_features.py (history, config, misc commands)
 ## test-discovery-visibility: just test_discovery_visibility.py
 test-discovery-visibility: ## run test_discovery_visibility.py (broadcast side of the visibility flip)
 	@$(PY) test_discovery_visibility.py
+
+## test-systemd-control: just test_systemd_control.py
+test-systemd-control: ## run test_systemd_control.py (systemd unix-socket control channel + bridge)
+	@$(PY) test_systemd_control.py
+
+## systemd-install: install + enable the lanchat systemd user unit
+systemd-install: ## copy systemd/lanchat.service to ~/.config/systemd/user and enable it
+	@mkdir -p $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user
+	@cp systemd/lanchat.service $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.service
+	@systemctl --user daemon-reload
+	@systemctl --user enable --now lanchat.service
+	@echo "Lanchat daemon now runs under systemd. Status: systemctl --user status lanchat"
+
+## systemd-status: show the daemon's systemd state
+systemd-status: ## systemctl --user status lanchat (is the daemon running?)
+	@systemctl --user status lanchat --no-pager || true
 
 ## lint: ruff check on all Python
 lint: ## run `ruff check` (fast, no fix)
