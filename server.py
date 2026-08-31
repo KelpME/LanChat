@@ -954,6 +954,12 @@ def _udp_listener(sock: socket.socket) -> None:
             # NOT pong, so we stay invisible to the devices we discover.
             if not hidden:
                 _udp_send(sock, {"t": "pong"}, target=addr[0])
+        elif t == "friend-request":
+            # A stranger bootstraps friendship over UDP (no TCP connection yet —
+            # the TCP path is chicken-and-egg for first contact). Because UDP is
+            # unauthenticated, the request MUST be signed: we verify the sender
+            # owns the private key for its claimed cert id before registering it.
+            _handle_udp_friend_request(sock, pkt, addr[0])
 
 
 def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
@@ -983,6 +989,71 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
 
 
 _udp_fail_window = [0, 0.0, 0.0]  # [count since last log, last_fail_time, last_log_time]
+
+
+def _send_udp_friend_request(sock: socket.socket, target: str) -> bool:
+    """Send a SIGNED friend request to a peer over UDP (no TCP needed).
+
+    Friendship is the bootstrap — the first contact between strangers who have
+    no TCP trust yet. So the request goes over the discovery channel (UDP).
+    Because UDP is unauthenticated, the request is signed with our private key
+    over (id + nonce): the recipient verifies we own the key for our claimed
+    cert id, exactly like the TCP challenge-response but without needing an
+    established connection. Returns True if sent.
+    """
+    nonce = secrets.token_hex(16)
+    payload = {"t": "friend-request",
+               "id": host_id(),
+               "name": display_name(),
+               "cert": _our_cert_pem(),
+               "nonce": nonce,
+               "sig": _sign((host_id() + nonce).encode("utf-8")),
+               "port": port()}
+    try:
+        sock.sendto(json.dumps(payload).encode("utf-8"), (target, port()))
+        _diag("udp-friend-request-sent", to=target, nonce=nonce[:8])
+        return True
+    except OSError as e:
+        _diag("udp-friend-request-failed", to=target, errno=getattr(e, "errno", None))
+        return False
+
+
+def _handle_udp_friend_request(sock: socket.socket, pkt: dict, addr: str) -> None:
+    """Verify + register an inbound UDP friend request.
+
+    The sender must prove they own the private key for the claimed cert id:
+      - sha256(cert) == id          (the cert matches the claimed identity)
+      - verify(sig, id+nonce, cert) (they hold the key for that cert)
+    This prevents a UDP spoof from impersonating someone. On success the
+    request is surfaced (verified fingerprint) for the user to accept.
+    """
+    claimed = str(pkt.get("id") or "")
+    cert_pem = str(pkt.get("cert") or "")
+    nonce = str(pkt.get("nonce") or "")
+    sig = str(pkt.get("sig") or "")
+    name = str(pkt.get("name") or friendly_name(claimed))
+    pport = int(pkt.get("port") or DEFAULT_PORT)
+    # Reject our own request echoing back.
+    if not claimed or claimed == host_id():
+        return
+    # Verify the cert matches the claimed id, and the signature proves key
+    # ownership. Both must hold or the request is forged — drop it.
+    if _cert_fingerprint_of_pem(cert_pem) != claimed:
+        _diag("udp-friend-request-rejected", from_id=claimed[:12], reason="bad-identity")
+        return
+    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
+        _diag("udp-friend-request-rejected", from_id=claimed[:12], reason="bad-signature")
+        return
+    # Honored requests: only if we accept incoming requests.
+    if not accept_requests():
+        _diag("udp-friend-request-rejected", from_id=claimed[:12], reason="requests-disabled")
+        return
+    # Register the peer (so we know their address) and surface the request with
+    # the VERIFIED fingerprint — the same verified-request UI as the TCP path.
+    upsert_peer(claimed, name, addr, pport)
+    _emit({"event": "friend-request", "from": claimed, "name": name,
+           "fingerprint": claimed, "text": "wants to add you as a friend", "udp": True})
+    _diag("udp-friend-request", from_id=claimed[:12], name=name, addr=addr)
 
 
 def _local_subnet_hosts(max_hosts: int = 512) -> list:
@@ -2164,6 +2235,18 @@ def _stop_http() -> None:
 
 def handle_command(cmd: dict) -> None:
     kind = cmd.get("cmd")
+    if kind == "udpFriendRequest":
+        # Send a friend request over UDP (signed) — the bootstrap path that
+        # needs no pre-existing TCP connection. The recipient verifies our
+        # signature and surfaces it. Falls back gracefully if UDP is down.
+        to = str(cmd.get("to") or "")
+        if to and _udp_sock is not None:
+            sent = _send_udp_friend_request(_udp_sock, to)
+            if sent:
+                _emit({"event": "friend-request", "outgoing": True, "to": to,
+                       "toName": str(cmd.get("name") or friendly_name(to)),
+                       "text": "wants to add you as a friend"})
+        return
     if kind == "send":
         att = cmd.get("attachment")
         if att and att.get("path"):

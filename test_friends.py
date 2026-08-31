@@ -224,6 +224,56 @@ def main():
         assert oe and oe["online"] is True
         print("OK  8. back online")
 
+        # 9) Friend request over UDP (signed bootstrap — no TCP needed).
+        #    A sends a signed UDP friend request to B; B verifies the signature
+        #    and surfaces the request (verified fingerprint), even though no
+        #    TCP connection exists between them yet.
+        #    Craft a signed request from A's identity.
+        import test_peer as _tp2
+        import hashlib, json as _json, socket as _sock
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        # A's cert + key live in A's home cert dir.
+        ca_home = ha
+        ca_cert = os.path.join(ca_home, ".config", "omarchy", "lanchat-certs", "cert.pem")
+        ca_key = os.path.join(ca_home, ".config", "omarchy", "lanchat-certs", "key.pem")
+        with open(ca_cert, "rb") as f:
+            from cryptography import x509 as _x509
+            cert = _x509.load_pem_x509_certificate(f.read())
+        cert_der = cert.public_bytes(serialization.Encoding.DER)
+        ida_fp = hashlib.sha256(cert_der).hexdigest()
+        # Sign id+nonce with A's private key.
+        with open(ca_key, "rb") as f:
+            key = serialization.load_pem_private_key(f.read(), password=None)
+        nonce = "deadbeef" * 4
+        sig = key.sign((ida_fp + nonce).encode(), padding.PKCS1v15(), hashes.SHA256())
+        import binascii
+        # Send the signed UDP friend request to B's port.
+        req = {"t": "friend-request", "id": ida_fp,
+               "name": "AlphaUDP", "cert": open(ca_cert).read(),
+               "nonce": nonce, "sig": binascii.hexlify(sig).decode(),
+               "port": a.port}
+        _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
+            _json.dumps(req).encode(), ("127.0.0.1", b.port))
+        fr3 = b.wait_event("friend-request")
+        assert fr3 and fr3.get("from") == ida_fp, "B did not surface verified UDP friend request"
+        assert fr3.get("fingerprint") == ida_fp, "UDP request must carry verified fingerprint"
+        print("OK  9. signed UDP friend request verified + surfaced (no TCP needed)")
+
+        # 10) Forged UDP request (wrong signature) must be rejected.
+        bad_sig = binascii.hexlify(b"0" * 256).decode()[:256]
+        req_bad = {"t": "friend-request", "id": ida_fp, "name": "Forged",
+                   "cert": open(ca_cert).read(), "nonce": nonce,
+                   "sig": bad_sig, "port": a.port}
+        _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
+            _json.dumps(req_bad).encode(), ("127.0.0.1", b.port))
+        time.sleep(0.6)
+        # B should NOT surface a request from this (it's rejected as forged).
+        bad_reqs = [e for e in b.events_of("friend-request")
+                    if e.get("name") == "Forged"]
+        assert not bad_reqs, "forged UDP friend request was accepted!"
+        print("OK  10. forged UDP friend request rejected (bad signature)")
+
         print("\nALL FRIEND TESTS PASSED")
         return 0
     finally:

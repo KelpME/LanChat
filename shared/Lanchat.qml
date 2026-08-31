@@ -226,10 +226,14 @@ QtObject {
   }
 
   // Explicit "add a friend" action — decoupled from messaging. Sends a friend
-  // request to a peer; they accept/reject it in the notifications banner.
+  // request to a peer. Friendship is the bootstrap (first contact between
+  // strangers), so the request goes over UDP (signed), NOT TCP — the TCP path
+  // requires an established connection that doesn't exist between non-friends
+  // yet (chicken-and-egg). The recipient verifies our signature and the
+  // request appears in their notifications banner.
   function requestFriend(id) {
-    daemon.write(JSON.stringify({ cmd: "send", to: id,
-      text: "wants to add you as a friend", friend_request: true }) + "\n")
+    var name = lanchat.peerName(id)
+    daemon.write(JSON.stringify({ cmd: "udpFriendRequest", to: id, name: name }) + "\n")
   }
 
   // The daemon's send cmd. Friendship is its own action (requestFriend), so a
