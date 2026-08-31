@@ -31,7 +31,7 @@ def make_home(name, port, display):
     d = tempfile.mkdtemp(prefix="lnc-persist-" + name)
     c = os.path.join(d, ".config", "omarchy"); os.makedirs(c)
     open(os.path.join(c, "lanchat.json"), "w").write(json.dumps(
-        {"token": TOKEN, "port": port, "displayName": display, "httpPort": port + 10}))
+        {"token": TOKEN, "port": port, "displayName": display, "httpPort": port + 10, "visibility": "open"}))
     return d
 
 

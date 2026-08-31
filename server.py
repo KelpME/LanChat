@@ -71,6 +71,11 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # both machines can verify they're running the same code; falls back to the
 # manifest version when git isn't available (e.g. a bare copy).
 #
+# 1.3.0 — public-network safety: visibility model. New `visibility` setting
+#   ("open" discoverable / "private" invisible by default) and `acceptRequests`
+#   toggle. In private mode we don't broadcast/scan or respond to hello probes,
+#   and friend requests carry the requester's verified cert fingerprint for the
+#   UI to confirm before accepting.
 # 1.2.3 — at-rest encryption: message history is now AES-256-GCM encrypted with
 #   a dedicated 0600 key, so history.json isn't readable as plaintext. Protects
 #   the file in isolation (backup/copy/sync); not against full device compromise.
@@ -92,7 +97,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
 #   over the existing socket). Old and new transports do not interoperate; both
 #   machines must run >= 1.1.0.
-VERSION = "1.2.3"
+VERSION = "1.3.0"
 
 
 def _git_version() -> str:
@@ -216,6 +221,15 @@ def load_config() -> None:
     # isn't exposed to the LAN; set to "0.0.0.0" to allow remote agents
     # (e.g. other machines holding the token) to reach it.
     CONFIG.setdefault("httpBind", "127.0.0.1")
+    # Discovery / friend-request model (1.3).
+    #   visibility: "open"   — broadcast + scan, anyone can discover and
+    #                request you (trusted-LAN behavior).
+    #                "private" — invisible on discovery (no broadcast/scan);
+    #                you connect by adding fingerprints directly.
+    #   acceptRequests: whether inbound friend requests are accepted (and shown
+    #                with the requester's verified identity) or rejected.
+    CONFIG.setdefault("visibility", "private")
+    CONFIG.setdefault("acceptRequests", True)
     # Full API access to chat data (read history/peers) vs send-only.
     # When False, the agent can send messages to friends but cannot read
     # history, list peers, or download attachments.
@@ -469,6 +483,16 @@ def http_port() -> int:
 def http_bind() -> str:
     """Loopback by default; "0.0.0.0" opts into LAN exposure."""
     return str(CONFIG.get("httpBind") or "127.0.0.1")
+
+
+def visibility() -> str:
+    """"open" (discoverable) or "private" (invisible)."""
+    return str(CONFIG.get("visibility") or "private")
+
+
+def accept_requests() -> bool:
+    """Whether inbound friend requests are accepted."""
+    return bool(CONFIG.get("acceptRequests", True))
 
 
 # --------------------------------------------------------------------------
@@ -840,6 +864,13 @@ def _udp_listener(sock: socket.socket) -> None:
             # Skip ourselves — our own broadcast/scan echoes back on loopback.
             if pid == host_id():
                 continue
+            # (1.3) Private visibility: we don't respond to unsolicited hello
+            # probes — otherwise anyone who pings our IP learns we exist.
+            # Existing friend connections ride the TCP socket, not UDP, so
+            # ignoring probes doesn't affect established friends. We still
+            # dial OUT to friends by fingerprint (see conn_loop).
+            if visibility() != "open":
+                continue
             # Prefer the peer's broadcast display name; fall back to a
             # deterministic friendly name derived from its id.
             name = str(pkt.get("name") or friendly_name(pid))
@@ -994,10 +1025,16 @@ def udp_loop() -> None:
     last_broadcast = 0.0
     last_unicast = 0.0
     scanned_once = False
+    # In private visibility we are invisible: no broadcast, no scan, and we do
+    # NOT re-announce to known peers either (that would still leak our presence
+    # to anyone sniffing). Existing established friend sockets are unaffected;
+    # we simply stop announcing ourselves on the network.
+    hidden = visibility() != "open"
     while True:
         now = time.time()
-        # Only announce ourselves while online (appear offline otherwise).
-        if is_online() and now - last_broadcast >= BROADCAST_INTERVAL_S:
+        # Only announce ourselves while online (appear offline otherwise) and
+        # only when visible on discovery.
+        if is_online() and not hidden and now - last_broadcast >= BROADCAST_INTERVAL_S:
             _udp_send(sock, {"t": "hello"})
             last_broadcast = now
             # Reliable steady-state discovery: on networks where UDP broadcast
@@ -1012,7 +1049,7 @@ def udp_loop() -> None:
         # send queue and chokes inbound traffic. Broadcast + unicast-to-known
         # handle steady-state discovery; the scan only seeds peers that
         # broadcast filtering hides.
-        if is_online() and not scanned_once and now - last_broadcast >= 3.0:
+        if is_online() and not hidden and not scanned_once and now - last_broadcast >= 3.0:
             _scan_subnet(sock)
             scanned_once = True
         expire_peers()
@@ -1024,7 +1061,7 @@ _udp_sock = None
 
 def broadcast_now() -> None:
     """Immediately announce ourselves so a name change reaches peers right away."""
-    if _udp_sock is not None:
+    if _udp_sock is not None and visibility() == "open":
         _udp_send(_udp_sock, {"t": "hello"})
 
 
@@ -1538,6 +1575,12 @@ def _handle_incoming(msg: dict, addr) -> None:
     # non-confirmed peer (not just the first) so content never surfaces until
     # they're accepted.
     if msg.get("friendRequest") and not is_friend(pid):
+        # (1.3) Request gating: when the user has disabled accepting friend
+        # requests, a stranger's request is silently dropped. The requester is
+        # never added as pending, so they can't even get a trust foothold.
+        if not accept_requests():
+            _log("inbound-friend-request-rejected from=%s reason=requests-disabled" % pid[:12])
+            return
         if not is_pending(pid):
             add_friend(pid, addr[0], from_name, confirmed=False)
         # Do NOT surface the message content yet — hold it so the receiver
@@ -1548,7 +1591,12 @@ def _handle_incoming(msg: dict, addr) -> None:
         message["held"] = True
         with _pending_lock:
             _pending_first.setdefault(pid, []).append(message)
-        _emit({"event": "friend-request", "from": pid, "fromName": from_name, "text": text, "ts": ts, "mid": message["mid"]})
+        # Emit the request WITH the requester's verified cert fingerprint
+        # (pid is the identity `_reader_inbound` cryptographically proved),
+        # so the UI can show it and require confirmation it matches what the
+        # user expected before accepting (1.3 Option B).
+        _emit({"event": "friend-request", "from": pid, "fromName": from_name,
+               "text": text, "ts": ts, "mid": message["mid"], "fingerprint": pid})
         _diag("inbound-friend-request", peer=pid[:12], name=from_name, text=text[:40])
         return
     append_history(message)
@@ -2132,6 +2180,17 @@ def stdin_loop() -> None:
             CONFIG["apiFullAccess"] = bool(cmd.get("enabled"))
             _save_config()
             _emit({"event": "api-full-access", "enabled": bool(cmd.get("enabled"))})
+        elif kind == "setVisibility":
+            # "open" (discoverable) or "private" (invisible). Re-reads the flag
+            # in the UDP loop each tick, so it takes effect immediately.
+            vis = str(cmd.get("visibility") or "private")
+            CONFIG["visibility"] = "open" if vis == "open" else "private"
+            _save_config()
+            _emit({"event": "visibility", "visibility": CONFIG["visibility"]})
+        elif kind == "setAcceptRequests":
+            CONFIG["acceptRequests"] = bool(cmd.get("enabled", True))
+            _save_config()
+            _emit({"event": "accept-requests", "enabled": bool(CONFIG["acceptRequests"])})
         elif kind == "setPanelSize":
             size = str(cmd.get("size", "medium"))
             if size in ("small", "medium", "large", "xl", "full"):
@@ -2261,6 +2320,8 @@ def _ready_event() -> dict:
         "httpEnabled": http_enabled(),
         "httpPort": http_port(),
         "httpBind": http_bind(),
+        "visibility": visibility(),
+        "acceptRequests": accept_requests(),
         "online": is_online(),
         "friends": friends_list(),
         "downloadDir": CONFIG.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),

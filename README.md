@@ -210,12 +210,20 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
   disk with a dedicated 0600 key, so `history.json` isn't readable as
   plaintext. This protects the file in isolation (a backup, a copy, sync);
   it is not a defense against full compromise of the machine.
+- **Visibility & requests** (1.3) — safe on public networks by default.
+  `visibility` is `private` (invisible: no discovery broadcast/scan, and hello
+  probes are ignored) unless you switch to `open` for a trusted LAN. Inbound
+  friend requests are gated by `acceptRequests` and, when shown, carry the
+  requester's **verified cert fingerprint** for you to confirm matches before
+  accepting. Connect to friends in private mode by adding their fingerprint
+  directly.
 
 > The cert is self-signed (no CA), which is appropriate for LAN peer-to-peer.
-> Because discovery is open, any machine on your LAN can see you and send a
-> friend request — but they can't message you until you accept, and their cert
-> fingerprint identifies them. The `token` in config only protects the optional
-> HTTPS API, which is loopback-only by default.
+> Visibility is `private` by default — you're invisible on discovery until you
+> switch to `open`. In `open` mode any machine on your LAN can see you and send
+> a friend request; they can't message you until you accept, and their verified
+> cert fingerprint identifies them. The `token` in config only protects the
+> optional HTTPS API, which is loopback-only by default.
 
 ## How it works
 

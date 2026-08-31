@@ -31,9 +31,23 @@ independent of your display name, so you can re-roll your name without breaking
 anything.
 
 When another machine connects to you, it must prove it holds the private key
-for the fingerprint it claims (it signs a random challenge). Your fingerprint is
-broadcast on the LAN, but without the matching key a stranger can't forge
-messages from you. All your machines should run the same recent version.
+for the fingerprint it claims (it signs a random challenge). Without the
+matching key a stranger can't forge messages from you. All your machines should
+run the same recent version.
+
+## Private by default (safe on public networks)
+
+Lanchat is **invisible on the network unless you switch to open mode**. In the
+default **private** mode you don't broadcast your presence or reply to
+discovery probes, so strangers on the same wifi can't find you or even confirm
+you're there. To connect to a friend in private mode, add their **cert
+fingerprint** directly (from Settings).
+
+- **Open mode** — for trusted LANs (your own machines at home): you broadcast
+  and are discoverable, and anyone can send you a friend request.
+- **Accept friend requests** — a separate toggle. When on, incoming requests
+  show the requester's **verified fingerprint**; confirm it matches before
+  accepting. Turn it off to reject all incoming requests.
 
 ## The bar icon
 

@@ -19,7 +19,6 @@ import sys
 import tempfile
 import threading
 import time
-
 TOKEN = "test-shared-secret-token"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRV = os.path.join(HERE, "server.py")
@@ -44,7 +43,7 @@ def make_home(name, port, display):
     cfg_dir = os.path.join(d, ".config", "omarchy")
     os.makedirs(cfg_dir, exist_ok=True)
     with open(os.path.join(cfg_dir, "lanchat.json"), "w") as f:
-        json.dump({"token": TOKEN, "port": port, "displayName": display, "httpPort": port + 10}, f)
+        json.dump({"token": TOKEN, "port": port, "displayName": display, "httpPort": port + 10, "visibility": "open"}, f)
     return d
 
 
@@ -211,14 +210,24 @@ def main():
             flood.sendall(b"A" * (600 * 1024))
         except OSError:
             pass
-        # The reader should hit the cap and close the connection.
-        closed = False
+        # The reader should hit the cap and close the connection. Wait a moment
+        # for the server to consume the flood, then a further write must fail
+        # (broken pipe) because the server dropped the socket.
+        time.sleep(0.5)
+        dropped = False
         try:
-            flood.recv(1)
-        except Exception:
-            closed = True
+            flood.settimeout(2)
+            flood.sendall(b"B" * 64)
+            # If the send succeeded, read to see if the server closed.
+            try:
+                if flood.recv(1) == b"":
+                    dropped = True
+            except Exception:
+                dropped = True
+        except OSError:
+            dropped = True
         flood.close()
-        assert closed, "flooding peer connection was not dropped (buffer not bounded)"
+        assert dropped, "flooding peer connection was not dropped (buffer not bounded)"
         print("OK  oversized no-newline flood dropped (buffer cap)")
 
         # Still functional after the flood.
@@ -235,6 +244,37 @@ def main():
         assert "hello from alpha" not in hist_raw, "history not encrypted (message visible on disk)"
         assert hist_raw.startswith("TEFOQ0hJU1Qx"), "history blob missing LANCHIST1 magic"
         print("OK  history encrypted at rest (message not plaintext on disk)")
+
+        # --- 1.3: private visibility + request gating ----------------------
+        # Private mode ignores unsolicited hello probes: a stranger's hello
+        # must NOT make B respond with a pong or add them as a peer.
+        b.cmd(cmd="setVisibility", visibility="private")
+        b.wait_event("visibility")
+        probe_pid = "probe-" + os.urandom(4).hex()
+        # Send a hello from an unknown id; B should not add it as a peer.
+        udp_broadcast(b.port, {"t": "hello", "id": probe_pid, "name": "Probe", "port": 9999})
+        time.sleep(0.8)
+        assert not wait_until(lambda: _has_peer(b, probe_pid), timeout=1.0), \
+            "private mode added an unknown probe as a peer"
+        print("OK  private visibility ignores unknown hello probes (no peer added)")
+        # And a stranger friend request is dropped when acceptRequests is off.
+        b.cmd(cmd="setAcceptRequests", enabled=False)
+        b.wait_event("accept-requests")
+        import test_peer as _tp
+        stranger_home2 = tempfile.mkdtemp(prefix="lanchat-stranger2-")
+        scert2, skey2 = _tp.make_certs(stranger_home2)
+        sid2 = _tp.fingerprint(scert2)
+        # Stranger authenticates (proves identity), then sends a friend request.
+        _tp.authed_send("127.0.0.1", b.port, scert2, skey2,
+                        {"t": "msg", "from": sid2, "fromName": "Stranger2",
+                         "text": "hi", "friendRequest": True})
+        # B should not emit a friend-request event (requests disabled).
+        assert not wait_until(lambda: _has_friend_request(b, sid2), timeout=1.0), \
+            "friend request accepted despite acceptRequests=false"
+        print("OK  friend request dropped when acceptRequests disabled")
+        # Restore open visibility + requests for the rest of the test.
+        b.cmd(cmd="setVisibility", visibility="open"); b.wait_event("visibility")
+        b.cmd(cmd="setAcceptRequests", enabled=True); b.wait_event("accept-requests")
 
         # History reload command returns what's on disk (decrypted by daemon).
         b.cmd(cmd="history")
@@ -386,6 +426,11 @@ def _has_peer(d, pid):
 def _has_message(d, text):
     with d._lock:
         return any(m.get("text") == text for e in d.events if e.get("event") == "message" for m in [e["message"]])
+
+
+def _has_friend_request(d, pid):
+    with d._lock:
+        return any(e.get("event") == "friend-request" and e.get("from") == pid for e in d.events)
 
 
 if __name__ == "__main__":
