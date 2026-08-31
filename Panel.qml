@@ -394,7 +394,7 @@ Panel {
                 delegate: Rectangle {
                   required property var modelData
                   width: peerList.width
-                  height: Style.spacing.controlHeight
+                  height: Style.space(40)
                   radius: Style.cornerRadius
                   color: modelData.id === root.selectedPeerId
                     ? Style.selectedFill : "transparent"
@@ -416,8 +416,8 @@ Panel {
 
                   // Status dot: colored per the peer's status.
                   Rectangle {
-                    width: Style.space(8)
-                    height: Style.space(8)
+                    width: Style.space(9)
+                    height: Style.space(9)
                     radius: width / 2
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
@@ -428,12 +428,14 @@ Panel {
                       : Color.accent  // available
                   }
 
+                  // Name on the left, status label on the right — spread apart
+                  // with generous gaps so the row reads cleanly.
                   Text {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: Style.spacing.xl
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.spacing.sm
+                    anchors.right: statusText.left
+                    anchors.rightMargin: Style.spacing.md
                     text: modelData.name
                     color: modelData.id === root.selectedPeerId
                       ? Color.accent
@@ -441,6 +443,20 @@ Panel {
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     elide: Text.ElideRight
+                  }
+
+                  Text {
+                    id: statusText
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.spacing.sm
+                    text: modelData.status === "dnd" ? "\u2715"  // ✕ Do Not Disturb
+                      : modelData.status === "away" ? "\u23F0"   // ⏰ Away
+                      : modelData.status === "brb" ? "\u23EB"    // ⏫ Be Right Back
+                      : "\u2713"                                  // ✓ Available
+                    color: Color.muted
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
                   }
                 }
 
