@@ -371,7 +371,7 @@ Panel {
                 id: peerList
                 width: parent.width
                 anchors.top: parent.top
-                anchors.bottom: peersOnlineBar.top
+                anchors.bottom: notifBanner.top
                 clip: true
                 model: Lanchat.displayPeers
                 spacing: Style.spacing.xs
@@ -497,6 +497,94 @@ Panel {
                   font.pixelSize: Style.font.caption
                   wrapMode: Text.Wrap
                   horizontalAlignment: Text.AlignHCenter
+                }
+              }
+
+              // ---- friend-request notifications: pinned below the peer
+              // list so an incoming request is always in view -------------
+              Item {
+                id: notifBanner
+                width: parent.width
+                height: Lanchat.friendRequests.length === 0 ? 0
+                       : root.notifExpanded ? Style.space(24) + notifRows.implicitHeight + Style.spacing.xs
+                       : Style.space(24)
+                anchors.bottom: peersOnlineBar.top
+                visible: Lanchat.friendRequests.length > 0
+                clip: true
+
+                Rectangle {
+                  anchors.fill: parent
+                  color: Style.selectedAccentFill
+                  Rectangle {
+                    anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+                    height: 1; color: Color.popups.border
+                  }
+                }
+
+                // Header row: summary + expand/collapse chevron.
+                Item {
+                  anchors.top: parent.top
+                  anchors.left: parent.left; anchors.right: parent.right
+                  height: Style.space(24)
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left; anchors.leftMargin: Style.spacing.sm
+                    text: (root.notifExpanded ? "\u25BC " : "\u25B6 ") + Lanchat.friendRequests.length
+                          + (Lanchat.friendRequests.length === 1 ? " friend request" : " friend requests")
+                    color: Color.accent
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.weight: Font.Bold
+                  }
+                  MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.notifExpanded = !root.notifExpanded
+                  }
+                }
+
+                Column {
+                  id: notifRows
+                  anchors.top: parent.top
+                  anchors.topMargin: Style.space(24)
+                  width: parent.width
+                  visible: root.notifExpanded
+                  spacing: Style.spacing.xs
+
+                  Repeater {
+                    model: Lanchat.friendRequests
+                    Row {
+                      required property var modelData
+                      width: notifBanner.width - Style.space(16)
+                      anchors.horizontalCenter: parent.horizontalCenter
+                      spacing: Style.spacing.sm
+
+                      Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - Style.space(96)
+                        text: modelData.outgoing
+                          ? "Waiting for " + (modelData.name || "them") + " to accept"
+                          : "Friend request from " + (modelData.name || "someone")
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                      }
+                      Item { width: Style.space(4) }
+                      Button {
+                        visible: !modelData.outgoing
+                        text: "Accept"
+                        fontSize: Style.font.caption
+                        onClicked: root.acceptFriend(modelData.peerId)
+                      }
+                      Button {
+                        visible: !modelData.outgoing
+                        text: "Reject"
+                        fontSize: Style.font.caption
+                        onClicked: root.rejectFriend(modelData.peerId)
+                      }
+                    }
+                  }
                 }
               }
 
@@ -1208,97 +1296,10 @@ Panel {
             width: parent.width - root.peerColW - 1
             height: parent.height
 
-            // ---- friend-request notifications banner (moved out of the
-            // thread; the "add a friend" flow is separate from messaging) ----
-            Item {
-              id: notifBanner
-              width: parent.width
-              height: Lanchat.friendRequests.length === 0 ? 0
-                     : root.notifExpanded ? Style.space(24) + notifRows.implicitHeight + Style.spacing.xs
-                     : Style.space(24)
-              visible: Lanchat.friendRequests.length > 0
-              clip: true
-
-              Rectangle {
-                anchors.fill: parent
-                color: Style.selectedAccentFill
-                Rectangle {
-                  anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
-                  height: 1; color: Color.popups.border
-                }
-              }
-
-              // Header row: summary + expand/collapse chevron.
-              Item {
-                anchors.top: parent.top
-                anchors.left: parent.left; anchors.right: parent.right
-                height: Style.space(24)
-
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  anchors.left: parent.left; anchors.leftMargin: Style.spacing.sm
-                  text: (root.notifExpanded ? "\u25BC " : "\u25B6 ") + Lanchat.friendRequests.length
-                        + (Lanchat.friendRequests.length === 1 ? " friend request" : " friend requests")
-                  color: Color.accent
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  font.weight: Font.Bold
-                }
-                MouseArea {
-                  anchors.fill: parent
-                  onClicked: root.notifExpanded = !root.notifExpanded
-                }
-              }
-
-              Column {
-                id: notifRows
-                anchors.top: parent.top
-                anchors.topMargin: Style.space(24)
-                width: parent.width
-                visible: root.notifExpanded
-                spacing: Style.spacing.xs
-
-                Repeater {
-                  model: Lanchat.friendRequests
-                  Row {
-                    required property var modelData
-                    width: notifBanner.width - Style.space(16)
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: Style.spacing.sm
-
-                    Text {
-                      anchors.verticalCenter: parent.verticalCenter
-                      width: parent.width - Style.space(96)
-                      text: modelData.outgoing
-                        ? "Waiting for " + (modelData.name || "them") + " to accept"
-                        : "Friend request from " + (modelData.name || "someone")
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      elide: Text.ElideRight
-                    }
-                    Item { width: Style.space(4) }
-                    Button {
-                      visible: !modelData.outgoing
-                      text: "Accept"
-                      fontSize: Style.font.caption
-                      onClicked: root.acceptFriend(modelData.peerId)
-                    }
-                    Button {
-                      visible: !modelData.outgoing
-                      text: "Reject"
-                      fontSize: Style.font.caption
-                      onClicked: root.rejectFriend(modelData.peerId)
-                    }
-                  }
-                }
-              }
-            }
-
             ListView {
               id: list
               width: parent.width
-              height: parent.height - composeBox.height - notifBanner.height
+              height: parent.height - composeBox.height
               clip: true
               spacing: Style.spacing.sm
               model: root.thread
