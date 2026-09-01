@@ -76,6 +76,11 @@ systemctl --user status lanchat        # is the daemon running?
 systemctl --user restart lanchat       # restart it
 ```
 
+**The daemon also restarts itself when its files change** (`lanchat.path` +
+`lanchat-restart.service`, added in 1.5.16): after `omarchy plugin update` (or
+any `git` pull) it picks up the new code automatically instead of silently
+staying on the old version until you restart it manually.
+
 **Install is a single command** (needs sudo once for the firewall step). Lanchat
 needs its port (4812, udp+tcp) reachable inbound from the LAN — for discovery,
 friend requests, and messaging — and Omarchy ships with the firewall closed.

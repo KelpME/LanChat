@@ -59,16 +59,20 @@ test-discovery-visibility: ## run test_discovery_visibility.py (broadcast side o
 test-systemd-control: ## run test_systemd_control.py (systemd unix-socket control channel + bridge)
 	@$(PY) test_systemd_control.py
 
-## systemd-install: install + enable the lanchat systemd unit AND open the firewall port
+## systemd-install: install + enable the lanchat systemd unit (service + path watcher) AND open the firewall port
 ## This is the full install: daemon under systemd + lanchat 4812 opened to the LAN
 ## (the port is REQUIRED for discovery, friend requests, and messaging to work —
 ## the outbound dial still needs the recipient's 4812 reachable inbound).
-systemd-install: firewall-open ## copy systemd/lanchat.service, enable it, and open 4812 to the LAN
+## The .path + .restart units restart the daemon automatically when server.py/scripts change.
+systemd-install: firewall-open ## copy systemd/lanchat.service + lanchat.path + lanchat-restart.service, enable them, and open 4812 to the LAN
 	@mkdir -p $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user
 	@cp systemd/lanchat.service $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.service
+	@cp systemd/lanchat.path $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.path
+	@cp systemd/lanchat-restart.service $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat-restart.service
 	@systemctl --user daemon-reload
 	@systemctl --user enable --now lanchat.service
-	@echo "Lanchat daemon now runs under systemd. Status: systemctl --user status lanchat"
+	@systemctl --user enable --now lanchat.path
+	@echo "Lanchat daemon now runs under systemd (auto-restarts on update via lanchat.path). Status: systemctl --user status lanchat"
 	@echo "Firewall port 4812 (udp+tcp) is open to the LAN."
 
 ## firewall-open: open lanchat's port (4812) to the LAN via ufw (prompts for password via polkit)
@@ -89,9 +93,13 @@ systemd-status: ## systemctl --user status lanchat (is the daemon running?)
 	@systemctl --user status lanchat --no-pager || true
 
 ## systemd-uninstall: stop + disable + remove the unit AND wipe all lanchat data
-systemd-uninstall: ## FULL uninstall: stop the daemon, remove the systemd unit, and delete config/certs/history (run BEFORE omarchy plugin remove)
+systemd-uninstall: ## FULL uninstall: stop the daemon, remove the systemd units (service + path watcher + restart oneshot), and delete config/certs/history (run BEFORE omarchy plugin remove)
 	@-systemctl --user disable --now lanchat.service 2>/dev/null || true
+	@-systemctl --user disable --now lanchat.path 2>/dev/null || true
+	@-systemctl --user disable --now lanchat-restart.service 2>/dev/null || true
 	@-rm -f $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.service
+	@-rm -f $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat.path
+	@-rm -f $${XDG_CONFIG_HOME:-$$HOME/.config}/systemd/user/lanchat-restart.service
 	@systemctl --user daemon-reload
 	@echo "Lanchat systemd unit removed."
 	@echo "Killing any surviving lanchat daemon/bridge processes (so a reinstall starts clean, no stale cert)..."

@@ -21,6 +21,15 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 UNIT_SRC = os.path.join(HERE, "systemd", "lanchat.service")
 UNIT_NAME = "lanchat.service"
+# Companion path unit: watches server.py + scripts/ and restarts the daemon
+# automatically when they change (e.g. after `omarchy plugin update`), so a
+# running daemon never keeps reporting a stale version after an update.
+# lanchat-restart.service is the oneshot the path unit triggers (a path unit
+# only STARTS its target, so the oneshot does the actual `restart`).
+PATH_SRC = os.path.join(HERE, "systemd", "lanchat.path")
+PATH_NAME = "lanchat.path"
+RESTART_SRC = os.path.join(HERE, "systemd", "lanchat-restart.service")
+RESTART_NAME = "lanchat-restart.service"
 
 
 def _user_unit_dir() -> str:
@@ -147,16 +156,38 @@ def main() -> int:
         print("lanchat: 'cryptography' installed.", file=sys.stderr)
 
 
-    # Already enabled and running — nothing to do.
+    # Already enabled and running — but ensure the companion path watcher is
+    # installed too (upgrade case: a machine that predates the path unit).
     if _is_enabled() and _is_active():
+        unit_dir = _user_unit_dir()
+        path_dst = os.path.join(unit_dir, PATH_NAME)
+        restart_dst = os.path.join(unit_dir, RESTART_NAME)
+        if os.path.exists(PATH_SRC) and not os.path.exists(path_dst):
+            try:
+                shutil.copyfile(PATH_SRC, path_dst)
+                if os.path.exists(RESTART_SRC):
+                    shutil.copyfile(RESTART_SRC, restart_dst)
+                _run(["systemctl", "--user", "daemon-reload"])
+                _run(["systemctl", "--user", "enable", "--now", PATH_NAME])
+                print("lanchat: installed path watcher (auto-restart on update).",
+                      file=sys.stderr)
+            except OSError as e:
+                print("lanchat: could not install path watcher: %s" % e,
+                      file=sys.stderr)
         return 0
 
-    # Install the unit file if it isn't there.
+    # Install the unit files if they aren't there.
     unit_dir = _user_unit_dir()
     os.makedirs(unit_dir, exist_ok=True)
     unit_dst = os.path.join(unit_dir, UNIT_NAME)
+    path_dst = os.path.join(unit_dir, PATH_NAME)
+    restart_dst = os.path.join(unit_dir, RESTART_NAME)
     try:
         shutil.copyfile(UNIT_SRC, unit_dst)
+        if os.path.exists(PATH_SRC):
+            shutil.copyfile(PATH_SRC, path_dst)
+        if os.path.exists(RESTART_SRC):
+            shutil.copyfile(RESTART_SRC, restart_dst)
     except OSError as e:
         print("lanchat: failed to copy unit: %s" % e, file=sys.stderr)
         return 1
@@ -170,6 +201,15 @@ def main() -> int:
     if r.returncode != 0:
         print("lanchat: enable --now failed: %s" % r.stderr.strip(), file=sys.stderr)
         return 1
+
+    # Enable the companion path unit too, so the daemon restarts automatically
+    # when its files change. Best-effort: a path-watch failure shouldn't fail
+    # the install (the daemon itself is up).
+    if os.path.exists(PATH_SRC):
+        r = _run(["systemctl", "--user", "enable", "--now", PATH_NAME])
+        if r.returncode != 0:
+            print("lanchat: could not enable path watcher: %s"
+                  % r.stderr.strip(), file=sys.stderr)
 
     if not _is_active():
         print("lanchat: unit enabled but daemon not active", file=sys.stderr)

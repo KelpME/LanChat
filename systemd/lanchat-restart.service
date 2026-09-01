@@ -1,0 +1,10 @@
+[Unit]
+Description=Restart lanchat daemon after its files changed
+# Triggered by lanchat.path (which watches server.py + scripts/). A path unit
+# only STARTS its target — it will not restart a running service — so this
+# oneshot exists to turn the file-change trigger into a real `restart` of the
+# lanchat daemon, so it never keeps reporting a stale version after an update.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --user restart lanchat.service
