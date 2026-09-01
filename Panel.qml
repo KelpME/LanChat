@@ -866,22 +866,21 @@ Panel {
               }
 
               // ---- peers online: pinned above settings ----------------
-              Item {
+              Column {
                 id: peersOnlineBar
                 width: parent.width
-                // Extra height when a firewall warning is shown below the
-                // daemon-status line (daemon running but port blocked).
-                height: Style.space(26) + (showFwAlert ? Style.space(16) : 0)
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.topMargin: Style.spacing.xs
+                spacing: Style.space(3)
 
                 Text {
                   id: daemonStatusText
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
+                  width: parent.width
+                  leftPadding: Style.spacing.sm
+                  rightPadding: Style.spacing.sm
+                  wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                   text: Lanchat.daemonState === "running"
                     ? ((Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online")
                     : (Lanchat.daemonState === "starting"
@@ -896,14 +895,15 @@ Panel {
 
                 // Firewall warning: the daemon is up but port 4812 is
                 // blocked, so LAN peers can't reach us. Persistent (unlike
-                // the transient chat alert) so it's not missed.
+                // the transient chat alert) so it's not missed. Wraps so the
+                // text is never clipped on narrow panels.
                 Text {
                   id: firewallAlertText
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.spacing.sm
-                  anchors.top: daemonStatusText.bottom
-                  anchors.topMargin: Style.space(3)
+                  width: parent.width
+                  leftPadding: Style.spacing.sm
+                  rightPadding: Style.spacing.sm
                   visible: showFwAlert
+                  wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                   text: "⚠ Firewall blocking port 4812 — peers can't reach you"
                   color: Color.urgent
                   font.family: Style.font.family

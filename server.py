@@ -107,7 +107,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   the port when closed and closes it when open, matching the current state.
 # 1.5.5 — persistent firewall warning in the peers-online bar (daemon running
 #   but port 4812 blocked); refreshes firewall state when the panel opens.
-VERSION = "1.5.5"
+VERSION = "1.5.6"
 
 
 def _git_version() -> str:
