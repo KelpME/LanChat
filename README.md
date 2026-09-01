@@ -36,8 +36,9 @@ no IP addresses, no accounts, no cloud, no shared keys to copy.
 - **Per-machine history** — each machine keeps its own copy of its threads in
   `~/.local/state/lanchat/history.json`, so messages survive reboots.
 - **A native bar UI** — one chat icon in the bar whose color reflects your
-  status, an unread-count badge, and a click opens the chat panel (peer list +
-  thread + compose box). Right-click toggles online/offline or sets your status.
+  status, an unread-count badge (top-right), a pending-friend-request badge
+  (bottom-right), and a click opens the chat panel (peer list + thread +
+  compose box). Right-click toggles online/offline or sets your status.
 
 ## Requirements
 

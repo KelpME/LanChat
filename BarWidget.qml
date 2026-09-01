@@ -154,13 +154,41 @@ BarWidget {
     function toggle(): void { root.togglePanel() }
   }
 
-  // Unread badge, top-right corner of the widget slot.
+  // Pending-friend-request badge, lower-right corner, shifted right to clear the
+  // status icon so its color stays visible. Mirrors the unread badge (top-right).
+  Rectangle {
+    id: pendingBadge
+    visible: Lanchat.friendRequests.length > 0
+    anchors.bottom: parent.bottom
+    anchors.right: parent.right
+    anchors.bottomMargin: 1
+    anchors.rightMargin: -9
+    width: Math.max(pendingBadgeText.implicitWidth + Style.space(7), Style.space(15))
+    height: Style.space(15)
+    radius: height / 2
+    color: Color.accent
+    border.color: Color.background
+    border.width: 1
+
+    Text {
+      id: pendingBadgeText
+      anchors.centerIn: parent
+      text: Lanchat.friendRequests.length > 99 ? "99+" : Lanchat.friendRequests.length
+      color: Color.background
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.weight: Font.Bold
+    }
+  }
+
+  // Unread badge, top-right corner, shifted right to clear the icon — the
+  // pending badge (lower-right) is the vertical mirror.
   Rectangle {
     visible: Lanchat.unreadCount > 0
     anchors.top: parent.top
     anchors.right: parent.right
     anchors.topMargin: 1
-    anchors.rightMargin: 1
+    anchors.rightMargin: -9
     width: Math.max(badgeText.implicitWidth + Style.space(7), Style.space(15))
     height: Style.space(15)
     radius: height / 2
