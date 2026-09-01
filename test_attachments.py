@@ -161,6 +161,60 @@ def main():
             "unknown fileId left a .part behind"
         print("OK  socket path: untrusted requester gated; unknown fileId -> attachmentError")
 
+        # ---- 3.6) size check: incomplete transfer is rejected ---------------
+        # Even if the sha256 somehow matched, a download missing bytes (dropped
+        # trailing chunk) must be refused — written must equal the sender's
+        # reported total.
+        import server as _s
+        _s.CONFIG["token"] = TOKEN
+        _s._stdout = open(os.devnull, "w")
+        inc_dir = os.path.join(hb, "dl-inc"); os.makedirs(inc_dir, exist_ok=True)
+        inc_save = os.path.join(inc_dir, "partial.bin")
+        assert _s._dl_begin("inc1", ida, inc_save, "", "minc"), "dl_begin failed"
+        ok, total, written = _s._dl_chunk("inc1", ida,
+                                          _s.base64.b64encode(b"SHORT").decode("ascii"), 100)
+        assert ok, "chunk should be accepted"
+        # Sender claimed total=100 but only 5 bytes arrived -> incomplete.
+        status, *_ = _s._dl_finish("inc1", ida, True)
+        assert status == "incomplete", "missing bytes must be flagged incomplete, got %r" % status
+        assert not os.path.exists(inc_save), "incomplete transfer must not save a file"
+        assert not os.path.exists(inc_save + ".part"), "incomplete transfer left .part"
+        print("OK  size check: incomplete transfer (bytes missing) rejected, no file")
+
+        # ---- 3.7) offline sender fail-fast ---------------------------------
+        # If the sender's socket is down when we accept, the request can't be
+        # written -> the acceptAttachment handler must emit ok:false (not hang
+        # the Save bar on \"Saving…\") and clean up the .part. Test the branch
+        # in-process (peer record present, no active socket) so we capture the
+        # emitted event deterministically.
+        import server as _s
+        _s.CONFIG["token"] = TOKEN
+        off_dir = os.path.join(hb, "dl-off"); os.makedirs(off_dir, exist_ok=True)
+        _s.CONFIG["downloadDir"] = off_dir
+        # Register the sender as a known peer but ensure its socket is down.
+        _s._peers[ida] = {"id": ida, "name": "Alpha", "address": "127.0.0.1",
+                          "port": 4991, "httpPort": None, "status": "available",
+                          "lastSeen": int(time.time() * 1000), "version": ""}
+        # Make sure no active socket exists for it.
+        with _s._conn(ida)["lock"]:
+            _s._conn(ida)["sock"] = None
+        captured = []
+        orig_emit = _s._emit
+        _s._emit = lambda e: captured.append(e)
+        _s.handle_command({"cmd": "acceptAttachment", "from": ida, "fileId": "off1",
+                           "name": "gone.bin", "mid": "moff", "sha256": ""})
+        _s._emit = orig_emit
+        saved_ev = [e for e in captured if e.get("event") == "attachment-saved"]
+        assert saved_ev and saved_ev[0].get("ok") is False, \
+            "offline sender must fail fast: %r" % (captured,)
+        assert "offline" in (saved_ev[0].get("error") or ""), \
+            "offline error should mention offline: %r" % (saved_ev[0],)
+        assert not os.path.exists(os.path.join(off_dir, "gone.bin")), \
+            "offline sender must not save a file"
+        assert not os.path.exists(os.path.join(off_dir, "gone.bin.part")), \
+            "offline sender left .part behind"
+        print("OK  offline sender fail-fast: attachment-saved ok:false, no hang, no .part")
+
         # ---- 4) _safe_filename unit behaviour ------------------------------
         import server as _s
         cases = {

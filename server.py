@@ -2043,6 +2043,12 @@ def _dl_finish(file_id: str, peer_id: str, ok: bool):
     if not ok:
         _remove_file(tmp)
         return ("aborted", save_to, d["mid"], d["total"])
+    # Completeness: if the sender told us the total size, require every byte.
+    # A dropped trailing chunk would otherwise go unnoticed even if it hashed
+    # the same (extremely unlikely) — this is the size half of the check.
+    if d["total"] > 0 and d["written"] != d["total"]:
+        _remove_file(tmp)
+        return ("incomplete", save_to, d["mid"], d["total"])
     digest = _file_sha256(tmp)
     if d["sha256"] and digest != d["sha256"]:
         _remove_file(tmp)
@@ -2065,7 +2071,12 @@ def _finalize_download(res, mid: str, file_id: str, error: str = "") -> None:
         _emit({"event": "attachment-saved", "ok": True, "path": save_to,
                "mid": mid, "fileId": file_id})
     else:
-        msg = error or ("checksum mismatch" if status == "mismatch" else "transfer aborted")
+        if status == "mismatch":
+            msg = error or "checksum mismatch"
+        elif status == "incomplete":
+            msg = error or "incomplete transfer (bytes missing)"
+        else:
+            msg = error or "transfer aborted"
         _emit({"event": "attachment-saved", "ok": False, "path": save_to,
                "mid": mid, "fileId": file_id, "error": msg})
 
@@ -2468,8 +2479,18 @@ def handle_command(cmd: dict) -> None:
         # HTTP server, no LAN bind, no token in a URL). The sender replies with
         # attachmentChunk/attachmentEnd/attachmentError messages on the socket,
         # which _handle_incoming routes into _dl_chunk/_dl_finish.
-        _write(peer_id, {"t": "attachmentRequest", "from": host_id(), "to": peer_id,
-                         "fileId": file_id, "mid": mid})
+        sent = _write(peer_id, {"t": "attachmentRequest", "from": host_id(), "to": peer_id,
+                                "fileId": file_id, "mid": mid})
+        if not sent:
+            # Sender's socket is down (their daemon went offline before we
+            # could pull the file). The file exists only while the sender is
+            # online and still has it registered, so fail fast instead of
+            # hanging the Save bar on "Saving…". Clean up the .part and let the
+            # user retry while the sender is back.
+            _dl_finish(file_id, peer_id, False)
+            _log("attachment-sender-offline file=%s peer=%s" % (name, peer_id[:12]))
+            _emit({"event": "attachment-saved", "ok": False, "path": save_to,
+                   "mid": mid, "fileId": file_id, "error": "sender offline — file not available"})
     elif kind == "list":
         _emit({"event": "peers", "peers": peer_snapshot()})
     elif kind == "setHttp":

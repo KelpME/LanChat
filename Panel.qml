@@ -1975,7 +1975,11 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.leftMargin: parent.bubblePaddingX
                     anchors.rightMargin: parent.bubblePaddingX + Style.space(12)
-                    text: modelData.text
+                    // Show the attachment (paperclip + name) so an attachment-only
+                    // message isn't a blank bubble; text + attachment stack.
+                    text: (modelData.attachment && modelData.attachment.name)
+                      ? ((modelData.text ? modelData.text + "\n" : "") + "\uD83D\uDCCE " + modelData.attachment.name)
+                      : modelData.text
                     color: Color.popups.text
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
