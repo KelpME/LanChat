@@ -119,7 +119,9 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   muted) so the group titles are no longer dark.
 # 1.5.10 — center Settings section titles, use the accent color (same as My
 #   ID), and underline them.
-VERSION = "1.5.10"
+# 1.5.11 — right-justify the My ID fingerprint value (aligns against the copy
+#   button, matching the other right-aligned controls).
+VERSION = "1.5.11"
 
 
 def _git_version() -> str:

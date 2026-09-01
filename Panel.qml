@@ -1063,6 +1063,7 @@ Panel {
                       color: Color.accent
                       font.family: Style.font.mono || Style.font.family
                       font.pixelSize: Style.font.micro
+                      horizontalAlignment: Text.AlignRight
                       elide: Text.ElideRight
                     }
 
