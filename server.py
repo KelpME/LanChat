@@ -121,7 +121,9 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   ID), and underline them.
 # 1.5.11 — right-justify the My ID fingerprint value (aligns against the copy
 #   button, matching the other right-aligned controls).
-VERSION = "1.5.11"
+# 1.5.12 — "Save to" row now shows the full path (with parent folders, e.g.
+#   /home/tmo/Downloads) instead of only the folder name; middle-elide when long.
+VERSION = "1.5.12"
 
 
 def _git_version() -> str:
