@@ -112,7 +112,10 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   a password and creates NO permanent sudoers rule; the LAN subnet is baked
 #   into the ufw rule (never the internet). Status read is best-effort without
 #   admin (reports Unknown when it can't read rules, so it never nags).
-VERSION = "1.5.7"
+# 1.5.8 — reorganize Settings into labeled sections (Identity, Presence, Chat,
+#   Appearance, Agents, Reachability, Developer); right-justify the Status and
+#   Panel-size option buttons; improve My ID text contrast.
+VERSION = "1.5.8"
 
 
 def _git_version() -> str:

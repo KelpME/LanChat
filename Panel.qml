@@ -387,7 +387,7 @@ Panel {
 
     Row {
       id: clipRow
-      anchors.left: parent.left
+      anchors.right: parent.right
       spacing: Style.spacing.xs
     }
 
@@ -977,7 +977,22 @@ Panel {
                     spacing: Style.spacing.xs
                     anchors.top: parent.top
 
-                    // Name row (top)
+                  // ---- Identity ----
+                  Item {
+                    width: parent.width
+                    height: Style.space(18)
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "IDENTITY"
+                      color: Color.popups.mutedText
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                  }
+
                     Item {
                       width: parent.width
                     height: Style.space(30)
@@ -1021,7 +1036,45 @@ Panel {
                     }
                   }
 
-                  // (1.3) Add a friend by fingerprint (private mode).
+                  Item {
+                    width: parent.width
+                    height: Style.space(30)
+
+                    Text {
+                      id: myIdLabel
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "My ID"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Text {
+                      anchors.left: myIdLabel.right
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.right: myIdCopy.left
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: (Lanchat.myId || "…").slice(0, 20) + "…"
+                      color: Color.accent
+                      font.family: Style.font.mono || Style.font.family
+                      font.pixelSize: Style.font.micro
+                      elide: Text.ElideRight
+                    }
+
+                    Button {
+                      id: myIdCopy
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "\uF0C5"  // copy icon
+                      onClicked: root.copyToClipboard(Lanchat.myId)
+                    }
+                  }
+
                   Item {
                     width: parent.width
                     height: Style.space(30)
@@ -1062,50 +1115,707 @@ Panel {
                     }
                   }
 
-                  // (1.3) My ID row: this device's cert fingerprint — share it
-                  // with a friend so they can add you by fingerprint.
+                  // ---- Presence ----
                   Item {
                     width: parent.width
-                    height: Style.space(30)
-
+                    height: Style.space(18)
                     Text {
-                      id: myIdLabel
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "My ID"
+                      text: "PRESENCE"
+                      color: Color.popups.mutedText
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: tooltipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Online"
                       color: Color.popups.text
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
                     }
 
-                    Text {
-                      anchors.left: myIdLabel.right
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.right: myIdCopy.left
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: (Lanchat.myId || "…").slice(0, 20) + "…"
-                      color: Color.popups.mutedText
-                      font.family: Style.font.mono || Style.font.family
-                      font.pixelSize: Style.font.micro
-                      elide: Text.ElideRight
+                    PanelToolTip {
+                      visible: tooltipHover.containsMouse
+                      text: "Go offline to stop broadcasting and drop inbound messages."
                     }
 
-                    Button {
-                      id: myIdCopy
+                    ToggleSwitch {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "\uF0C5"  // copy icon
-                      onClicked: root.copyToClipboard(Lanchat.myId)
+                      checked: Lanchat.online
+                      onToggled: Lanchat.setOnline(!Lanchat.online)
                     }
                   }
 
-                  // Firewall row — shows whether lanchat's port (4812) is
-                  // reachable inbound, with a single toggle button that opens
-                  // or closes it (prompting for a password via polkit).
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: statusTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Status"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: statusTipHover.containsMouse
+                      text: "Your status is shown to friends."
+                    }
+
+                    ClippedOptions {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+
+                      Button { text: "\uF2BD"; tooltipText: "Available"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("available") }
+                      Button { text: "\uF1F6"; tooltipText: "Do Not Disturb"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("dnd") }
+                      Button { text: "\uF017"; tooltipText: "Away"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("away") }
+                      Button { text: "\uF0F4"; tooltipText: "Be Right Back"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("brb") }
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: visTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Discoverable (open mode)"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.visibility === "open"
+                      onToggled: Lanchat.setVisibility(Lanchat.visibility === "open" ? "private" : "open")
+                    }
+
+                    PanelToolTip {
+                      visible: visTipHover.containsMouse
+                      text: "On = broadcast your presence on the LAN (trusted networks). Off = invisible; connect by adding a fingerprint."
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: reqTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Receive friend requests"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.acceptRequests
+                      onToggled: Lanchat.setAcceptRequests(!Lanchat.acceptRequests)
+                    }
+
+                    PanelToolTip {
+                      visible: reqTipHover.containsMouse
+                      text: "On = receive friend requests (shown with the requester's verified fingerprint). Off = reject all incoming requests."
+                    }
+                  }
+
+                  // ---- Chat ----
+                  Item {
+                    width: parent.width
+                    height: Style.space(18)
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "CHAT"
+                      color: Color.popups.mutedText
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: soundTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Message sound"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: soundTipHover.containsMouse
+                      text: "Play a chime when a new message arrives."
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.soundEnabled
+                      onToggled: Lanchat.setSoundEnabled(!Lanchat.soundEnabled)
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+                    MouseArea { id: sendTypingTip; anchors.fill: parent; hoverEnabled: true }
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Let friends see me typing"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                    PanelToolTip {
+                      visible: sendTypingTip.containsMouse
+                      text: "When on, your friends see \u201Ctyping\u2026\u201D while you type."
+                    }
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.typingEnabled
+                      onToggled: Lanchat.setTypingEnabled(!Lanchat.typingEnabled)
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+                    MouseArea { id: showTypingTip; anchors.fill: parent; hoverEnabled: true }
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Show when friends are typing"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                    PanelToolTip {
+                      visible: showTypingTip.containsMouse
+                      text: "When on, you see \u201C[friend] is typing\u2026\u201D in the chat."
+                    }
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.showTyping
+                      onToggled: Lanchat.setShowTyping(!Lanchat.showTyping)
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+                    MouseArea { id: sendReadTip; anchors.fill: parent; hoverEnabled: true }
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Let friends see when I've read"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                    PanelToolTip {
+                      visible: sendReadTip.containsMouse
+                      text: "When on, your friends see a \u2713 on messages you've read."
+                    }
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.readReceiptsEnabled
+                      onToggled: Lanchat.setReadReceiptsEnabled(!Lanchat.readReceiptsEnabled)
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+                    MouseArea { id: showReadTip; anchors.fill: parent; hoverEnabled: true }
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Show when friends have read"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                    PanelToolTip {
+                      visible: showReadTip.containsMouse
+                      text: "When on, you see a \u2713 on messages your friends have read."
+                    }
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.showReadReceipts
+                      onToggled: Lanchat.setShowReadReceipts(!Lanchat.showReadReceipts)
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: undoTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Undo delay"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: undoTipHover.containsMouse
+                      text: "Hold messages for N seconds so you can undo them before they send."
+                    }
+
+                    TextField {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Style.space(48)
+                      text: Lanchat.sendDelay
+                      maximumLength: 3
+                      horizontalPadding: Style.space(6)
+                      verticalPadding: Style.space(4)
+                      onEditingFinished: {
+                        var v = parseInt(text, 10)
+                        if (!isNaN(v)) Lanchat.setSendDelay(v)
+                      }
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: saveTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Save to"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: saveTipHover.containsMouse
+                      text: "Folder where accepted files are saved (default ~/Downloads)."
+                    }
+
+                    Row {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.spacing.xs
+
+                      Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Style.space(110)
+                        text: root.pathBasename(Lanchat.downloadDir)
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                        horizontalAlignment: Text.AlignRight
+                      }
+
+                      Button {
+                        width: Style.space(22)
+                        height: Style.space(18)
+                        text: "\u2026"
+                        fontSize: Style.font.caption
+                        onClicked: root.pickDownloadDir()
+                      }
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(30)
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Clear all chats"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: clearAllHover.containsMouse
+                      text: "Deletes every conversation on this machine."
+                    }
+                    MouseArea {
+                      id: clearAllHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Button {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: root.confirmClearAll ? "Confirm?" : "Clear"
+                      fontSize: Style.font.caption
+                      onClicked: {
+                        if (!root.confirmClearAll) { root.confirmClearAll = true; root.clearConfirmTimer.restart() }
+                        else {
+                          root.confirmClearAll = false
+                          Lanchat.clearAllChats()
+                          root.showClearAllCheck = true
+                          root.clearAllCheckTimer.restart()
+                        }
+                      }
+                    }
+
+                    // Brief checkmark feedback after a successful clear-all.
+                    Text {
+                      visible: root.showClearAllCheck
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(64)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "\u2713"
+                      color: Color.accent
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                    }
+                  }
+
+                  // ---- Appearance ----
+                  Item {
+                    width: parent.width
+                    height: Style.space(18)
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "APPEARANCE"
+                      color: Color.popups.mutedText
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: sizeTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Panel size"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: sizeTipHover.containsMouse
+                      text: "S/M/L/XL/F — panel window size. F fills the screen."
+                    }
+
+                    ClippedOptions {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+
+                      Button { width: Style.space(24); height: Style.space(18); text: "S"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("small") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "M"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("medium") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "L"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("large") }
+                      Button { width: Style.space(28); height: Style.space(18); text: "XL"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("xl") }
+                      Button { width: Style.space(24); height: Style.space(18); text: "F"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("full") }
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: sizeWHHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Size (W × H)"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    PanelToolTip {
+                      visible: sizeWHHover.containsMouse
+                      text: "Panel width × height in pixels. Pick a preset above, or type your own and press Enter / Apply."
+                    }
+
+                    Row {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.space(4)
+
+                      TextField {
+                        id: sizeWField
+                        width: Style.space(40)
+                        text: Lanchat.customW > 0 ? String(Lanchat.customW) : String(root.panelW)
+                        maximumLength: 5
+                        horizontalPadding: Style.space(4)
+                        verticalPadding: Style.space(3)
+                        inputMethodHints: Qt.ImhDigitsOnly
+                        onEditingFinished: root.applyManualSize(sizeWField.text, sizeHField.text)
+                      }
+                      Text {
+                        text: "×"
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        anchors.verticalCenter: parent.verticalCenter
+                      }
+                      TextField {
+                        id: sizeHField
+                        width: Style.space(40)
+                        text: Lanchat.customH > 0 ? String(Lanchat.customH) : String(root.panelH)
+                        maximumLength: 5
+                        horizontalPadding: Style.space(4)
+                        verticalPadding: Style.space(3)
+                        inputMethodHints: Qt.ImhDigitsOnly
+                        onEditingFinished: root.applyManualSize(sizeWField.text, sizeHField.text)
+                      }
+                      Button {
+                        text: "Apply"
+                        fontSize: Style.font.caption
+                        onClicked: root.applyManualSize(sizeWField.text, sizeHField.text)
+                      }
+                    }
+                  }
+
+                  // ---- Agents ----
+                  Item {
+                    width: parent.width
+                    height: Style.space(18)
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "AGENTS"
+                      color: Color.popups.mutedText
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+
+                    MouseArea {
+                      id: apiTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Row {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.spacing.xs
+
+                      Text {
+                        text: "API"
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        font.weight: Font.Bold
+                      }
+
+                      Text {
+                        text: Lanchat.httpEnabled ? ":" + Lanchat.httpPort : "off"
+                        color: Lanchat.httpEnabled ? Color.accent : Color.muted
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+
+                    PanelToolTip {
+                      visible: apiTipHover.containsMouse
+                      text: "HTTP API for scripts/agents. On = agents can send messages."
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.httpEnabled
+                      onToggled: Lanchat.setHttpEnabled(!Lanchat.httpEnabled)
+                    }
+                  }
+
+                  Item {
+                    width: parent.width
+                    height: Style.space(28)
+                    visible: Lanchat.httpEnabled
+
+                    MouseArea {
+                      id: fullTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Agent full access"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      checked: Lanchat.apiFullAccess
+                      onToggled: Lanchat.setApiFullAccess(!Lanchat.apiFullAccess)
+                    }
+
+                    PanelToolTip {
+                      visible: fullTipHover.containsMouse
+                      text: "On = agent can read your chats, peers, and files. Off = send-only."
+                    }
+                  }
+
+                  // ---- Reachability ----
+                  Item {
+                    width: parent.width
+                    height: Style.space(18)
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "REACHABILITY"
+                      color: Color.popups.mutedText
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+                  }
+
                   Item {
                     width: parent.width
                     height: Style.space(30)
@@ -1184,649 +1894,22 @@ Panel {
                     }
                   }
 
-                  // Online row
+                  // ---- Developer ----
                   Item {
                     width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: tooltipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
+                    height: Style.space(18)
                     Text {
                       anchors.left: parent.left
                       anchors.leftMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "Online"
-                      color: Color.popups.text
+                      text: "DEVELOPER"
+                      color: Color.popups.mutedText
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
                     }
-
-                    PanelToolTip {
-                      visible: tooltipHover.containsMouse
-                      text: "Go offline to stop broadcasting and drop inbound messages."
-                    }
-
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.online
-                      onToggled: Lanchat.setOnline(!Lanchat.online)
-                    }
                   }
 
-                  // Status row.
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: statusTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Status"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    PanelToolTip {
-                      visible: statusTipHover.containsMouse
-                      text: "Your status is shown to friends."
-                    }
-
-                    ClippedOptions {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-
-                      Button { text: "\uF2BD"; tooltipText: "Available"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("available") }
-                      Button { text: "\uF1F6"; tooltipText: "Do Not Disturb"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("dnd") }
-                      Button { text: "\uF017"; tooltipText: "Away"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("away") }
-                      Button { text: "\uF0F4"; tooltipText: "Be Right Back"; fontSize: Style.font.body; onClicked: Lanchat.setStatus("brb") }
-                    }
-                  }
-
-                  // Message sound row.
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: soundTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Message sound"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    PanelToolTip {
-                      visible: soundTipHover.containsMouse
-                      text: "Play a chime when a new message arrives."
-                    }
-
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.soundEnabled
-                      onToggled: Lanchat.setSoundEnabled(!Lanchat.soundEnabled)
-                    }
-                  }
-
-                  // Send typing indicator.
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-                    MouseArea { id: sendTypingTip; anchors.fill: parent; hoverEnabled: true }
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Let friends see me typing"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-                    PanelToolTip {
-                      visible: sendTypingTip.containsMouse
-                      text: "When on, your friends see \u201Ctyping\u2026\u201D while you type."
-                    }
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.typingEnabled
-                      onToggled: Lanchat.setTypingEnabled(!Lanchat.typingEnabled)
-                    }
-                  }
-
-                  // Show typing indicator.
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-                    MouseArea { id: showTypingTip; anchors.fill: parent; hoverEnabled: true }
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Show when friends are typing"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-                    PanelToolTip {
-                      visible: showTypingTip.containsMouse
-                      text: "When on, you see \u201C[friend] is typing\u2026\u201D in the chat."
-                    }
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.showTyping
-                      onToggled: Lanchat.setShowTyping(!Lanchat.showTyping)
-                    }
-                  }
-
-                  // Send read receipts.
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-                    MouseArea { id: sendReadTip; anchors.fill: parent; hoverEnabled: true }
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Let friends see when I've read"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-                    PanelToolTip {
-                      visible: sendReadTip.containsMouse
-                      text: "When on, your friends see a \u2713 on messages you've read."
-                    }
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.readReceiptsEnabled
-                      onToggled: Lanchat.setReadReceiptsEnabled(!Lanchat.readReceiptsEnabled)
-                    }
-                  }
-
-                  // Show read receipts.
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-                    MouseArea { id: showReadTip; anchors.fill: parent; hoverEnabled: true }
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Show when friends have read"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-                    PanelToolTip {
-                      visible: showReadTip.containsMouse
-                      text: "When on, you see a \u2713 on messages your friends have read."
-                    }
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.showReadReceipts
-                      onToggled: Lanchat.setShowReadReceipts(!Lanchat.showReadReceipts)
-                    }
-                  }
-
-                  // API row
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: apiTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Row {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      spacing: Style.spacing.xs
-
-                      Text {
-                        text: "API"
-                        color: Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        font.weight: Font.Bold
-                      }
-
-                      Text {
-                        text: Lanchat.httpEnabled ? ":" + Lanchat.httpPort : "off"
-                        color: Lanchat.httpEnabled ? Color.accent : Color.muted
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                      }
-                    }
-
-                    PanelToolTip {
-                      visible: apiTipHover.containsMouse
-                      text: "HTTP API for scripts/agents. On = agents can send messages."
-                    }
-
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.httpEnabled
-                      onToggled: Lanchat.setHttpEnabled(!Lanchat.httpEnabled)
-                    }
-                  }
-
-                  // API full-access row (agent can read chat data).
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-                    visible: Lanchat.httpEnabled
-
-                    MouseArea {
-                      id: fullTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Agent full access"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.apiFullAccess
-                      onToggled: Lanchat.setApiFullAccess(!Lanchat.apiFullAccess)
-                    }
-
-                    PanelToolTip {
-                      visible: fullTipHover.containsMouse
-                      text: "On = agent can read your chats, peers, and files. Off = send-only."
-                    }
-                  }
-
-                  // (1.3) Visibility row: "open" (discoverable) / "private"
-                  // (invisible on discovery).
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: visTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Discoverable (open mode)"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.visibility === "open"
-                      onToggled: Lanchat.setVisibility(Lanchat.visibility === "open" ? "private" : "open")
-                    }
-
-                    PanelToolTip {
-                      visible: visTipHover.containsMouse
-                      text: "On = broadcast your presence on the LAN (trusted networks). Off = invisible; connect by adding a fingerprint."
-                    }
-                  }
-
-                  // (1.3) Accept-friend-requests toggle.
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: reqTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Receive friend requests"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    ToggleSwitch {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      checked: Lanchat.acceptRequests
-                      onToggled: Lanchat.setAcceptRequests(!Lanchat.acceptRequests)
-                    }
-
-                    PanelToolTip {
-                      visible: reqTipHover.containsMouse
-                      text: "On = receive friend requests (shown with the requester's verified fingerprint). Off = reject all incoming requests."
-                    }
-                  }
-
-                  // Send-delay row (undo window).
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: undoTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Undo delay"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    PanelToolTip {
-                      visible: undoTipHover.containsMouse
-                      text: "Hold messages for N seconds so you can undo them before they send."
-                    }
-
-                    TextField {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      width: Style.space(48)
-                      text: Lanchat.sendDelay
-                      maximumLength: 3
-                      horizontalPadding: Style.space(6)
-                      verticalPadding: Style.space(4)
-                      onEditingFinished: {
-                        var v = parseInt(text, 10)
-                        if (!isNaN(v)) Lanchat.setSendDelay(v)
-                      }
-                    }
-                  }
-
-                  // Download folder row.
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: saveTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Save to"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    PanelToolTip {
-                      visible: saveTipHover.containsMouse
-                      text: "Folder where accepted files are saved (default ~/Downloads)."
-                    }
-
-                    Row {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      spacing: Style.spacing.xs
-
-                      Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: Style.space(110)
-                        text: root.pathBasename(Lanchat.downloadDir)
-                        color: Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        elide: Text.ElideRight
-                        maximumLineCount: 1
-                        horizontalAlignment: Text.AlignRight
-                      }
-
-                      Button {
-                        width: Style.space(22)
-                        height: Style.space(18)
-                        text: "\u2026"
-                        fontSize: Style.font.caption
-                        onClicked: root.pickDownloadDir()
-                      }
-                    }
-                  }
-
-                  // Size row (small/medium/large panel).
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: sizeTipHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Panel size"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    PanelToolTip {
-                      visible: sizeTipHover.containsMouse
-                      text: "S/M/L/XL/F — panel window size. F fills the screen."
-                    }
-
-                    ClippedOptions {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-
-                      Button { width: Style.space(24); height: Style.space(18); text: "S"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("small") }
-                      Button { width: Style.space(24); height: Style.space(18); text: "M"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("medium") }
-                      Button { width: Style.space(24); height: Style.space(18); text: "L"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("large") }
-                      Button { width: Style.space(28); height: Style.space(18); text: "XL"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("xl") }
-                      Button { width: Style.space(24); height: Style.space(18); text: "F"; fontSize: Style.font.caption; onClicked: root.applyPanelSize("full") }
-                    }
-                  }
-
-                  // Manual size row (W × H in pixels). Picking a preset above
-                  // fills these boxes with that preset's computed size; typing
-                  // here overrides the size directly.
-                  Item {
-                    width: parent.width
-                    height: Style.space(28)
-
-                    MouseArea {
-                      id: sizeWHHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Size (W × H)"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    PanelToolTip {
-                      visible: sizeWHHover.containsMouse
-                      text: "Panel width × height in pixels. Pick a preset above, or type your own and press Enter / Apply."
-                    }
-
-                    Row {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      spacing: Style.space(4)
-
-                      TextField {
-                        id: sizeWField
-                        width: Style.space(40)
-                        text: Lanchat.customW > 0 ? String(Lanchat.customW) : String(root.panelW)
-                        maximumLength: 5
-                        horizontalPadding: Style.space(4)
-                        verticalPadding: Style.space(3)
-                        inputMethodHints: Qt.ImhDigitsOnly
-                        onEditingFinished: root.applyManualSize(sizeWField.text, sizeHField.text)
-                      }
-                      Text {
-                        text: "×"
-                        color: Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        anchors.verticalCenter: parent.verticalCenter
-                      }
-                      TextField {
-                        id: sizeHField
-                        width: Style.space(40)
-                        text: Lanchat.customH > 0 ? String(Lanchat.customH) : String(root.panelH)
-                        maximumLength: 5
-                        horizontalPadding: Style.space(4)
-                        verticalPadding: Style.space(3)
-                        inputMethodHints: Qt.ImhDigitsOnly
-                        onEditingFinished: root.applyManualSize(sizeWField.text, sizeHField.text)
-                      }
-                      Button {
-                        text: "Apply"
-                        fontSize: Style.font.caption
-                        onClicked: root.applyManualSize(sizeWField.text, sizeHField.text)
-                      }
-                    }
-                  }
-
-                  // Clear all conversations. Two-step confirm so an accidental
-                  // click can't wipe the whole history.
-                  Item {
-                    width: parent.width
-                    height: Style.space(30)
-
-                    Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "Clear all chats"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    PanelToolTip {
-                      visible: clearAllHover.containsMouse
-                      text: "Deletes every conversation on this machine."
-                    }
-                    MouseArea {
-                      id: clearAllHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                    }
-
-                    Button {
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.spacing.sm
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: root.confirmClearAll ? "Confirm?" : "Clear"
-                      fontSize: Style.font.caption
-                      onClicked: {
-                        if (!root.confirmClearAll) { root.confirmClearAll = true; root.clearConfirmTimer.restart() }
-                        else {
-                          root.confirmClearAll = false
-                          Lanchat.clearAllChats()
-                          root.showClearAllCheck = true
-                          root.clearAllCheckTimer.restart()
-                        }
-                      }
-                    }
-
-                    // Brief checkmark feedback after a successful clear-all.
-                    Text {
-                      visible: root.showClearAllCheck
-                      anchors.right: parent.right
-                      anchors.rightMargin: Style.space(64)
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "\u2713"
-                      color: Color.accent
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.bold: true
-                    }
-                  }
-
-                  // Diagnostics section — shows the daemon's diagnostic log
-                  // lines inline (peer expiry, dropped messages, send failures).
                   Item {
                     width: parent.width
                     height: Style.space(30)
@@ -1864,7 +1947,6 @@ Panel {
                     }
                   }
 
-                  // The diagnostic lines, scrollable, newest last.
                   Item {
                     visible: diagExpanded
                     width: parent.width
@@ -1896,7 +1978,6 @@ Panel {
                     }
                   }
 
-                  // Version row.
                   Item {
                     width: parent.width
                     height: Style.space(26)
@@ -1922,6 +2003,7 @@ Panel {
                       font.pixelSize: Style.font.caption
                     }
                   }
+
                   }
                 }
               }
