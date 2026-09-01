@@ -967,6 +967,11 @@ def _udp_listener(sock: socket.socket) -> None:
                 # unauthenticated, the request MUST be signed: we verify the sender
                 # owns the private key for its claimed cert id before registering it.
                 _handle_udp_friend_request(sock, pkt, addr[0])
+            elif t == "friend-accept":
+                # The accepter's reply to a friend request also rides UDP (a TCP
+                # reply is held forever when no connection exists — the one-way
+                # handshake bug). Verify the signed accept and confirm the friend.
+                _handle_udp_friend_accept(sock, pkt, addr[0])
         except Exception:
             # Never let one packet kill the discovery listener. Log (rate-safely
             # is hard here; just one line per bad packet is acceptable and rare).
@@ -1082,6 +1087,78 @@ def _handle_udp_friend_request(sock: socket.socket, pkt: dict, addr: str) -> Non
     _emit({"event": "friend-request", "from": claimed, "name": name,
            "fingerprint": claimed, "text": "wants to add you as a friend", "udp": True})
     _diag("udp-friend-request", from_id=claimed[:12], name=name, addr=addr)
+
+
+def _send_udp_friend_accept(sock: socket.socket, pid: str) -> bool:
+    """Send a SIGNED friend-accept back to a peer over UDP (no TCP needed).
+
+    The friend handshake is bidirectional bootstrap: the requester sends a
+    signed UDP request, and the accepter must reply over the SAME channel —
+    a TCP reply is held forever when no connection exists yet (the one-way
+    bug). Like the request, the accept is signed so the recipient can verify
+    it's genuinely from the peer they friended.
+    """
+    peer = find_peer(pid)
+    target = (peer or {}).get("address", "")
+    tport = int((peer or {}).get("port") or DEFAULT_PORT)
+    if not target:
+        for f in CONFIG.get("friends", []):
+            if f.get("id") == pid and f.get("address"):
+                target = f.get("address")
+                tport = int(f.get("port") or DEFAULT_PORT)
+                break
+    if not target:
+        _diag("udp-friend-accept-failed", to=pid[:12], reason="no-address")
+        return False
+    nonce = secrets.token_hex(16)
+    payload = {"t": "friend-accept",
+               "id": host_id(),
+               "name": display_name(),
+               "cert": _our_cert_pem(),
+               "nonce": nonce,
+               "sig": _sign((host_id() + nonce).encode("utf-8")),
+               "port": port(),
+               "to": pid}
+    try:
+        sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
+        _diag("udp-friend-accept-sent", to=target, port=tport, nonce=nonce[:8])
+        return True
+    except OSError as e:
+        _diag("udp-friend-accept-failed", to=target, errno=getattr(e, "errno", None))
+        return False
+
+
+def _handle_udp_friend_accept(sock: socket.socket, pkt: dict, addr: str) -> None:
+    """Verify + process an inbound UDP friend-accept.
+
+    The accepter proves ownership of its claimed cert id (same signature
+    scheme as the request). On success we mark the peer as a CONFIRMED friend
+    and reveal any held messages — completing the handshake on our side
+    without needing a TCP connection.
+    """
+    claimed = str(pkt.get("id") or "")
+    cert_pem = str(pkt.get("cert") or "")
+    nonce = str(pkt.get("nonce") or "")
+    sig = str(pkt.get("sig") or "")
+    name = str(pkt.get("name") or friendly_name(claimed))
+    # We only accept a friend-accept for someone we actually requested.
+    if not claimed or claimed == host_id():
+        return
+    if _cert_fingerprint_of_pem(cert_pem) != claimed:
+        _diag("udp-friend-accept-rejected", from_id=claimed[:12], reason="bad-identity")
+        return
+    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
+        _diag("udp-friend-accept-rejected", from_id=claimed[:12], reason="bad-signature")
+        return
+    # Confirm the friendship locally and reveal any held messages.
+    peer = find_peer(claimed)
+    pname = (peer or {}).get("name") or name
+    add_friend(claimed, addr, pname, confirmed=True)
+    _emit({"event": "friend-accepted", "id": claimed, "name": pname})
+    with _pending_lock:
+        held = _pending_sent.pop(claimed, [])
+    _diag("udp-friend-accepted", peer=claimed[:12], name=pname, revealed=len(held))
+    _reveal(held)
 
 
 def _local_subnet_hosts(max_hosts: int = 512) -> list:
@@ -2070,9 +2147,17 @@ def send_control(peer_id: str, ctype: str, mid: str = "") -> bool:
 
 
 def _notify_accept(peer_id: str) -> bool:
-    """Send the friendAccept notification over the peer's persistent socket.
-    If no socket is up yet, the message is held and flushed on reconnect — no
-    reverse dial, no polling."""
+    """Send the friendAccept notification to a peer.
+
+    This is the RETURN half of the friend handshake. Like the request, the
+    accept must ride UDP (signed) — a TCP delivery is held forever when no
+    connection exists yet (the one-way handshake bug: requester sees the
+    request "sent", accepter accepts locally, but the accept never reaches the
+    requester). Falls back to the TCP socket if UDP is unavailable.
+    """
+    if _udp_sock is not None:
+        if _send_udp_friend_accept(_udp_sock, peer_id):
+            return True
     return send_control(peer_id, "friendAccept")
 
 

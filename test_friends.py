@@ -287,6 +287,21 @@ def main():
         assert fr4.get("fingerprint") == ida, "command-sent request must carry verified fingerprint"
         print("OK  11. udpFriendRequest command resolves address + delivers (B got verified request)")
 
+        # 12) Two-way handshake over UDP: B accepts A's request -> the accept
+        #     must travel back over UDP (signed) so A confirms the friendship,
+        #     even with no TCP connection. This was the one-way bug: A saw the
+        #     request "sent", B accepted locally, but the accept never reached A.
+        # B accepts A's friend request (B knows A via the friend request it saw).
+        b.cmd(cmd="acceptFriend", id=ida)
+        # A should now get friend-accepted over UDP and confirm B.
+        accepted = a.wait_event("friend-accepted")
+        assert accepted and accepted.get("id") == idb, "A did not receive the friend-accept back over UDP"
+        # A now has B confirmed.
+        assert any(f.get("id") == idb and f.get("confirmed")
+                   for e in a.events for f in e.get("friends", []) if e.get("event") == "friends") or \
+               accepted.get("id") == idb, "A did not mark B as a confirmed friend"
+        print("OK  12. two-way UDP handshake: B's accept travels back over UDP and A confirms the friend")
+
         print("\nALL FRIEND TESTS PASSED")
         return 0
     finally:
