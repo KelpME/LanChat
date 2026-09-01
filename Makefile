@@ -11,7 +11,7 @@
 
 PY      ?= python3
 RUFF    ?= ruff
-TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py test_systemd_control.py test_cert_reload.py
+TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py test_systemd_control.py test_cert_reload.py test_udp_resilience.py
 PYFILES := server.py naming.py $(TESTS) test_peer.py
 
 # Bare `make` (no target) shows the help listing.
@@ -25,7 +25,7 @@ help: ## (default) show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 ## test: run the full offline test suite (all test_*.py)
-test: ## run every test_*.py suite (server, friends, persistent, attachments, features, discovery-visibility, systemd-control, cert-reload)
+test: ## run every test_*.py suite (server, friends, persistent, attachments, features, discovery-visibility, systemd-control, cert-reload, udp-resilience)
 	@for t in $(TESTS); do \
 		printf "=== %s ===\n" "$$t"; \
 		$(PY) "$$t" || exit 1; \

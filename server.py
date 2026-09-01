@@ -460,9 +460,9 @@ def _verify(cert_pem: str, data: bytes, sig_hex: str) -> bool:
 
 def _cert_fingerprint_of_pem(cert_pem: str) -> str:
     """SHA-256 fingerprint of the cert in `cert_pem` (empty on parse failure)."""
-    from cryptography import x509
-    from cryptography.hazmat.primitives import serialization
     try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
         cert = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
         return hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
     except Exception:
@@ -921,45 +921,59 @@ def _udp_listener(sock: socket.socket) -> None:
             pkt = json.loads(data.decode("utf-8"))
         except ValueError:
             continue
-        # No token on discovery — any machine on the LAN can be seen, and the
-        # friend handshake is the gate that decides who can actually message us.
-        t = pkt.get("t")
-        if t == "hello":
-            pid = str(pkt.get("id", addr[0]))
-            # Skip ourselves — our own broadcast/scan echoes back on loopback.
-            if pid == host_id():
-                continue
-            # (1.3) Visibility controls whether WE broadcast (are discoverable),
-            # NOT whether we can see others. A private device still listens and
-            # records devices that broadcast, so it can see open peers on the
-            # network — it just doesn't announce itself or reply, so those peers
-            # don't see it back. Confirmed friends are always accepted too.
-            hidden = visibility() != "open"
-            # Prefer the peer's broadcast display name; fall back to a
-            # deterministic friendly name derived from its id.
-            name = str(pkt.get("name") or friendly_name(pid))
-            upsert_peer(
-                pid,
-                name,
-                addr[0],
-                int(pkt.get("port", DEFAULT_PORT)),
-                int(pkt.get("httpPort", 0)) or None,
-                str(pkt.get("status") or "available"),
-                str(pkt.get("version") or ""),
-            )
-            # Reply so the caller learns about us immediately. Send a UNICAST
-            # pong back to the sender's address — broadcast replies get lost
-            # on networks where broadcasts are filtered, leaving discovery
-            # one-way (they see us, we don't see them). In private mode we do
-            # NOT pong, so we stay invisible to the devices we discover.
-            if not hidden:
-                _udp_send(sock, {"t": "pong"}, target=addr[0])
-        elif t == "friend-request":
-            # A stranger bootstraps friendship over UDP (no TCP connection yet —
-            # the TCP path is chicken-and-egg for first contact). Because UDP is
-            # unauthenticated, the request MUST be signed: we verify the sender
-            # owns the private key for its claimed cert id before registering it.
-            _handle_udp_friend_request(sock, pkt, addr[0])
+        # Process this packet inside a broad exception guard: a malformed packet
+        # or a missing-dependency error in a handler (e.g. a cryptography import)
+        # must NEVER kill the UDP listener thread — that silently stops all
+        # discovery/friend traffic (the .51 bug: peers visible but friend
+        # requests never surface, no error shown). One bad packet is skipped,
+        # not fatal to the whole listener.
+        try:
+            # No token on discovery — any machine on the LAN can be seen, and the
+            # friend handshake is the gate that decides who can actually message us.
+            t = pkt.get("t")
+            if t == "hello":
+                pid = str(pkt.get("id", addr[0]))
+                # Skip ourselves — our own broadcast/scan echoes back on loopback.
+                if pid == host_id():
+                    continue
+                # (1.3) Visibility controls whether WE broadcast (are discoverable),
+                # NOT whether we can see others. A private device still listens and
+                # records devices that broadcast, so it can see open peers on the
+                # network — it just doesn't announce itself or reply, so those peers
+                # don't see it back. Confirmed friends are always accepted too.
+                hidden = visibility() != "open"
+                # Prefer the peer's broadcast display name; fall back to a
+                # deterministic friendly name derived from its id.
+                name = str(pkt.get("name") or friendly_name(pid))
+                upsert_peer(
+                    pid,
+                    name,
+                    addr[0],
+                    int(pkt.get("port", DEFAULT_PORT)),
+                    int(pkt.get("httpPort", 0)) or None,
+                    str(pkt.get("status") or "available"),
+                    str(pkt.get("version") or ""),
+                )
+                # Reply so the caller learns about us immediately. Send a UNICAST
+                # pong back to the sender's address — broadcast replies get lost
+                # on networks where broadcasts are filtered, leaving discovery
+                # one-way (they see us, we don't see them). In private mode we do
+                # NOT pong, so we stay invisible to the devices we discover.
+                if not hidden:
+                    _udp_send(sock, {"t": "pong"}, target=addr[0])
+            elif t == "friend-request":
+                # A stranger bootstraps friendship over UDP (no TCP connection yet —
+                # the TCP path is chicken-and-egg for first contact). Because UDP is
+                # unauthenticated, the request MUST be signed: we verify the sender
+                # owns the private key for its claimed cert id before registering it.
+                _handle_udp_friend_request(sock, pkt, addr[0])
+        except Exception:
+            # Never let one packet kill the discovery listener. Log (rate-safely
+            # is hard here; just one line per bad packet is acceptable and rare).
+            try:
+                _diag("udp-listener-skipped-bad-packet", addr=addr[0])
+            except Exception:
+                pass
 
 
 def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
@@ -2623,6 +2637,29 @@ def main() -> None:
                     help="run under systemd: serve the unix-socket control channel "
                          "instead of reading commands from stdin")
     args = ap.parse_args()
+
+    # Hard dependency check: server.py requires the `cryptography` library
+    # (cert fingerprinting, TLS identity proof, storage encryption). If it's
+    # missing from the Python running the daemon, importing it deep inside a
+    # background thread (e.g. _udp_listener) raises ModuleNotFoundError and
+    # silently kills that thread — the classic symptom: peers are visible
+    # (UDP hello works) but friend requests/identity never surface, with no
+    # visible error. Fail fast here with an actionable message instead.
+    try:
+        import cryptography  # noqa: F401
+    except Exception as _dep_err:
+        _msg = (
+            "Lanchat requires the 'cryptography' Python library, but it is not "
+            "installed for the interpreter running this daemon (%s). "
+            "Install it (e.g. 'pacman -S python-cryptography' or "
+            "'pip install cryptography') and restart lanchat.service."
+            % sys.executable)
+        print(_msg, file=sys.stderr)
+        try:
+            _emit({"event": "error", "message": _msg})
+        except Exception:
+            pass
+        return 1
 
     # Diagnose identity consistency at startup: the daemon's announced id
     # (host_id = cert_fingerprint of CERT_PEM) must match the cert it will

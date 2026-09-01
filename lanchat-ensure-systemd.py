@@ -52,6 +52,23 @@ def main() -> int:
         print("lanchat: systemctl not found (no systemd user session?)", file=sys.stderr)
         return 1
 
+    # Verify the daemon's Python dependency is present BEFORE starting it.
+    # `cryptography` is NOT guaranteed by Omarchy (it was a manual install on
+    # some machines) — if it's missing, every UDP friend request crashes the
+    # listener thread silently (the .51 bug). Fail here with a clear message
+    # instead of letting the daemon start into a half-broken state.
+    try:
+        import cryptography  # noqa: F401
+    except Exception as _dep_err:
+        print(
+            "lanchat: the 'cryptography' Python library is not installed for "
+            "%s, which the lanchat daemon requires. Install it, e.g.:\n"
+            "  sudo pacman -S python-cryptography\n"
+            "or:  python3 -m pip install --user cryptography\n"
+            "then re-run this installer." % sys.executable,
+            file=sys.stderr)
+        return 1
+
     # Already enabled and running — nothing to do.
     if _is_enabled() and _is_active():
         return 0
