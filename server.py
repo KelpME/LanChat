@@ -2624,6 +2624,25 @@ def main() -> None:
                          "instead of reading commands from stdin")
     args = ap.parse_args()
 
+    # Diagnose identity consistency at startup: the daemon's announced id
+    # (host_id = cert_fingerprint of CERT_PEM) must match the cert it will
+    # serve on TCP. A mismatch means the daemon is running with a different
+    # HOME (CERT_PEM resolves elsewhere) or a second daemon holds the port —
+    # both silently break every peer connection (the recurring .51 issue).
+    try:
+        _diag("identity", home=os.path.expanduser("~"),
+              cert_path=CERT_PEM, cert_exists=os.path.exists(CERT_PEM),
+              announced_id=host_id()[:16],
+              served_cert_fp=_cert_fingerprint_of_pem(_our_cert_pem())[:16])
+        if os.path.exists(CERT_PEM):
+            _announced = host_id()
+            _served = _cert_fingerprint_of_pem(_our_cert_pem())
+            if _announced != _served:
+                _diag("identity-mismatch", announced=_announced[:16], served=_served[:16],
+                      hint="daemon HOME or multiple daemons on port")
+    except Exception as _e:
+        pass
+
     load_config()
     load_history()
     if args.socket:
