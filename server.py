@@ -115,7 +115,9 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # 1.5.8 — reorganize Settings into labeled sections (Identity, Presence, Chat,
 #   Appearance, Agents, Reachability, Developer); right-justify the Status and
 #   Panel-size option buttons; improve My ID text contrast.
-VERSION = "1.5.8"
+# 1.5.9 — brighten Settings section headers (Color.popups.text instead of
+#   muted) so the group titles are no longer dark.
+VERSION = "1.5.9"
 
 
 def _git_version() -> str:
