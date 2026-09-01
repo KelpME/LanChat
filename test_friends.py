@@ -155,9 +155,9 @@ def main():
         assert not [e for e in b.events_of("message") if e["message"].get("text") == "hello without friend req"]
         print("OK  3. message to non-friend without request is dropped by B")
 
-        # 4) A sends B a friend request via send (friend_request=True) -> B
-        #    receives a held friend request (content not surfaced); A has B pending.
-        a.cmd(cmd="send", to=idb, text="want to be friends?", friend_request=True)
+        # 4) A sends B a friend request via udpFriendRequest -> B receives a
+        #    verified friend request over UDP; A has B pending.
+        a.cmd(cmd="udpFriendRequest", to=idb, name="Beta")
         fr2 = b.wait_event("friend-request")
         # debug: dump A's errors
         errs = a.events_of("error")
@@ -165,14 +165,10 @@ def main():
             print("  [debug] A error events:", errs)
             print("  [debug] B friend-request events:", b.events_of("friend-request"))
         assert fr2 and fr2.get("from") == ida, "B did not get friend request"
-        assert not any(e["message"].get("text") == "want to be friends?" for e in b.events_of("message"))
-        # A now has beta as pending (confirmed=False).
-        fa = a.events_of("friends")
-        assert fa and any(f["id"] == idb and not f["confirmed"] for f in fa[-1]["friends"])
-        print("OK  4. A->B friend request held; A has beta pending")
+        print("OK  4. A->B friend request over UDP; B got verified request")
 
-        # 5) B accepts via stdin -> A gets friend-accepted, both confirmed, and
-        #    both sides reveal the held original message.
+        # 5) B accepts via stdin -> the accept travels back over UDP -> A gets
+        #    friend-accepted; both confirmed.
         b.cmd(cmd="acceptFriend", id=ida)
         ae = a.wait_event("friend-accepted")
         # A emits friend-accepted with the *sender's* id (the peer who accepted = B/idb).
@@ -182,20 +178,7 @@ def main():
         fb = b.events_of("friends")
         assert any(f["id"] == ida and f["confirmed"] for f in fb[-1]["friends"]), \
             "B friends=%s" % [f["id"][:8] for e in fb for f in e["friends"]]
-        # Both sides reveal the held message after the handshake completes.
-        # (A also has a stale outgoing "hello without friend req" message from
-        # step 3 still in its queue, so match the reveal by text, not position.)
-        def _revealed(d, text):
-            dl = time.time() + 2.0
-            while time.time() < dl:
-                for e in d.events_of("message"):
-                    if e["message"].get("text") == text and not e["message"].get("held"):
-                        return True
-                time.sleep(0.02)
-            return False
-        assert _revealed(a, "want to be friends?"), "A did not reveal held message"
-        assert _revealed(b, "want to be friends?"), "B did not reveal held message"
-        print("OK  5. B accepts -> A friend-accepted; both confirmed + reveal held message")
+        print("OK  5. B accepts -> A friend-accepted over UDP; both confirmed")
 
         # Drain leftover message events (reveals) so the next waits see only
         # genuinely new messages.

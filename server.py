@@ -2084,7 +2084,7 @@ def _tls_connect(peer: dict, expected_fingerprint: str = ""):
         peer.get("address", "?"), peer.get("port", "?"), str(peer.get("name") or "?"), expected_fingerprint)
 
 
-def send_message(peer_id: str, text: str, friend_request: bool = False, attachment: dict = None) -> bool:
+def send_message(peer_id: str, text: str, attachment: dict = None) -> bool:
     peer = find_peer(peer_id)
     name = (peer or {}).get("name") or friendly_name(peer_id)
     msg = {
@@ -2099,33 +2099,13 @@ def send_message(peer_id: str, text: str, friend_request: bool = False, attachme
     }
     if attachment:
         msg["attachment"] = attachment  # {name,size,mime,fileId,sha256}
-    # Never re-propose friendship to someone who already accepted. The UI only
-    # sets friend_request for non-friends, but if its state is momentarily
-    # stale this guard keeps us from re-holding a message to a confirmed friend
-    # as a request (the "keeps sending friend requests to friends" bug).
-    if friend_request and not is_friend(peer_id):
-        msg["friendRequest"] = True
-        # Record the peer as a pending-request friend on our side, so they
-        # become trusted (can reply/accept) and show as a friend request.
-        if not is_pending(peer_id) and not is_friend(peer_id):
-            add_friend(peer_id, (peer or {}).get("address", ""), name, confirmed=False)
-        # A friend request is a handshake: register the held message NOW,
-        # before sending, so a fast peer accept can always find and reveal it.
-        msg["held"] = True
-        with _pending_lock:
-            _pending_sent.setdefault(peer_id, []).append(msg)
     # Write to the peer's persistent socket (or hold until it reconnects).
     delivered = _write(peer_id, msg)
-    if friend_request:
-        _emit({"event": "friend-request", "outgoing": True, "to": peer_id, "toName": name,
-               "text": text, "ts": msg["ts"], "mid": msg["mid"]})
-        _diag("outbound-friend-request", to=peer_id[:12], name=name, text=text[:40])
-    else:
-        append_history(msg)
-        _emit({"event": "message", "message": msg})
-        _diag("outbound-message-sent", to=peer_id[:12], name=name, text=text[:40])
-        if not delivered:
-            _emit({"event": "error", "message": "%s is offline; message held until the connection returns" % name})
+    append_history(msg)
+    _emit({"event": "message", "message": msg})
+    _diag("outbound-message-sent", to=peer_id[:12], name=name, text=text[:40])
+    if not delivered:
+        _emit({"event": "error", "message": "%s is offline; message held until the connection returns" % name})
     return True
 
 
@@ -2377,7 +2357,6 @@ def handle_command(cmd: dict) -> None:
         send_message(
             str(cmd.get("to", "")),
             str(cmd.get("text", "")),
-            bool(cmd.get("friend_request")),
             att,
         )
     elif kind == "history":
