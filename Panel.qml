@@ -1104,9 +1104,8 @@ Panel {
                   }
 
                   // Firewall row — shows whether lanchat's port (4812) is
-                  // reachable inbound, with Open/Close buttons. Uses the
-                  // scoped sudoers rule (no password prompt); if that rule
-                  // isn't installed yet the daemon reports how to set it up.
+                  // reachable inbound, with a single toggle button that opens
+                  // or closes it (prompting for a password via polkit).
                   Item {
                     width: parent.width
                     height: Style.space(30)
@@ -1178,7 +1177,7 @@ Panel {
                       text: Lanchat.firewall.open === true ? "\uF023" : "\uF09C"  // lock when open (action=close), unlock otherwise (action=open)
                       tooltipText: Lanchat.firewall.open === true
                         ? "Port 4812 is open — click to close it (block inbound)"
-                        : "Port 4812 is closed — click to open it to the LAN"
+                        : "Port 4812 is closed — click to open it to the LAN (asks for your password)"
                       onClicked: Lanchat.firewall.open === true
                         ? Lanchat.firewallClose()
                         : Lanchat.firewallOpen()

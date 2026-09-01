@@ -209,7 +209,9 @@ systemctl --user restart lanchat    # restart it
 <li><strong>Is its firewall port open?</strong> Omarchy ships with the firewall closed, and
    lanchat needs port 4812 (udp+tcp) reachable inbound from the LAN for
    discovery, friend requests, and messaging. Run <code>make systemd-install</code> (or
-   <code>make firewall-open</code>) once on that machine — it opens 4812 to the LAN only.</li>
+   <code>make firewall-open</code>) once on that machine — it opens 4812 to the LAN only
+   (it will prompt for your password via polkit). You can also toggle it from
+   <strong>Settings → Port 4812</strong> in the panel.</li>
 <li><strong>Is it on the same network?</strong> Both machines must be on the same LAN
    (same subnet) for discovery broadcasts to reach each other.</li>
 <li><strong>Is Discoverable on?</strong> In <strong>Settings</strong>, switch on <strong>Discoverable (open

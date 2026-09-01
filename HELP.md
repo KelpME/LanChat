@@ -165,7 +165,9 @@ If a machine isn't showing up in your peer list:
 2. **Is its firewall port open?** Omarchy ships with the firewall closed, and
    lanchat needs port 4812 (udp+tcp) reachable inbound from the LAN for
    discovery, friend requests, and messaging. Run `make systemd-install` (or
-   `make firewall-open`) once on that machine — it opens 4812 to the LAN only.
+   `make firewall-open`) once on that machine — it opens 4812 to the LAN only
+   (it will prompt for your password via polkit). You can also toggle it from
+   **Settings → Port 4812** in the panel.
 3. **Is it on the same network?** Both machines must be on the same LAN
    (same subnet) for discovery broadcasts to reach each other.
 4. **Is Discoverable on?** In **Settings**, switch on **Discoverable (open

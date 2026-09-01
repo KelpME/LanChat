@@ -71,17 +71,15 @@ systemd-install: firewall-open ## copy systemd/lanchat.service, enable it, and o
 	@echo "Lanchat daemon now runs under systemd. Status: systemctl --user status lanchat"
 	@echo "Firewall port 4812 (udp+tcp) is open to the LAN."
 
-## firewall-open: open lanchat's port (4812) to the LAN via ufw (one-time, needs sudo)
-## Installs a scoped sudoers rule so only lanchat's port 4812 can be managed,
-## then opens UDP+TCP 4812 to the LAN subnet (never the internet).
-firewall-open: ## open lanchat 4812 to the LAN (install scoped sudoers rule + open port)
-	@echo "Installing scoped sudoers rule (this prompts for your sudo password once)..."
-	@sudo scripts/lanchat-sudoers.sh
-	@echo "Opening lanchat port 4812 to the LAN..."
+## firewall-open: open lanchat's port (4812) to the LAN via ufw (prompts for password via polkit)
+## Uses pkexec so no permanent sudoers rule is created — every open/close
+## prompts once. Opens UDP+TCP 4812 to the LAN subnet (never the internet).
+firewall-open: ## open lanchat 4812 to the LAN (prompts for your password via polkit)
+	@echo "Opening lanchat port 4812 to the LAN (a password prompt will appear)..."
 	@scripts/lanchat-firewall.sh open
 	@echo "Done. Lanchat is now reachable from your LAN (port 4812 udp+tcp)."
 
-## firewall-close: remove lanchat's port rule (keeps the sudoers rule)
+## firewall-close: remove lanchat's port rule (prompts for your password via polkit)
 firewall-close: ## close lanchat 4812 to the LAN (remove the ufw rules)
 	@scripts/lanchat-firewall.sh close
 	@echo "Lanchat port 4812 closed."

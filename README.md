@@ -86,9 +86,15 @@ auto-detected) — never the internet:
 make systemd-install   # prompts for sudo once: enables daemon + opens 4812 to the LAN
 ```
 
-The firewall part installs a **scoped sudoers rule** so only lanchat's port 4812
-can be managed (no password afterward). To close the port later:
+The firewall part uses **polkit (pkexec)** — it prompts for your password each
+time you open/close the port, and creates **no permanent sudoers rule**. The
+port is opened to your LAN subnet only. To close the port later:
 `make firewall-close`. A full `make systemd-uninstall` also closes it.
+
+From the Lanchat panel you can also toggle the port from **Settings → Port
+4812**: a status dot shows whether it's open, and a single button opens/closes
+it (prompting for your password via polkit each time). If the port is blocked,
+a persistent warning appears in the peers-online bar.
 
 The shell no longer spawns `server.py` directly. Instead it runs a tiny
 `lanchat-bridge.py` that connects to the daemon's unix-socket control channel

@@ -107,7 +107,12 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   the port when closed and closes it when open, matching the current state.
 # 1.5.5 — persistent firewall warning in the peers-online bar (daemon running
 #   but port 4812 blocked); refreshes firewall state when the panel opens.
-VERSION = "1.5.6"
+# 1.5.6 — word-wrap the peers-online + firewall alert lines.
+# 1.5.7 — firewall toggle now uses polkit (pkexec): each open/close prompts for
+#   a password and creates NO permanent sudoers rule; the LAN subnet is baked
+#   into the ufw rule (never the internet). Status read is best-effort without
+#   admin (reports Unknown when it can't read rules, so it never nags).
+VERSION = "1.5.7"
 
 
 def _git_version() -> str:
@@ -2441,13 +2446,16 @@ def _firewall_status() -> dict:
                 "detail": "No active firewall — port 4812 is reachable."}
 
     if ufw_active:
-        # The scoped sudoers rule grants `sudo -n ufw status numbered`
-        # passwordless, so we can read the real rule set. If sudoers isn't
-        # installed, sudo fails and we report unknown with a hint.
+        # Try to read the real rule set WITHOUT prompting: `sudo -n` succeeds
+        # only if a sudoers rule exists (e.g. an older `make firewall-open`).
+        # With polkit-every-time there is no standing rule, so this usually
+        # fails and we report Unknown — the toggle itself still works via
+        # pkexec (which prompts). We never prompt here: reading status on
+        # every panel open must not nag.
         rc, out, err = _run_cmd(["sudo", "-n", "ufw", "status", "numbered"])
         if rc != 0:
             return {"open": None, "backend": "ufw",
-                    "detail": "UFW active but can't read rules (run `make firewall-open` once to install the scoped sudoers rule)."}
+                    "detail": "UFW active but can't read rules without admin (status unknown; the toggle will prompt for a password)."}
         udp_ok = "4812/udp" in out and "ALLOW" in out
         tcp_ok = "4812/tcp" in out and "ALLOW" in out
         if udp_ok and tcp_ok:
@@ -2469,18 +2477,18 @@ def _firewall_status() -> dict:
 def _firewall_script(action: str) -> dict:
     """Run scripts/lanchat-firewall.sh open|close and return a status dict.
 
-    The script uses `sudo -n ufw` internally, which requires the scoped
-    sudoers rule (installed by `make firewall-open`). If that rule is missing,
-    sudo fails and we surface a clear message instead of failing silently.
+    The script uses pkexec (polkit), so each action pops a password prompt and
+    leaves NO permanent sudoers rule. If the user cancels the prompt, pkexec
+    returns non-zero and we surface a clear message.
     """
     here = os.path.dirname(os.path.abspath(__file__))
     script = os.path.join(here, "scripts", "lanchat-firewall.sh")
-    rc, out, err = _run_cmd(["bash", script, action], timeout=30.0)
+    rc, out, err = _run_cmd(["bash", script, action], timeout=60.0)
     if rc == 0:
         return _firewall_status()
-    # sudoers rule missing / sudo failed.
+    # pkexec failed or was cancelled.
     return {"open": None, "backend": "ufw",
-            "detail": "Couldn't %s the port (sudo failed). Run `make firewall-open` once to install the scoped sudoers rule, then retry." % action,
+            "detail": "Couldn't %s the port (no admin rights given). Re-run to get a password prompt, or open the port manually." % action,
             "error": (out + err).strip()[:200]}
 
 
