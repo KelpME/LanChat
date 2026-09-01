@@ -103,7 +103,9 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   ready event; Settings shows a status dot + Open/Close buttons. The install
 #   helper now opens the port at install time via the scoped sudoers rule,
 #   piggybacking the admin prompt already used for cryptography.
-VERSION = "1.5.3"
+# 1.5.4 — single firewall toggle button (replaces Open/Close pair): it opens
+#   the port when closed and closes it when open, matching the current state.
+VERSION = "1.5.4"
 
 
 def _git_version() -> str:

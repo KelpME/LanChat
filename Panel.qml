@@ -1119,7 +1119,7 @@ Panel {
                       id: fwState
                       anchors.left: fwLabel.right
                       anchors.leftMargin: Style.spacing.sm
-                      anchors.right: fwCloseBtn.left
+                      anchors.right: fwToggleBtn.left
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
                       text: Lanchat.firewall.open === true ? "Open"
@@ -1138,26 +1138,21 @@ Panel {
                       text: Lanchat.firewall.detail || "Check whether lanchat's port is reachable."
                     }
 
-                    // Close button (lock glyph).
+                    // Single toggle button: if the port is open, clicking
+                    // closes it; if closed (or unknown), clicking opens it —
+                    // whichever `make firewall-*` the current state calls for.
                     Button {
-                      id: fwCloseBtn
-                      anchors.right: fwOpenBtn.left
-                      anchors.rightMargin: Style.spacing.xs
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: "\uF023"  // lock
-                      tooltipText: "Close port 4812 (block inbound)"
-                      onClicked: Lanchat.firewallClose()
-                    }
-
-                    // Open button (unlock glyph).
-                    Button {
-                      id: fwOpenBtn
+                      id: fwToggleBtn
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "\uF09C"  // unlock
-                      tooltipText: "Open port 4812 to the LAN (needs the scoped sudoers rule — see `make firewall-open`)"
-                      onClicked: Lanchat.firewallOpen()
+                      text: Lanchat.firewall.open === true ? "\uF023" : "\uF09C"  // lock when open (action=close), unlock otherwise (action=open)
+                      tooltipText: Lanchat.firewall.open === true
+                        ? "Port 4812 is open — click to close it (block inbound)"
+                        : "Port 4812 is closed — click to open it to the LAN"
+                      onClicked: Lanchat.firewall.open === true
+                        ? Lanchat.firewallClose()
+                        : Lanchat.firewallOpen()
                     }
                   }
 
