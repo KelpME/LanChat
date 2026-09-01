@@ -81,9 +81,9 @@ def check_file(path: str):
         i += 1
 
     # unclosed
-    for open_c, l in stack:
+    for open_c, ln in stack:
         name = "{ }" if open_c == "{" else ("( )" if open_c == "(" else "[ ]")
-        problems.append("unclosed %s from line %d" % (name, l))
+        problems.append("unclosed %s from line %d" % (name, ln))
     return problems
 
 

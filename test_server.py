@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+
 TOKEN = "test-shared-secret-token"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRV = os.path.join(HERE, "server.py")

@@ -98,7 +98,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
 #   over the existing socket). Old and new transports do not interoperate; both
 #   machines must run >= 1.1.0.
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 
 
 def _git_version() -> str:
@@ -1266,7 +1266,6 @@ def udp_loop() -> None:
     threading.Thread(target=_udp_listener, args=(sock,), daemon=True).start()
 
     last_broadcast = 0.0
-    last_unicast = 0.0
     scanned_once = False
     # In private visibility we are invisible: no broadcast, no scan, and we do
     # NOT re-announce to known peers either (that would still leak our presence
@@ -1291,7 +1290,6 @@ def udp_loop() -> None:
             # them alive by re-announcing DIRECTLY to every known peer every
             # broadcast interval — unicast always works, unlike broadcast.
             _announce_to_known(sock)
-            last_unicast = now
         # Subnet scan ONCE shortly after startup, as a broadcast fallback for
         # networks where broadcasts are filtered. It is NOT repeated: blind
         # unicasting to every host on the /24 every few seconds floods the UDP

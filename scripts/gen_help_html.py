@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Generate HELP.html from HELP.md with clean, self-contained styling."""
-import markdown, pathlib
+import pathlib
+
+import markdown
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 src = ROOT / "HELP.md"

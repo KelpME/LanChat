@@ -23,7 +23,6 @@ Behaviour on the daemon being down:
 
 Usage: python3 lanchat-bridge.py [--socket PATH]
 """
-import json
 import os
 import select
 import socket

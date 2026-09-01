@@ -18,11 +18,15 @@ in-process — it asserts the loop actually emits hellos after the flip.
 
 Run: python3 test_discovery_visibility.py
 """
-import os, socket, sys, tempfile, threading, time
+import os
+import sys
+import tempfile
+import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import server as srv
+import server as srv  # noqa: E402
 
 
 def main():

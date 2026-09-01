@@ -5,6 +5,7 @@ runs. A stale cached tls_ctx would keep serving the OLD cert after a reinstall
 wiped + regenerated lanchat-certs, causing fingerprint-mismatch on every peer
 connection (the exact bug that made friend requests silently fail)."""
 import hashlib
+import json
 import os
 import shutil
 import socket
@@ -13,7 +14,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRV = os.path.join(HERE, "server.py")
@@ -45,7 +45,6 @@ def main():
 
         def announced_id():
             # The daemon's host_id is the fingerprint of its current cert.pem.
-            import cryptography
             from cryptography import x509
             from cryptography.hazmat.primitives import serialization
             with open(os.path.join(cfg, "lanchat-certs", "cert.pem"), "rb") as f:

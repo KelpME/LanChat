@@ -212,8 +212,10 @@ def main():
         #    and surfaces the request (verified fingerprint), even though no
         #    TCP connection exists between them yet.
         #    Craft a signed request from A's identity.
-        import test_peer as _tp2
-        import hashlib, json as _json, socket as _sock
+        import hashlib
+        import json as _json
+        import socket as _sock
+
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import padding
         # A's cert + key live in A's home cert dir.
@@ -260,7 +262,6 @@ def main():
         # 11) End-to-end via the daemon command: A sends udpFriendRequest to B
         #     (by B's ID, as the UI does). The daemon must resolve B's address
         #     and B receives the signed request.
-        import test_peer as _tp3
         # Give A's daemon B's address (as discovery would have) via setFriend.
         a.cmd(cmd="setFriend", id=idb, address="127.0.0.1", port=b.port, name="Beta")
         a.wait_event("friend-added")

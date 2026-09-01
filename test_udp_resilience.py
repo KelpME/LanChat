@@ -1,6 +1,15 @@
 """Verify the UDP listener survives a handler exception (the .51 bug:
 a missing cryptography dep killed the listener thread silently)."""
-import sys, os, json, tempfile, subprocess, time, threading, shutil, socket
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
 sys.path.insert(0,'.')
 # Simulate: run a daemon, then send a malformed packet AND one that triggers
 # an exception in a handler; the listener must survive and still process hello.
