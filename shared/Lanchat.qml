@@ -53,6 +53,7 @@ QtObject {
   // Manual pixel override for panel size; 0 = follow the panelSize preset.
   property int customW: 0
   property int customH: 0
+  property int peerColW: 0
   property string status: "available"
   property bool soundEnabled: true
   property bool typingEnabled: true
@@ -446,6 +447,13 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setCustomSize", w: w, h: h }) + "\n")
   }
 
+  // Persist the left peer-column width set by the draggable divider.
+  // 0 = fall back to the UI default.
+  function setPeerColW(w) {
+    peerColW = w
+    daemon.write(JSON.stringify({ cmd: "setPeerColW", w: w }) + "\n")
+  }
+
   // Set user status: "available" | "dnd" | "away" | "brb".
   function setStatus(s) {
     status = s
@@ -538,6 +546,7 @@ QtObject {
       if (obj.acceptRequests !== undefined) lanchat.acceptRequests = obj.acceptRequests
       if (obj.customW !== undefined) lanchat.customW = obj.customW
       if (obj.customH !== undefined) lanchat.customH = obj.customH
+      if (obj.peerColW !== undefined) lanchat.peerColW = obj.peerColW
       if (obj.status !== undefined) lanchat.status = obj.status
       if (obj.soundEnabled !== undefined) lanchat.soundEnabled = obj.soundEnabled
       if (obj.typingEnabled !== undefined) lanchat.typingEnabled = obj.typingEnabled
@@ -584,6 +593,10 @@ QtObject {
     case "custom-size":
       if (obj.w !== undefined) lanchat.customW = obj.w
       if (obj.h !== undefined) lanchat.customH = obj.h
+      break
+
+    case "peer-col-w":
+      if (obj.w !== undefined) lanchat.peerColW = obj.w
       break
 
     case "api-full-access":

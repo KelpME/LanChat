@@ -19,8 +19,14 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
 
-  // Width of the left peer column (draggable via the divider). Not persisted.
-  property real peerColW: Style.space(280)
+  // Width of the left peer column (draggable via the divider). Persisted so
+  // the layout survives a restart. Mid-drag, the live width comes from
+  // dragPeerColW; otherwise it falls back to the persisted value (or the UI
+  // default when the user has never moved the divider).
+  property real dragPeerColW: 0
+  readonly property real peerColW: dragPeerColW > 0
+    ? dragPeerColW
+    : (Lanchat.peerColW > 0 ? Lanchat.peerColW : Style.space(280))
 
   // Peer-list row height — single source of truth for the delegate rendering.
   property real peerRowH: Style.space(40)
@@ -1831,12 +1837,20 @@ Panel {
               cursorShape: Qt.SizeHorCursor
               property bool dragging: false
               onPressed: dragging = true
-              onReleased: dragging = false
+              onReleased: {
+                dragging = false
+                // Persist the final divider position so the peer-column
+                // layout survives a restart.
+                if (root.dragPeerColW > 0) {
+                  Lanchat.setPeerColW(root.dragPeerColW)
+                  root.dragPeerColW = 0
+                }
+              }
               onPositionChanged: {
                 // New width = handle's center X within the panel (parent of the Row).
                 if (dragging) {
                   var px = parent.mapToItem(parent.parent, mouse.x, 0).x
-                  root.peerColW = Math.max(Style.space(140), Math.min(px + Style.space(4), parent.parent.width - Style.space(200)))
+                  root.dragPeerColW = Math.max(Style.space(140), Math.min(px + Style.space(4), parent.parent.width - Style.space(200)))
                 }
               }
             }

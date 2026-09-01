@@ -98,7 +98,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
 #   over the existing socket). Old and new transports do not interoperate; both
 #   machines must run >= 1.1.0.
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 
 
 def _git_version() -> str:
@@ -279,6 +279,8 @@ def load_config() -> None:
     # Manual pixel override for panel size (0 = follow the preset).
     CONFIG.setdefault("customW", 0)
     CONFIG.setdefault("customH", 0)
+    # Left peer-column width set by the draggable divider (0 = UI default).
+    CONFIG.setdefault("peerColW", 0)
     # User status: "available" | "dnd" | "away" | "brb". Broadcast to friends.
     CONFIG.setdefault("status", "available")
     # Play a sound on incoming messages.
@@ -2537,6 +2539,17 @@ def handle_command(cmd: dict) -> None:
         CONFIG["customH"] = h
         _save_config()
         _emit({"event": "custom-size", "w": w, "h": h})
+    elif kind == "setPeerColW":
+        # Left peer-column width from the draggable divider. 0 = fall back to
+        # the UI's default; clamps to a sane range so a huge value can't
+        # collapse the chat pane.
+        try:
+            w = max(0, int(cmd.get("w", 0)))
+        except (TypeError, ValueError):
+            w = 0
+        CONFIG["peerColW"] = w
+        _save_config()
+        _emit({"event": "peer-col-w", "w": w})
     elif kind == "setStatus":
         s = str(cmd.get("status", "available"))
         if s in STATUSES:
@@ -2764,6 +2777,7 @@ def _ready_event() -> dict:
         "panelSize": panel_size(),
         "customW": int(CONFIG.get("customW", 0) or 0),
         "customH": int(CONFIG.get("customH", 0) or 0),
+        "peerColW": int(CONFIG.get("peerColW", 0) or 0),
         "status": status(),
         "soundEnabled": sound_enabled(),
         "typingEnabled": typing_enabled(),
