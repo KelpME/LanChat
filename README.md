@@ -347,6 +347,8 @@ python3 test_features.py     # lazy-load, clear/delete, attachment plumbing, con
 python3 test_attachments.py  # recipient file receipt: accept, checksum, auth pinning
 python3 test_discovery_visibility.py  # broadcast side of the private/open visibility flip
 python3 test_systemd_control.py      # systemd unix-socket control channel + bridge
+python3 test_cert_reload.py          # served cert tracks a regenerated cert (no stale fingerprint)
+python3 test_udp_resilience.py       # UDP listener survives bad packets (no silent thread death)
 ```
 
 > The plugin reloads QML but not always compiled types — after editing QML,
