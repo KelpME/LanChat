@@ -56,24 +56,40 @@ def main() -> int:
     # `cryptography` is NOT guaranteed by Omarchy (it was a manual install on
     # some machines) — if it's missing, every UDP friend request crashes the
     # listener thread silently (the .51 bug). So we ensure it here as part of
-    # the install: try pacman (Arch-native), fall back to pip.
+    # the install. Order of attempts:
+    #   1. pacman via `sudo -n` (fail fast, no TTY prompt) then `pkexec`
+    #      (GUI polkit prompt — the panel runs in a graphical session).
+    #   2. pip via `python3 -m pip` (gate on the MODULE, not a binary), with
+    #      --break-system-packages for Arch's PEP 668 externally-managed env.
     try:
         import cryptography  # noqa: F401
     except Exception:
         print("lanchat: installing required 'cryptography' dependency...", file=sys.stderr)
         installed = False
         if shutil.which("pacman"):
-            r = _run(["sudo", "pacman", "-S", "--noconfirm", "python-cryptography"])
+            # Non-interactive first: sudo -n fails fast instead of hanging on a
+            # prompt it can't render (no controlling TTY from the panel).
+            r = _run(["sudo", "-n", "pacman", "-S", "--noconfirm", "python-cryptography"])
+            if r.returncode != 0 and shutil.which("pkexec"):
+                # GUI polkit prompt (an agent is running in the session).
+                r = _run(["pkexec", "pacman", "-S", "--noconfirm", "python-cryptography"])
             installed = r.returncode == 0
-        if not installed and shutil.which("pip"):
-            r = _run([sys.executable, "-m", "pip", "install", "--user", "cryptography"])
-            installed = r.returncode == 0
+        if not installed:
+            # Gate on the pip MODULE being importable, not a `pip` binary on
+            # PATH (system Python ships no pip binary). --break-system-packages
+            # is required on Arch's PEP 668 externally-managed interpreter;
+            # --user keeps it in ~/.local so pacman ownership is untouched.
+            probe = _run([sys.executable, "-m", "pip", "--version"])
+            if probe.returncode == 0:
+                r = _run([sys.executable, "-m", "pip", "install", "--user",
+                          "--break-system-packages", "cryptography"])
+                installed = r.returncode == 0
         if not installed:
             print(
                 "lanchat: could not auto-install 'cryptography'. Install it "
                 "manually, e.g.:\n"
                 "  sudo pacman -S python-cryptography\n"
-                "or:  python3 -m pip install --user cryptography\n"
+                "or:  python3 -m pip install --user --break-system-packages cryptography\n"
                 "then re-run this installer.",
                 file=sys.stderr)
             return 1
