@@ -363,14 +363,6 @@ Panel {
     Quickshell.execDetached(["xdg-open", Lanchat.logPath()])
   }
 
-  // Last component of a path (folder name).
-  function pathBasename(path) {
-    var p = String(path || "")
-    p = p.replace(/\/+$/, "")
-    var idx = p.lastIndexOf("/")
-    return idx >= 0 ? p.slice(idx + 1) : p
-  }
-
   // Wraps a right-side options area. If the options are wider than the row,
   // they clip and a trailing "…" appears, hinting the user to widen the column.
   component ClippedOptions: Item {
@@ -1511,11 +1503,11 @@ Panel {
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
                         width: Style.space(110)
-                        text: root.pathBasename(Lanchat.downloadDir)
+                        text: Lanchat.downloadDir
                         color: Color.popups.text
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
-                        elide: Text.ElideRight
+                        elide: Text.ElideMiddle
                         maximumLineCount: 1
                         horizontalAlignment: Text.AlignRight
                       }
