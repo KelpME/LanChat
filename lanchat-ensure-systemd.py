@@ -55,19 +55,35 @@ def main() -> int:
     # Verify the daemon's Python dependency is present BEFORE starting it.
     # `cryptography` is NOT guaranteed by Omarchy (it was a manual install on
     # some machines) — if it's missing, every UDP friend request crashes the
-    # listener thread silently (the .51 bug). Fail here with a clear message
-    # instead of letting the daemon start into a half-broken state.
+    # listener thread silently (the .51 bug). So we ensure it here as part of
+    # the install: try pacman (Arch-native), fall back to pip.
     try:
         import cryptography  # noqa: F401
-    except Exception as _dep_err:
-        print(
-            "lanchat: the 'cryptography' Python library is not installed for "
-            "%s, which the lanchat daemon requires. Install it, e.g.:\n"
-            "  sudo pacman -S python-cryptography\n"
-            "or:  python3 -m pip install --user cryptography\n"
-            "then re-run this installer." % sys.executable,
-            file=sys.stderr)
-        return 1
+    except Exception:
+        print("lanchat: installing required 'cryptography' dependency...", file=sys.stderr)
+        installed = False
+        if shutil.which("pacman"):
+            r = _run(["sudo", "pacman", "-S", "--noconfirm", "python-cryptography"])
+            installed = r.returncode == 0
+        if not installed and shutil.which("pip"):
+            r = _run([sys.executable, "-m", "pip", "install", "--user", "cryptography"])
+            installed = r.returncode == 0
+        if not installed:
+            print(
+                "lanchat: could not auto-install 'cryptography'. Install it "
+                "manually, e.g.:\n"
+                "  sudo pacman -S python-cryptography\n"
+                "or:  python3 -m pip install --user cryptography\n"
+                "then re-run this installer.",
+                file=sys.stderr)
+            return 1
+        try:
+            import cryptography  # noqa: F401
+        except Exception:
+            print("lanchat: 'cryptography' still not importable after install", file=sys.stderr)
+            return 1
+        print("lanchat: 'cryptography' installed.", file=sys.stderr)
+
 
     # Already enabled and running — nothing to do.
     if _is_enabled() and _is_active():
