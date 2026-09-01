@@ -131,7 +131,10 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # 1.5.15 — firewall prompt: run pkexec on a tiny helper script instead of an
 #   inline bash -c ufw string, so the polkit authorization message is short and
 #   readable instead of truncated.
-VERSION = "1.5.15"
+# 1.5.16 — systemd: add lanchat.path + lanchat-restart.service so the daemon
+#   restarts automatically when server.py/scripts change (e.g. after an update),
+#   so a running daemon never keeps reporting a stale version.
+VERSION = "1.5.16"
 
 
 def _git_version() -> str:

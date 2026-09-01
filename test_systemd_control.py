@@ -99,7 +99,9 @@ def main():
             "lanchat-ensure-systemd.py missing"
         assert os.path.exists(os.path.join(HERE, "systemd", "lanchat.service")), \
             "systemd/lanchat.service missing"
-        print("OK  ensure helper + systemd unit ship with the plugin")
+        assert os.path.exists(os.path.join(HERE, "systemd", "lanchat.path")), \
+            "systemd/lanchat.path missing"
+        print("OK  ensure helper + systemd units (service + path watcher) ship with the plugin")
 
         print("\nALL SYSTEMD-CONTROL TESTS PASSED")
         return 0

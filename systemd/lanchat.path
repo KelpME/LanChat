@@ -1,0 +1,22 @@
+[Unit]
+Description=Watch lanchat daemon files and restart it on change
+
+# Companion to lanchat.service: whenever server.py or the scripts dir changes
+# (e.g. after `omarchy plugin update` or `git reset --hard`), systemd restarts
+# the daemon automatically so it never keeps reporting a stale version. Only
+# daemon-affecting files are watched — QML/UI changes are a separate concern
+# (they need a shell restart, not a daemon restart).
+[Path]
+# The unit lives in ~/.config/systemd/user; use %h for the plugin dir so it is
+# portable across machines. server.py is the daemon entrypoint; scripts/ holds
+# the firewall helper it invokes. PathChanged on the scripts/ directory fires
+# when git/plugin updates replace files inside it (no glob directive exists in
+# systemd.path); PathModified on server.py catches content edits to it.
+# The target is lanchat-restart.service (a oneshot), because a path unit only
+# STARTS its target — it can't restart an already-running daemon.
+PathModified=%h/.config/omarchy/plugins/KelpME.lanchat/server.py
+PathChanged=%h/.config/omarchy/plugins/KelpME.lanchat/scripts
+Unit=lanchat-restart.service
+
+[Install]
+WantedBy=default.target
