@@ -62,8 +62,10 @@ run the same recent version.
 
 ## The bar icon
 
-Click the chat icon in the bar to open Lanchat. An **unread-count badge** shows
-new messages (the icon also lights up when peers are online). The **icon's
+Click the chat icon in the bar to open Lanchat. An **unread-count badge**
+(top-right of the icon) shows new messages, and a **pending-friend-request
+badge** (bottom-right, accent-colored) shows friend requests waiting to be
+accepted (the icon also lights up when peers are online). The **icon's
 color reflects your status**: white = Available, red = Do Not Disturb, orange
 = Away, yellow = Be Right Back. **Right-click** the icon for a menu: toggle
 online/offline, or pick a status.

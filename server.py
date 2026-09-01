@@ -125,7 +125,10 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   /home/tmo/Downloads) instead of only the folder name; middle-elide when long.
 # 1.5.13 — "Save to" path keeps the folder + one parent visible and truncates
 #   the leading part (…/parent/folder) so the tail stays readable.
-VERSION = "1.5.13"
+# 1.5.14 — bar widget: add a pending-friend-request badge (lower-right,
+#   accent-colored); shift both badges right so they clear the status icon
+#   whose fill color reflects presence.
+VERSION = "1.5.14"
 
 
 def _git_version() -> str:
