@@ -78,8 +78,8 @@ online/offline, or pick a status.
 - **Paperclip** — attach and send one or more files. The receiver gets an
   **Incoming file** bar with a **Save** button; accepting streams the transfer
   with progress, verifies it, and saves it to your download folder. Transfers
-  are pinned to the sender's certificate, so the file comes from who you think
-  it does.
+  ride the encrypted, identity-verified message socket, so the file comes from
+  who you think it does.
 - **Copy button** (hover a message) — copies that message to the clipboard.
 - **Edit a message** (hover an outgoing message) — click the pencil to revise
   it; it's marked "(edited)".
@@ -131,9 +131,9 @@ except `/health` require the token in `~/.config/omarchy/lanchat.json`.
 - The agent can only message **friends** — the friend gate applies to the API
   too.
 - With **Agent full access** off, `/peers` and `/messages` return 403
-  (send-only). The agent can still send to friends. (Serving an accepted file
-  transfer is peer-to-peer, not script read-access, so downloads work
-  regardless of this toggle.)
+  (send-only). The agent can still send to friends. (File transfers between
+  friends do **not** use this API — they ride the encrypted message socket —
+  so saving a received file works regardless of this toggle.)
 - HTTPS uses the self-signed cert, so scripts skip verification (`curl -k`).
 
 ## Files & privacy

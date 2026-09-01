@@ -25,8 +25,8 @@ no IP addresses, no accounts, no cloud, no shared keys to copy.
   the encrypted, authenticated transport. The receiver sees an incoming-file
   bar with a **Save** button; accepting streams the transfer with live
   progress, verifies the file's checksum, and saves it to your chosen folder
-  (default `~/Downloads`). Downloads are pinned to the sender's cert
-  fingerprint, so the file comes from who you think it does.
+  (default `~/Downloads`). Transfers ride the identity-verified message
+  socket, so the file comes from the friend the connection proved.
 - **Lazy-loaded conversations** — long threads page in as you scroll, keeping
   the panel fluid.
 - **Unfriend** — remove a friend from the thread header.
@@ -230,8 +230,9 @@ whether the API can *read* chat data:
 - **On:** `/peers` and `/messages` work (full read access).
 - **Off (default):** the API is **send-only** — the agent can send messages to
   your friends but cannot read history or list peers; those read endpoints
-  return `403`. (Serving an accepted file transfer is peer-to-peer, not script
-  read-access, so downloads are not gated by this toggle.)
+  return `403`. (File transfers between friends do **not** use this API — they
+  ride the encrypted message socket — so saving a received file is never gated
+  by this toggle.)
 
 Send a message:
 
@@ -259,13 +260,13 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 - **Identity** — the cert's SHA-256 fingerprint is the device's true identity,
   decoupled from the cosmetic display name. Renaming never breaks a friend link.
 - **Peer verification** — when connecting, the peer's cert fingerprint is
-  checked against the one you friended, preventing impersonation. The same
-  check pins file downloads to the sender's identity. On **inbound**
-  connections (the peer dials you), identity is proven by challenge-response
-  (1.2.0): the dialer must sign a random nonce with the private key matching
-  its claimed fingerprint before any of its messages are trusted. A stranger
-  who harvests a friend's fingerprint (broadcast in the open) but not its key
-  cannot impersonate them.
+  checked against the one you friended, preventing impersonation. File
+  transfers ride that same verified socket, so the sender is the friend the
+  connection proved. On **inbound** connections (the peer dials you), identity
+  is proven by challenge-response (1.2.0): the dialer must sign a random nonce
+  with the private key matching its claimed fingerprint before any of its
+  messages are trusted. A stranger who harvests a friend's fingerprint
+  (broadcast in the open) but not its key cannot impersonate them.
 - **Access** — discovery is open (any LAN machine is visible); the
   friend/handshake gates messaging. Only confirmed friends (or peers you've
   requested) can reach you.
@@ -304,7 +305,8 @@ The plugin is three pieces:
   many bar surfaces or entry points exist.
 - **`server.py`** — a stdlib-only Python daemon: TLS TCP server for messages,
   UDP broadcast discovery, heartbeat/expiry for online status, attachment
-  serving, and JSON persistence. Runs under systemd (`systemd/lanchat.service`).
+  file transfer (over the message socket), and JSON persistence. Runs under
+  systemd (`systemd/lanchat.service`).
 - **`lanchat-bridge.py`** — a stdlib-only proxy the shell spawns: it connects
   to the daemon's unix-socket control channel and forwards commands/events, so
   the QML's Process-based wiring is unchanged.
@@ -344,7 +346,7 @@ python3 test_server.py       # core: discovery, TLS delivery, auth, HTTPS API
 python3 test_friends.py      # friend/handshake + online-toggle over TLS
 python3 test_persistent.py   # persistent connections, reconnect/hold/dedupe
 python3 test_features.py     # lazy-load, clear/delete, attachment plumbing, config
-python3 test_attachments.py  # recipient file receipt: accept, checksum, auth pinning
+python3 test_attachments.py  # recipient file receipt over the message socket: accept, checksum, trust gate
 python3 test_discovery_visibility.py  # broadcast side of the private/open visibility flip
 python3 test_systemd_control.py      # systemd unix-socket control channel + bridge
 python3 test_cert_reload.py          # served cert tracks a regenerated cert (no stale fingerprint)

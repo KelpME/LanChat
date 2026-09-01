@@ -26,6 +26,7 @@ Security model:
     offline.
 """
 
+import base64
 import hashlib
 import http.server
 import json
@@ -97,7 +98,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
 #   over the existing socket). Old and new transports do not interoperate; both
 #   machines must run >= 1.1.0.
-VERSION = "1.4.1"
+VERSION = "1.5.0"
 
 
 def _git_version() -> str:
@@ -1780,6 +1781,38 @@ def _handle_incoming(msg: dict, addr) -> None:
     if msg.get("t") == "read":
         _emit({"event": "read-receipt", "from": str(msg.get("from", "")), "mid": str(msg.get("mid", ""))})
         return
+    # ---- attachment file transfer (over the authenticated socket) ----
+    if msg.get("t") == "attachmentRequest":
+        # Recipient wants a file we registered. Stream it back over the socket
+        # (sender side). The connection is already authenticated, so the
+        # requester is the friend we trust — but still gate on is_trusted so a
+        # stranger can't drain our registered files.
+        from_pid = str(msg.get("from", ""))
+        if from_pid and is_trusted(from_pid):
+            threading.Thread(
+                target=_serve_attachment,
+                args=(from_pid, str(msg.get("fileId", "")), str(msg.get("mid", ""))),
+                daemon=True,
+            ).start()
+        return
+    if msg.get("t") in ("attachmentChunk", "attachmentEnd", "attachmentError"):
+        # Sender streaming the file back to us (recipient side). Chunks append
+        # to the registered .part file; End finalizes + verifies sha256 + renames.
+        from_pid = str(msg.get("from", ""))
+        file_id = str(msg.get("fileId", ""))
+        mid = str(msg.get("mid", ""))
+        if msg.get("t") == "attachmentChunk":
+            ok, total, written = _dl_chunk(
+                file_id, from_pid, str(msg.get("data", "")), int(msg.get("total") or 0))
+            if ok:
+                _emit({"event": "attachment-progress", "fileId": file_id, "mid": mid,
+                       "bytes": written, "total": total})
+        elif msg.get("t") == "attachmentEnd":
+            _finalize_download(_dl_finish(file_id, from_pid, True), mid, file_id)
+        else:
+            _finalize_download(_dl_finish(file_id, from_pid, False), mid, file_id,
+                               error=str(msg.get("error") or "sender aborted"))
+        return
     if msg.get("t") != "msg":
         return
     pid = str(msg.get("from", ""))
@@ -1919,131 +1952,161 @@ def get_attachment(file_id: str):
         return None
 
 
-def _http_response(sock, path: str):
-    """Send a GET over a connected TLS socket and read status + headers.
+# --------------------------------------------------------------------------
+# Attachment file transfer — over the authenticated message socket
+# --------------------------------------------------------------------------
+#
+# Files are carried over the SAME persistent TLS socket as messages (the peer
+# is already authenticated by the connect handshake), NOT over a separate HTTP
+# server. This removes the HTTP / loopback-bind / port dependency that made
+# cross-LAN saves fail: no new port, no LAN bind, no token in a URL, no extra
+# firewall rule, and no separate cert-pinning path — the socket transport's
+# identity proof covers the file bytes too. The sender streams the registered
+# file as base64 chunks; the recipient reassembles to downloadDir, verifies
+# the sha256, and renames atomically.
+#
+# Wire messages (all over the friend's active socket, `from`/`to` like any msg):
+#   attachmentRequest  recipient -> sender : {fileId, mid}
+#   attachmentChunk    sender   -> recipient: {fileId, mid, seq, total, data=b64}
+#   attachmentEnd      sender   -> recipient: {fileId, mid, total}
+#   attachmentError    either   -> other   : {fileId, mid, error}
+ATT_CHUNK_RAW = 128 * 1024   # raw bytes per chunk; base64 ~1.33x, well under MAX_FRAME_BUF
 
-    Returns (code, headers, content_length, body_prefix) where body_prefix is
-    any body bytes already read with the headers. The remaining body is read
-    from the socket by the caller (streamed), so we never buffer a whole file.
-    """
-    sock.sendall(("GET %s HTTP/1.0\r\nHost: lanchat\r\nConnection: close\r\n\r\n" % path).encode())
-    buf = b""
-    while b"\r\n\r\n" not in buf:
-        chunk = sock.recv(4096)
-        if not chunk:
-            break
-        buf += chunk
-    head, _, rest = buf.partition(b"\r\n\r\n")
-    lines = head.split(b"\r\n")
-    status = lines[0].decode("latin-1", "replace") if lines else ""
-    parts = status.split(" ")
-    code = int(parts[1]) if len(parts) > 1 else 0
-    headers = {}
-    for ln in lines[1:]:
-        if b":" in ln:
-            k, _, v = ln.partition(b":")
-            headers[k.strip().lower()] = v.strip().decode("latin-1", "replace")
-    clen = 0
+# Recipient-side reassembly state, keyed by fileId.
+_dl = {}                 # fileId -> {save_to,tmp,fh,mid,sha256,total,written,peer,ts}
+_dl_lock = threading.Lock()
+_DL_TTL_S = 600.0
+
+
+def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str):
+    """Register an in-progress download and open its .part file. Purges any
+    stale transfer first. Returns True on success."""
+    now = time.time()
+    with _dl_lock:
+        for fid in list(_dl):
+            if now - _dl[fid]["ts"] > _DL_TTL_S:
+                old = _dl.pop(fid)
+                try:
+                    old["fh"].close()
+                except OSError:
+                    pass
+                _remove_file(old["tmp"])
+        try:
+            os.makedirs(os.path.dirname(save_to) or ".", exist_ok=True)
+        except OSError:
+            return False
+        tmp = save_to + ".part"
+        try:
+            fh = open(tmp, "wb")
+        except OSError:
+            return False
+        _dl[file_id] = {"save_to": save_to, "tmp": tmp, "fh": fh, "mid": mid,
+                        "sha256": sha256, "total": 0, "written": 0,
+                        "peer": peer_id, "ts": now}
+    return True
+
+
+def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
+    """Decode + append one chunk from the sender. Returns (ok, total, written)."""
+    with _dl_lock:
+        d = _dl.get(file_id)
+        if not d or d.get("peer") != peer_id:
+            return (False, 0, 0)
+        if total:
+            d["total"] = total
+        try:
+            raw = base64.b64decode(data_b64)
+        except Exception:
+            return (False, d["total"], d["written"])
+        try:
+            d["fh"].write(raw)
+        except OSError:
+            return (False, d["total"], d["written"])
+        d["written"] += len(raw)
+        d["ts"] = time.time()
+        return (True, d["total"], d["written"])
+
+
+def _dl_finish(file_id: str, peer_id: str, ok: bool):
+    """Complete (or abort) a transfer. Returns (status, save_to, mid, total):
+    status in ('saved','mismatch','aborted'), or None if the transfer was not
+    registered for this peer (unknown/stale)."""
+    with _dl_lock:
+        d = _dl.pop(file_id, None)
+    if not d or d.get("peer") != peer_id:
+        return None
     try:
-        clen = int(headers.get("content-length") or 0)
-    except (TypeError, ValueError):
-        clen = 0
-    return code, headers, clen, rest
-
-
-def _download_attachment(peer: dict, file_id: str, save_to: str,
-                         expected_sha256: str = "", mid: str = "",
-                         expected_fingerprint: str = "") -> bool:
-    """Receiver fetches a file from a peer's HTTPS server and saves it.
-
-    The TLS connection's cert fingerprint is verified against the peer's true
-    identity (expected_fingerprint = the friend's cert fingerprint), exactly as
-    the message transport does — closing the previous unauthenticated gap. The
-    body is streamed to a temp file that is atomically renamed on success, the
-    sender's sha256 is verified when provided, and progress/saved events are
-    emitted from the calling thread. The acceptAttachment handler runs this in a
-    background thread so a large transfer never blocks the message/presence loop.
-    """
-    addr = peer.get("address", "?")
-    hport = peer.get("httpPort") or http_port()
-    name = str(peer.get("name") or "?")
-    tmp = save_to + ".part"
-    s = None
+        d["fh"].close()
+    except OSError:
+        pass
+    save_to, tmp = d["save_to"], d["tmp"]
+    if not ok:
+        _remove_file(tmp)
+        return ("aborted", save_to, d["mid"], d["total"])
+    digest = _file_sha256(tmp)
+    if d["sha256"] and digest != d["sha256"]:
+        _remove_file(tmp)
+        return ("mismatch", save_to, d["mid"], d["total"])
     try:
-        s = _tls_connect_host(addr, hport, name, expected_fingerprint=expected_fingerprint)
-        if s is None:
-            _log("attachment-download-rejected peer=%s file=%s err=untrusted-cert"
-                 % (name, os.path.basename(save_to)))
-            _emit({"event": "attachment-saved", "ok": False, "path": save_to,
-                   "mid": mid, "fileId": file_id, "error": "sender certificate not trusted"})
-            return False
-        s.settimeout(60)
-        code, headers, clen, prefix = _http_response(
-            s, "/attachment?fileId=%s&token=%s" % (file_id, CONFIG.get("token")))
-        if code != 200:
-            _log("attachment-download-failed peer=%s file=%s http=%s"
-                 % (name, os.path.basename(save_to), code))
-            _emit({"event": "attachment-saved", "ok": False, "path": save_to,
-                   "mid": mid, "fileId": file_id, "error": "sender returned HTTP %s" % code})
-            return False
-        os.makedirs(os.path.dirname(save_to) or ".", exist_ok=True)
-        h = hashlib.sha256()
-        got = 0
-        total = clen
-        with open(tmp, "wb") as f:
-            # Flush any bytes already read with the headers, then stream the rest.
-            if prefix:
-                f.write(prefix)
-                h.update(prefix)
-                got += len(prefix)
-                _emit({"event": "attachment-progress", "fileId": file_id, "mid": mid,
-                       "bytes": got, "total": total})
-            if clen > 0:
-                while got < clen:
-                    chunk = s.recv(min(65536, clen - got))
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    h.update(chunk)
-                    got += len(chunk)
-                    _emit({"event": "attachment-progress", "fileId": file_id, "mid": mid,
-                           "bytes": got, "total": total})
-            else:
-                # No Content-Length: read until the server closes the connection.
-                while True:
-                    chunk = s.recv(65536)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    h.update(chunk)
-                    got += len(chunk)
-                    _emit({"event": "attachment-progress", "fileId": file_id, "mid": mid,
-                           "bytes": got, "total": total})
-        digest = h.hexdigest()
-        if expected_sha256 and digest != expected_sha256:
-            _remove_file(tmp)
-            _log("attachment-checksum-mismatch file=%s expected=%s got=%s"
-                 % (os.path.basename(save_to), expected_sha256, digest))
-            _emit({"event": "attachment-saved", "ok": False, "path": save_to,
-                   "mid": mid, "fileId": file_id, "error": "checksum mismatch"})
-            return False
-        os.replace(tmp, save_to)  # atomic: never a truncated final file
+        os.replace(tmp, save_to)
+    except OSError:
+        _remove_file(tmp)
+        return ("aborted", save_to, d["mid"], d["total"])
+    return ("saved", save_to, d["mid"], d["total"])
+
+
+def _finalize_download(res, mid: str, file_id: str, error: str = "") -> None:
+    """Map a _dl_finish result to the attachment-saved event the UI watches."""
+    if res is None:
+        return  # not our transfer (unknown/stale/other peer)
+    status, save_to, _mid, _total = res
+    if status == "saved":
+        _log("attachment-saved file=%s" % os.path.basename(save_to))
         _emit({"event": "attachment-saved", "ok": True, "path": save_to,
                "mid": mid, "fileId": file_id})
-        return True
-    except Exception as e:
-        _remove_file(tmp)
-        _log("attachment-download-failed peer=%s file=%s err=%s"
-             % (name, os.path.basename(save_to), e))
+    else:
+        msg = error or ("checksum mismatch" if status == "mismatch" else "transfer aborted")
         _emit({"event": "attachment-saved", "ok": False, "path": save_to,
-               "mid": mid, "fileId": file_id, "error": str(e)})
-        return False
-    finally:
-        if s is not None:
-            try:
-                s.close()
-            except OSError:
-                pass
+               "mid": mid, "fileId": file_id, "error": msg})
+
+
+def _serve_attachment(peer_id: str, file_id: str, mid: str) -> None:
+    """Sender: stream a registered file to the requesting peer over the socket."""
+    att = get_attachment(file_id)
+    if not att:
+        _write(peer_id, {"t": "attachmentError", "from": host_id(), "to": peer_id,
+                         "fileId": file_id, "mid": mid, "error": "not found"})
+        return
+    path, name = att["path"], att["name"]
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        _write(peer_id, {"t": "attachmentError", "from": host_id(), "to": peer_id,
+                         "fileId": file_id, "mid": mid, "error": "file missing"})
+        return
+    try:
+        with open(path, "rb") as f:
+            seq = 0
+            while True:
+                chunk = f.read(ATT_CHUNK_RAW)
+                if not chunk:
+                    break
+                ok = _write(peer_id, {
+                    "t": "attachmentChunk", "from": host_id(), "to": peer_id,
+                    "fileId": file_id, "mid": mid, "seq": seq, "total": size,
+                    "data": base64.b64encode(chunk).decode("ascii")})
+                if not ok:
+                    _log("attachment-stream-aborted peer=%s file=%s err=socket-down"
+                         % (peer_id[:12], name))
+                    return
+                seq += 1
+        _write(peer_id, {"t": "attachmentEnd", "from": host_id(), "to": peer_id,
+                         "fileId": file_id, "mid": mid, "total": size})
+        _log("attachment-streamed peer=%s file=%s size=%s" % (peer_id[:12], name, size))
+    except OSError as e:
+        _log("attachment-stream-failed peer=%s file=%s err=%s" % (peer_id[:12], name, e))
+        _write(peer_id, {"t": "attachmentError", "from": host_id(), "to": peer_id,
+                         "fileId": file_id, "mid": mid, "error": str(e)})
 
 
 def _tls_connect_host(addr: str, port: int, name: str, expected_fingerprint: str = ""):
@@ -2388,27 +2451,25 @@ def handle_command(cmd: dict) -> None:
         _save_config()
         _emit({"event": "send-delay", "seconds": CONFIG["sendDelay"]})
     elif kind == "acceptAttachment":
-        peer = find_peer(str(cmd.get("from", "")))
-        if not peer:
+        peer_id = str(cmd.get("from", ""))
+        if not peer_id or find_peer(peer_id) is None:
             _emit({"event": "error", "message": "attachment sender not found"})
             return
         file_id = str(cmd.get("fileId", ""))
         name = _safe_filename(str(cmd.get("name", "download")))
         mid = str(cmd.get("mid", ""))
         sha256 = str(cmd.get("sha256", ""))
-        # The sender's `from` id is their cert fingerprint — the same
-        # identity the message transport verifies against. Use it to pin
-        # the download's TLS cert too (closes the unauthenticated gap).
-        fingerprint = str(cmd.get("from", ""))
         save_to = os.path.join(CONFIG.get("downloadDir", os.path.expanduser("~/Downloads")), name)
-        # Run the transfer off the stdin loop so a large file never blocks
-        # message processing / presence. Progress + completion events come
-        # back from the download thread.
-        threading.Thread(
-            target=_download_attachment,
-            args=(peer, file_id, save_to, sha256, mid, fingerprint),
-            daemon=True,
-        ).start()
+        if not _dl_begin(file_id, peer_id, save_to, sha256, mid):
+            _emit({"event": "attachment-saved", "ok": False, "path": save_to,
+                   "mid": mid, "fileId": file_id, "error": "cannot open download file"})
+            return
+        # Ask the sender to stream the file over our authenticated socket (no
+        # HTTP server, no LAN bind, no token in a URL). The sender replies with
+        # attachmentChunk/attachmentEnd/attachmentError messages on the socket,
+        # which _handle_incoming routes into _dl_chunk/_dl_finish.
+        _write(peer_id, {"t": "attachmentRequest", "from": host_id(), "to": peer_id,
+                         "fileId": file_id, "mid": mid})
     elif kind == "list":
         _emit({"event": "peers", "peers": peer_snapshot()})
     elif kind == "setHttp":

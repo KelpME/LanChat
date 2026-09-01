@@ -8,18 +8,17 @@ and sends an attachment message; B accepts it. Verifies:
   - the file lands in B's downloadDir with exact bytes (sha256 verified)
   - a hostile ../ name is sanitized to a safe basename before saving
   - a wrong sha256 is rejected (no file saved, no .part leftover)
+  - the socket transport's trust gate: a stranger isn't trusted, an unknown
+    fileId from a trusted peer yields attachmentError (no file)
   - _safe_filename unit behaviour
 
 Run: python3 test_attachments.py
 """
 import json
-import hashlib
 import os
 import shutil
 import socket
-import subprocess
 import sys
-import tempfile
 import threading
 import time
 
@@ -29,7 +28,7 @@ SRV = os.path.join(HERE, "server.py")
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from test_persistent import Daemon, make_home, _cert_fp  # noqa: E402
+from test_persistent import Daemon, _cert_fp, make_home  # noqa: E402
 
 
 def disco(port, pid, name, pport, phttp):
@@ -136,77 +135,31 @@ def main():
         assert not os.path.exists(os.path.join(dldir, "corrupt.txt.part")), "mismatch left .part behind"
         print("OK  sha256 mismatch rejected (no file, no .part)")
 
-        # ---- 3.5) unauthenticated server (wrong cert) is rejected ----------
-        # A rogue HTTPS server serving a DIFFERENT cert must be refused by the
-        # recipient's fingerprint check — the download that closes the auth gap.
+        # ---- 3.5) socket-path security: trust gate + unknown fileId ---------
+        # File transfer now rides the authenticated message socket, so the
+        # "different cert" MITM vector is gone (the peer's identity was proven
+        # at connect). Security is enforced by two rules instead:
+        #   (a) only an is_trusted peer's attachmentRequest is served, and
+        #   (b) an unknown/expired fileId yields attachmentError, not bytes.
         import server as _s
         _s.CONFIG["token"] = TOKEN
         _s._stdout = open(os.devnull, "w")  # keep in-process event noise out
-        rogue_dir = tempfile.mkdtemp(prefix="lnc-rogue-")
-        try:
-            # Build a fresh self-signed cert (not A's) for the rogue server.
-            from cryptography import x509
-            from cryptography.hazmat.primitives import hashes, serialization
-            from cryptography.hazmat.primitives.asymmetric import rsa
-            import datetime as _dt
-            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-            subj = issr = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "rogue")])
-            cert = (x509.CertificateBuilder()
-                    .subject_name(subj).issuer_name(issr)
-                    .public_key(key.public_key())
-                    .serial_number(x509.random_serial_number())
-                    .not_valid_before(_dt.datetime.utcnow())
-                    .not_valid_after(_dt.datetime.utcnow() + _dt.timedelta(days=1))
-                    .sign(key, hashes.SHA256()))
-            rogue_key = os.path.join(rogue_dir, "k.pem")
-            rogue_cert = os.path.join(rogue_dir, "c.pem")
-            open(rogue_key, "wb").write(key.private_bytes(
-                serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL,
-                serialization.NoEncryption()))
-            open(rogue_cert, "wb").write(cert.public_bytes(serialization.Encoding.PEM))
-            rogue_fp = hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
-            # Serve a file over the rogue cert.
-            import http.server as _http
-            import ssl as _ssl
-            import socket as _socket
-            rogue_src = os.path.join(rogue_dir, "secret.txt")
-            open(rogue_src, "wb").write(b"stolen bytes")
-            rid = _s.secrets.token_hex(8)
-            _s.register_attachment(rid, rogue_src, "secret.txt")
-            # Quiet server: the receiver closes the connection on a mismatched
-            # cert, and a plain ThreadingHTTPServer would print the broken pipe.
-            class _QuietServer(_http.ThreadingHTTPServer):
-                def handle_error(self, request, client_address):
-                    pass
-            rsrv = _QuietServer(("127.0.0.1", 0), _s._ApiHandler)
-            rctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
-            rctx.load_cert_chain(rogue_cert, rogue_key)
-            rsrv.socket = rctx.wrap_socket(rsrv.socket, server_side=True)
-            rport = rsrv.server_address[1]
-            threading.Thread(target=rsrv.serve_forever, daemon=True).start()
-            rogue_peer = {"address": "127.0.0.1", "httpPort": rport,
-                          "name": "Rogue", "id": "0" * 64}
 
-            # Expect fingerprint pinning (ida = A's real fingerprint) to refuse it.
-            out1 = os.path.join(dldir, "rogue1.txt")
-            ok1 = _s._download_attachment(rogue_peer, rid, out1,
-                                          expected_sha256="", mid="m1",
-                                          expected_fingerprint=ida)
-            assert ok1 is False, "rogue cert with a DIFFERENT fingerprint must be refused"
-            assert not os.path.exists(out1), "rogue-cert download must not save a file"
-            assert not os.path.exists(out1 + ".part"), "rogue-cert download left .part"
-            # Match the rogue cert's OWN fingerprint -> it is trusted and succeeds.
-            out2 = os.path.join(dldir, "rogue2.txt")
-            ok2 = _s._download_attachment(rogue_peer, rid, out2,
-                                          expected_sha256="", mid="m2",
-                                          expected_fingerprint=rogue_fp)
-            assert ok2 is True, "cert matching its own fingerprint should succeed"
-            with open(out2, "rb") as f:
-                assert f.read() == b"stolen bytes", "rogue-trusted download bytes differ"
-            print("OK  download refuses a DIFFERENT cert (fingerprint pinning); trusts a matching one")
-        finally:
-            rsrv.shutdown(); rsrv.server_close()
-            shutil.rmtree(rogue_dir, ignore_errors=True)
+        # (a) A stranger (not a friend) must not be trusted to pull files.
+        stranger_id = "f" * 64
+        assert not _s.is_trusted(stranger_id), "stranger must not be trusted"
+
+        # (b) Requesting an unknown fileId from a TRUSTED peer -> attachmentError.
+        b.cmd(**{"cmd": "acceptAttachment", "from": ida, "fileId": "bogus00000000",
+                 "name": "ghost.txt", "mid": "mghost", "sha256": ""})
+        err = b.wait_event("attachment-saved")
+        assert err and err.get("ok") is False, \
+            "unknown fileId should fail: %r" % (err,)
+        assert not os.path.exists(os.path.join(dldir, "ghost.txt")), \
+            "unknown fileId must not save a file"
+        assert not os.path.exists(os.path.join(dldir, "ghost.txt.part")), \
+            "unknown fileId left a .part behind"
+        print("OK  socket path: untrusted requester gated; unknown fileId -> attachmentError")
 
         # ---- 4) _safe_filename unit behaviour ------------------------------
         import server as _s
