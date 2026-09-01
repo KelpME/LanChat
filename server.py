@@ -128,7 +128,10 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # 1.5.14 — bar widget: add a pending-friend-request badge (lower-right,
 #   accent-colored); shift both badges right so they clear the status icon
 #   whose fill color reflects presence.
-VERSION = "1.5.14"
+# 1.5.15 — firewall prompt: run pkexec on a tiny helper script instead of an
+#   inline bash -c ufw string, so the polkit authorization message is short and
+#   readable instead of truncated.
+VERSION = "1.5.15"
 
 
 def _git_version() -> str:

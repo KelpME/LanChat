@@ -33,21 +33,11 @@ case "$ACTION" in
       echo "lanchat: pkexec not available — cannot prompt for admin rights" >&2
       exit 1
     fi
-    # One pkexec root invocation does the whole action so the user is prompted
-    # exactly once. Everything inside runs as root via ufw.
-    pkexec bash -c '
-      set -e
-      PORT='"$PORT"'
-      LAN='"$LAN"'
-      ACTION='"$ACTION"'
-      if [ "$ACTION" = "open" ]; then
-        ufw status numbered 2>/dev/null | grep -q "4812/udp.*ALLOW" || ufw allow from "$LAN" to any port "$PORT" proto udp
-        ufw status numbered 2>/dev/null | grep -q "4812/tcp.*ALLOW" || ufw allow from "$LAN" to any port "$PORT" proto tcp
-      else
-        ufw delete allow from "$LAN" to any port "$PORT" proto udp 2>/dev/null || true
-        ufw delete allow from "$LAN" to any port "$PORT" proto tcp 2>/dev/null || true
-      fi
-    '
+    # Run a tiny helper script (not an inline bash -c) so the polkit password
+    # prompt shows a short command instead of a huge ufw string that gets
+    # truncated. The helper runs the whole action as root via ufw.
+    helper="$(cd "$(dirname "$0")" && pwd)/lanchat-firewall-root.sh"
+    pkexec "$helper" "$ACTION" "$LAN" "$PORT"
     echo "lanchat: port $PORT $ACTION (from $LAN)"
     ;;
   *)
