@@ -208,6 +208,14 @@ Panel {
     (Lanchat.chatAlertPeerId === "" || Lanchat.chatAlertPeerId === selectedPeerId)
   }
 
+  // Show the persistent firewall warning in the peers-online bar: only when
+  // the daemon is actually running AND the port is confirmed blocked. If the
+  // daemon is down (that's its own alert) or the port is open/unknown, don't
+  // show a redundant firewall warning.
+  readonly property bool showFwAlert: {
+    Lanchat.daemonState === "running" && Lanchat.firewall.open === false
+  }
+
   // Outgoing attachments staged in the compose area, NOT yet sent. Picking
   // files appends here; the user reviews each, removes any, then presses Send.
   // [{name, path}]
@@ -399,6 +407,8 @@ Panel {
     Lanchat.panelOpen = root.opened
     if (root.opened) {
       Lanchat.clearUnread()
+      // Refresh firewall state so the peers-online alert is current.
+      Lanchat.refreshFirewall()
       if (selectedPeerId === "" && Lanchat.displayPeers.length > 0)
         selectedPeerId = Lanchat.displayPeers[0].id
       Qt.callLater(function() { list.positionViewAtEnd() })
@@ -859,13 +869,16 @@ Panel {
               Item {
                 id: peersOnlineBar
                 width: parent.width
-                height: Style.space(26)
+                // Extra height when a firewall warning is shown below the
+                // daemon-status line (daemon running but port blocked).
+                height: Style.space(26) + (showFwAlert ? Style.space(16) : 0)
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.topMargin: Style.spacing.xs
 
                 Text {
+                  id: daemonStatusText
                   anchors.left: parent.left
                   anchors.leftMargin: Style.spacing.sm
                   anchors.verticalCenter: parent.verticalCenter
@@ -877,6 +890,22 @@ Panel {
                   color: Lanchat.daemonState === "running"
                     ? (Lanchat.onlineCount > 0 ? Color.accent : Color.muted)
                     : Color.urgent
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+
+                // Firewall warning: the daemon is up but port 4812 is
+                // blocked, so LAN peers can't reach us. Persistent (unlike
+                // the transient chat alert) so it's not missed.
+                Text {
+                  id: firewallAlertText
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.spacing.sm
+                  anchors.top: daemonStatusText.bottom
+                  anchors.topMargin: Style.space(3)
+                  visible: showFwAlert
+                  text: "⚠ Firewall blocking port 4812 — peers can't reach you"
+                  color: Color.urgent
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                 }
