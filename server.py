@@ -123,7 +123,9 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   button, matching the other right-aligned controls).
 # 1.5.12 — "Save to" row now shows the full path (with parent folders, e.g.
 #   /home/tmo/Downloads) instead of only the folder name; middle-elide when long.
-VERSION = "1.5.12"
+# 1.5.13 — "Save to" path keeps the folder + one parent visible and truncates
+#   the leading part (…/parent/folder) so the tail stays readable.
+VERSION = "1.5.13"
 
 
 def _git_version() -> str:

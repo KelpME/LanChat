@@ -363,6 +363,20 @@ Panel {
     Quickshell.execDetached(["xdg-open", Lanchat.logPath()])
   }
 
+  // Shorten a filesystem path for display: always keep at least the folder
+  // and its immediate parent visible (e.g. /home/tmo/Downloads stays, a deeper
+  // /data/a/b/c/downloads becomes …/b/c/downloads). The leading part is
+  // collapsed so the tail — the part you actually care about — stays readable.
+  function shortPath(path) {
+    var p = String(path || "")
+    p = p.replace(/\/+$/, "")
+    if (!p) return ""
+    var parts = p.split("/").filter(function(s) { return s !== "" })
+    if (parts.length <= 2) return p
+    // Keep the last two components, prefix with an ellipsis.
+    return "…/" + parts.slice(parts.length - 2).join("/")
+  }
+
   // Wraps a right-side options area. If the options are wider than the row,
   // they clip and a trailing "…" appears, hinting the user to widen the column.
   component ClippedOptions: Item {
@@ -1503,11 +1517,11 @@ Panel {
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
                         width: Style.space(110)
-                        text: Lanchat.downloadDir
+                        text: root.shortPath(Lanchat.downloadDir)
                         color: Color.popups.text
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
-                        elide: Text.ElideMiddle
+                        elide: Text.ElideLeft
                         maximumLineCount: 1
                         horizontalAlignment: Text.AlignRight
                       }
