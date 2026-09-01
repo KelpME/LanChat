@@ -44,6 +44,56 @@ def _is_active() -> bool:
     return r.returncode == 0 and r.stdout.strip() == "active"
 
 
+def _ensure_firewall() -> None:
+    """Open lanchat's port (4812) if a firewall is active, at install time.
+
+    This runs AFTER the cryptography dependency step, so a password prompt
+    (sudo -n then pkexec) may already have been shown — we piggyback the same
+    admin escalation rather than requiring a second manual step. If no
+    firewall is active there is nothing to do; if sudo isn't available we warn
+    (the panel's Open button can do it later via the scoped sudoers rule).
+
+    Best-effort: never fail the whole install over a firewall hiccup.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    sudoers = os.path.join(here, "scripts", "lanchat-sudoers.sh")
+    firewall = os.path.join(here, "scripts", "lanchat-firewall.sh")
+
+    # Only bother if a firewall is actually active.
+    for unit in ("ufw", "firewalld"):
+        r = _run(["systemctl", "is-active", unit])
+        if r.returncode == 0 and r.stdout.strip() == "active":
+            break
+    else:
+        print("lanchat: no active firewall — nothing to open.", file=sys.stderr)
+        return
+
+    # Escalate exactly like the cryptography install: sudo -n, then pkexec.
+    def escalate(args):
+        if shutil.which("sudo"):
+            r = _run(["sudo", "-n"] + args)
+            if r.returncode == 0:
+                return r
+        if shutil.which("pkexec"):
+            return _run(["pkexec"] + args)
+        return None
+
+    # 1. Install the scoped sudoers rule so future open/close needs no prompt.
+    r = escalate(["bash", sudoers])
+    if r is None or r.returncode != 0:
+        print("lanchat: could not install firewall sudoers rule (skipping). "
+              "Run `make firewall-open` once, or use the panel's Open button.",
+              file=sys.stderr)
+        return
+    # 2. Open the port (the firewall script now runs sudo -n ufw via sudoers).
+    r2 = _run(["bash", firewall, "open"])
+    if r2.returncode == 0:
+        print("lanchat: firewall port 4812 opened for the LAN.", file=sys.stderr)
+    else:
+        print("lanchat: firewall open reported an issue:\n%s"
+              % (r2.stdout + r2.stderr).strip(), file=sys.stderr)
+
+
 def main() -> int:
     if not os.path.exists(UNIT_SRC):
         print("lanchat: unit source missing: %s" % UNIT_SRC, file=sys.stderr)
@@ -143,6 +193,11 @@ def main() -> int:
     if not _is_active():
         print("lanchat: unit enabled but daemon not active", file=sys.stderr)
         return 1
+    # Fresh install: open the firewall port at the one point a password may
+    # already have been typed (the cryptography step above). Best-effort —
+    # a firewall failure doesn't fail the install; the panel's Open button
+    # can retry later.
+    _ensure_firewall()
     return 0
 
 

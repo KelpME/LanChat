@@ -117,6 +117,12 @@ QtObject {
     return lanchat.logPathValue
   }
 
+  // Firewall reachability state (is lanchat's port 4812 open inbound?).
+  // fwOpen: true=open, false=blocked, null=unknown (couldn't read).
+  property var firewall: ({ open: null, backend: "", detail: "" })
+  // Last error string when an open/close action failed (e.g. sudoers missing).
+  property string firewallError: ""
+
   // Path to the systemd-ensure helper (installs/enables the daemon's systemd
   // unit on first run so a fresh plugin install is fully automatic).
   function ensureSystemdPath() {
@@ -341,6 +347,19 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setHttp", enabled: enabled }) + "\n")
   }
 
+  // Firewall controls: read current status, or open/close port 4812.
+  function refreshFirewall() {
+    daemon.write(JSON.stringify({ cmd: "firewallStatus" }) + "\n")
+  }
+  function firewallOpen() {
+    lanchat.firewallError = ""
+    daemon.write(JSON.stringify({ cmd: "firewallOpen" }) + "\n")
+  }
+  function firewallClose() {
+    lanchat.firewallError = ""
+    daemon.write(JSON.stringify({ cmd: "firewallClose" }) + "\n")
+  }
+
   // Set this machine's display name (persisted by the daemon).
   function setMyName(name) {
     var clean = String(name || "").trim()
@@ -554,6 +573,7 @@ QtObject {
       if (obj.readReceiptsEnabled !== undefined) lanchat.readReceiptsEnabled = obj.readReceiptsEnabled
       if (obj.showReadReceipts !== undefined) lanchat.showReadReceipts = obj.showReadReceipts
       if (obj.logPath) lanchat.logPathValue = obj.logPath
+      if (obj.firewall) lanchat.firewall = obj.firewall
       lanchat.reconcileFriendRequests()
       lanchat.rebuildDisplayPeers()
       lanchat.refreshHistory()
@@ -609,6 +629,18 @@ QtObject {
 
     case "accept-requests":
       lanchat.acceptRequests = obj.enabled === true
+      break
+
+    case "firewall-status":
+      if (obj.open !== undefined || obj.backend !== undefined) {
+        lanchat.firewall = { open: obj.open, backend: obj.backend || "", detail: obj.detail || "" }
+      }
+      if (obj.error) {
+        lanchat.firewallError = obj.error
+        lanchat.showChatAlert(obj.error || "Firewall action failed", true, "")
+      } else {
+        lanchat.firewallError = ""
+      }
       break
 
     case "http":

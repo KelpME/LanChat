@@ -1074,6 +1074,93 @@ Panel {
                     }
                   }
 
+                  // Firewall row — shows whether lanchat's port (4812) is
+                  // reachable inbound, with Open/Close buttons. Uses the
+                  // scoped sudoers rule (no password prompt); if that rule
+                  // isn't installed yet the daemon reports how to set it up.
+                  Item {
+                    width: parent.width
+                    height: Style.space(30)
+
+                    MouseArea {
+                      id: fwTipHover
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    // Colored status dot: accent=open, urgent=blocked,
+                    // muted=unknown.
+                    Rectangle {
+                      id: fwDot
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: Style.space(8)
+                      height: Style.space(8)
+                      radius: width / 2
+                      color: Lanchat.firewall.open === true ? Color.accent
+                           : Lanchat.firewall.open === false ? Color.urgent
+                           : Color.muted
+                    }
+
+                    Text {
+                      id: fwLabel
+                      anchors.left: fwDot.right
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Port 4812"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Text {
+                      id: fwState
+                      anchors.left: fwLabel.right
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.right: fwCloseBtn.left
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: Lanchat.firewall.open === true ? "Open"
+                          : Lanchat.firewall.open === false ? "Blocked"
+                          : "Unknown"
+                      color: Lanchat.firewall.open === true ? Color.accent
+                           : Lanchat.firewall.open === false ? Color.urgent
+                           : Color.muted
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      elide: Text.ElideRight
+                    }
+
+                    PanelToolTip {
+                      visible: fwTipHover.containsMouse
+                      text: Lanchat.firewall.detail || "Check whether lanchat's port is reachable."
+                    }
+
+                    // Close button (lock glyph).
+                    Button {
+                      id: fwCloseBtn
+                      anchors.right: fwOpenBtn.left
+                      anchors.rightMargin: Style.spacing.xs
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "\uF023"  // lock
+                      tooltipText: "Close port 4812 (block inbound)"
+                      onClicked: Lanchat.firewallClose()
+                    }
+
+                    // Open button (unlock glyph).
+                    Button {
+                      id: fwOpenBtn
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "\uF09C"  // unlock
+                      tooltipText: "Open port 4812 to the LAN (needs the scoped sudoers rule — see `make firewall-open`)"
+                      onClicked: Lanchat.firewallOpen()
+                    }
+                  }
+
                   // Online row
                   Item {
                     width: parent.width

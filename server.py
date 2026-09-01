@@ -98,7 +98,12 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   socket per peer (message-over-socket, reconnect+hold/flush+dedupe, accept
 #   over the existing socket). Old and new transports do not interoperate; both
 #   machines must run >= 1.1.0.
-VERSION = "1.5.2"
+# 1.5.3 — firewall reachability indicator + open/close controls. The daemon
+#   detects whether port 4812 (udp+tcp) is open inbound and reports it in the
+#   ready event; Settings shows a status dot + Open/Close buttons. The install
+#   helper now opens the port at install time via the scoped sudoers rule,
+#   piggybacking the admin prompt already used for cryptography.
+VERSION = "1.5.3"
 
 
 def _git_version() -> str:
@@ -2397,6 +2402,85 @@ def _stop_http() -> None:
 
 
 # --------------------------------------------------------------------------
+# Firewall status detection + open/close (port 4812)
+# --------------------------------------------------------------------------
+
+def _run_cmd(args, timeout=5.0):
+    """Run a command, return (returncode, stdout, stderr). Never raises."""
+    try:
+        r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, timeout=timeout)
+        return r.returncode, r.stdout, r.stderr
+    except (OSError, subprocess.TimeoutExpired):
+        return -1, "", ""
+
+
+def _firewall_status() -> dict:
+    """Detect whether lanchat's port 4812 (udp+tcp) is reachable inbound.
+
+    Returns {open, backend, detail}:
+      open: True  -> 4812 allowed in (or no active firewall)
+            False -> a firewall is active and 4812 is NOT allowed in
+            None  -> unknown (couldn't read the firewall state)
+      backend: "ufw" | "firewalld" | "none"
+      detail: human-readable explanation for the UI tooltip.
+    """
+    # ufw active?
+    rc, _, _ = _run_cmd(["systemctl", "is-active", "ufw"])
+    ufw_active = rc == 0
+    # firewalld active?
+    rc2, _, _ = _run_cmd(["systemctl", "is-active", "firewalld"])
+    fwld_active = rc2 == 0
+
+    if not ufw_active and not fwld_active:
+        return {"open": True, "backend": "none",
+                "detail": "No active firewall — port 4812 is reachable."}
+
+    if ufw_active:
+        # The scoped sudoers rule grants `sudo -n ufw status numbered`
+        # passwordless, so we can read the real rule set. If sudoers isn't
+        # installed, sudo fails and we report unknown with a hint.
+        rc, out, err = _run_cmd(["sudo", "-n", "ufw", "status", "numbered"])
+        if rc != 0:
+            return {"open": None, "backend": "ufw",
+                    "detail": "UFW active but can't read rules (run `make firewall-open` once to install the scoped sudoers rule)."}
+        udp_ok = "4812/udp" in out and "ALLOW" in out
+        tcp_ok = "4812/tcp" in out and "ALLOW" in out
+        if udp_ok and tcp_ok:
+            return {"open": True, "backend": "ufw",
+                    "detail": "UFW allows 4812/udp + 4812/tcp from the LAN."}
+        missing = []
+        if not udp_ok:
+            missing.append("udp")
+        if not tcp_ok:
+            missing.append("tcp")
+        return {"open": False, "backend": "ufw",
+                "detail": "UFW is blocking 4812/%s — open the port to be reachable." % "+".join(missing)}
+
+    # firewalld active (lanchat's scripts manage ufw only).
+    return {"open": False, "backend": "firewalld",
+            "detail": "firewalld is active — lanchat's scripts manage ufw only; open 4812/udp+tcp via firewall-cmd."}
+
+
+def _firewall_script(action: str) -> dict:
+    """Run scripts/lanchat-firewall.sh open|close and return a status dict.
+
+    The script uses `sudo -n ufw` internally, which requires the scoped
+    sudoers rule (installed by `make firewall-open`). If that rule is missing,
+    sudo fails and we surface a clear message instead of failing silently.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    script = os.path.join(here, "scripts", "lanchat-firewall.sh")
+    rc, out, err = _run_cmd(["bash", script, action], timeout=30.0)
+    if rc == 0:
+        return _firewall_status()
+    # sudoers rule missing / sudo failed.
+    return {"open": None, "backend": "ufw",
+            "detail": "Couldn't %s the port (sudo failed). Run `make firewall-open` once to install the scoped sudoers rule, then retry." % action,
+            "error": (out + err).strip()[:200]}
+
+
+# --------------------------------------------------------------------------
 # stdin command loop
 # --------------------------------------------------------------------------
 
@@ -2665,6 +2749,12 @@ def handle_command(cmd: dict) -> None:
         send_control(str(cmd.get("to", "")), "typingStopped")
     elif kind == "readReceipt":
         send_control(str(cmd.get("to", "")), "read", str(cmd.get("mid", "")))
+    elif kind == "firewallStatus":
+        _emit({"event": "firewall-status", **_firewall_status()})
+    elif kind == "firewallOpen":
+        _emit({"event": "firewall-status", **_firewall_script("open")})
+    elif kind == "firewallClose":
+        _emit({"event": "firewall-status", **_firewall_script("close")})
 
 
 def stdin_loop() -> None:
@@ -2785,6 +2875,7 @@ def _ready_event() -> dict:
         "readReceiptsEnabled": read_receipts_enabled(),
         "showReadReceipts": show_read_receipts(),
         "logPath": _LOG_PATH,
+        "firewall": _firewall_status(),
     }
 
 
