@@ -117,7 +117,9 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   Panel-size option buttons; improve My ID text contrast.
 # 1.5.9 — brighten Settings section headers (Color.popups.text instead of
 #   muted) so the group titles are no longer dark.
-VERSION = "1.5.9"
+# 1.5.10 — center Settings section titles, use the accent color (same as My
+#   ID), and underline them.
+VERSION = "1.5.10"
 
 
 def _git_version() -> str:

@@ -982,14 +982,15 @@ Panel {
                     width: parent.width
                     height: Style.space(18)
                     Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
+                      anchors.horizontalCenter: parent.horizontalCenter
+
                       anchors.verticalCenter: parent.verticalCenter
                       text: "IDENTITY"
-                      color: Color.popups.text
+                      color: Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                      font.underline: true
                     }
                   }
 
@@ -1120,14 +1121,15 @@ Panel {
                     width: parent.width
                     height: Style.space(18)
                     Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
+                      anchors.horizontalCenter: parent.horizontalCenter
+
                       anchors.verticalCenter: parent.verticalCenter
                       text: "PRESENCE"
-                      color: Color.popups.text
+                      color: Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                      font.underline: true
                     }
                   }
 
@@ -1276,14 +1278,15 @@ Panel {
                     width: parent.width
                     height: Style.space(18)
                     Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
+                      anchors.horizontalCenter: parent.horizontalCenter
+
                       anchors.verticalCenter: parent.verticalCenter
                       text: "CHAT"
-                      color: Color.popups.text
+                      color: Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                      font.underline: true
                     }
                   }
 
@@ -1587,14 +1590,15 @@ Panel {
                     width: parent.width
                     height: Style.space(18)
                     Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
+                      anchors.horizontalCenter: parent.horizontalCenter
+
                       anchors.verticalCenter: parent.verticalCenter
                       text: "APPEARANCE"
-                      color: Color.popups.text
+                      color: Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                      font.underline: true
                     }
                   }
 
@@ -1708,14 +1712,15 @@ Panel {
                     width: parent.width
                     height: Style.space(18)
                     Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
+                      anchors.horizontalCenter: parent.horizontalCenter
+
                       anchors.verticalCenter: parent.verticalCenter
                       text: "AGENTS"
-                      color: Color.popups.text
+                      color: Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                      font.underline: true
                     }
                   }
 
@@ -1805,14 +1810,15 @@ Panel {
                     width: parent.width
                     height: Style.space(18)
                     Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
+                      anchors.horizontalCenter: parent.horizontalCenter
+
                       anchors.verticalCenter: parent.verticalCenter
                       text: "REACHABILITY"
-                      color: Color.popups.text
+                      color: Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                      font.underline: true
                     }
                   }
 
@@ -1899,14 +1905,15 @@ Panel {
                     width: parent.width
                     height: Style.space(18)
                     Text {
-                      anchors.left: parent.left
-                      anchors.leftMargin: Style.spacing.sm
+                      anchors.horizontalCenter: parent.horizontalCenter
+
                       anchors.verticalCenter: parent.verticalCenter
                       text: "DEVELOPER"
-                      color: Color.popups.text
+                      color: Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.weight: Font.Bold
+                      font.underline: true
                     }
                   }
 
