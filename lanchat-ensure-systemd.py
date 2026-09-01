@@ -67,6 +67,17 @@ def main() -> int:
         print("lanchat: installing required 'cryptography' dependency...", file=sys.stderr)
         installed = False
         if shutil.which("pacman"):
+            # Explain WHY a password is needed before prompting. The lanchat
+            # daemon requires the `cryptography` library (cert fingerprinting,
+            # message-history encryption), and Omarchy doesn't ship it, so we
+            # install it with your system package manager. That needs admin
+            # rights — the prompt you're about to see is for this one install.
+            print(
+                "lanchat: 'cryptography' is required by the lanchat daemon "
+                "(identity fingerprints + encrypted history) but isn't installed "
+                "on your system. Installing it now via pacman needs your "
+                "administrator password — this is a one-time install.",
+                file=sys.stderr)
             # Non-interactive first: sudo -n fails fast instead of hanging on a
             # prompt it can't render (no controlling TTY from the panel).
             r = _run(["sudo", "-n", "pacman", "-S", "--noconfirm", "python-cryptography"])
@@ -75,6 +86,10 @@ def main() -> int:
                 r = _run(["pkexec", "pacman", "-S", "--noconfirm", "python-cryptography"])
             installed = r.returncode == 0
         if not installed:
+            print(
+                "lanchat: could not install via pacman; trying pip instead "
+                "(no admin needed, installs into your user profile)...",
+                file=sys.stderr)
             # Gate on the pip MODULE being importable, not a `pip` binary on
             # PATH (system Python ships no pip binary). --break-system-packages
             # is required on Arch's PEP 668 externally-managed interpreter;
