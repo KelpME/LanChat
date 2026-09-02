@@ -66,7 +66,11 @@ HISTORY_LIMIT = 500
 MAX_FRAME_BUF = 512 * 1024   # a peer must send a newline within this many bytes
 MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 
-# Version of the plugin/daemon. Keep in sync with manifest.json "version".
+# Version of the plugin/daemon. This is the SINGLE source of truth; manifest.json
+# is stamped from it by `make bump-version` (scripts/bump_version.py). Never edit
+# the version by hand in either file — bump with `make bump-version` (or
+# `make bump-version NEW=x.y.z`) so the two can't drift. `make check` verifies
+# they still match.
 # Bump when behaviour changes; breaking changes should bump the major number.
 # The reported version derives from the checked-out git commit (short hash) so
 # both machines can verify they're running the same code; falls back to the
@@ -144,9 +148,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (fetch + fast-forward, daemon/shell reload) rather than only checking; docs
 #   updated to match.
 
-VERSION = "1.5.20"
-
-
+VERSION = "1.5.21"
 def _git_version() -> str:
     try:
         import subprocess as _sp

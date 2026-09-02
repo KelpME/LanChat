@@ -13,11 +13,12 @@ PY      ?= python3
 RUFF    ?= ruff
 TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py test_systemd_control.py test_cert_reload.py test_udp_resilience.py
 PYFILES := server.py naming.py $(TESTS) test_peer.py
+VERSION_SCRIPT := scripts/bump_version.py
 
 # Bare `make` (no target) shows the help listing.
 .DEFAULT_GOAL := help
 
-.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info help-html test-systemd-control systemd-install systemd-status systemd-uninstall firewall-open firewall-close
+.PHONY: help test lint fmt check qml syntax clean typecheck run run-dev dev-info help-html test-systemd-control systemd-install systemd-status systemd-uninstall firewall-open firewall-close bump-version check-version-sync
 
 ## help: list all targets and what they do
 help: ## (default) show this help
@@ -137,7 +138,19 @@ syntax: ## python-compile everything (catches syntax errors)
 	@$(PY) -m py_compile $(PYFILES) && echo "syntax OK"
 
 ## check: lint + QML check + syntax (the pre-commit gate)
-check: lint qml syntax ## run lint, qml, and syntax together
+check: lint qml syntax check-version-sync ## run lint, qml, syntax, and version-sync together
+
+## bump-version: bump the plugin version in BOTH server.py and manifest.json at once
+##   make bump-version            # +0.0.1 (patch)
+##   make bump-version NEW=1.6.0  # explicit x.y.z
+## server.py is the single source of truth; manifest.json is stamped from it so
+## the two can never drift. Never edit the version by hand in either file.
+bump-version: ## bump plugin version (server.py + manifest.json stay in sync)
+	@$(PY) $(VERSION_SCRIPT) $(if $(NEW),$(NEW),)
+
+## check-version-sync: fail if server.py and manifest.json versions disagree
+check-version-sync: ## verify server.py and manifest.json versions match
+	@$(PY) $(VERSION_SCRIPT) --check
 
 ## typecheck: pyright (only if you've installed it)
 typecheck: ## run pyright static analysis (requires pyright installed)

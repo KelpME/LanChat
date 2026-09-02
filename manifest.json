@@ -2,11 +2,14 @@
   "schemaVersion": 1,
   "id": "KelpME.lanchat",
   "name": "Lanchat",
-  "version": "1.5.20",
+  "version": "1.5.21",
   "author": "KelpME",
   "license": "MIT",
   "description": "Private LAN messaging between your own machines. Automatic discovery over UDP, cert-fingerprint peer auth, message history per machine.",
-  "kinds": ["service", "bar-widget"],
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
   "entryPoints": {
     "service": "Service.qml",
     "barWidget": "BarWidget.qml"
