@@ -93,12 +93,12 @@ def main():
 
         # command round-trip over the bridge (QML -> daemon -> event)
         bridge.stdin.write(json.dumps({"cmd": "list"}) + "\n"); bridge.stdin.flush()
-        ev = read_until(bridge, lambda e: e.get("event") == "peers")
+        read_until(bridge, lambda e: e.get("event") == "peers")
         print("OK  command (list) proxied over bridge -> peers event")
 
         # a second command (setName) to confirm repeated round-trips
         bridge.stdin.write(json.dumps({"cmd": "setName", "name": "BridgeRenamed"}) + "\n"); bridge.stdin.flush()
-        ev = read_until(bridge, lambda e: e.get("event") == "ready" and e.get("name") == "BridgeRenamed")
+        read_until(bridge, lambda e: e.get("event") == "ready" and e.get("name") == "BridgeRenamed")
         print("OK  second command (setName) proxied -> ready echo")
 
         # --- daemon down: bridge must exit so the QML restarts it -------
