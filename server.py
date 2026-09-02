@@ -511,7 +511,7 @@ def _gen_cert() -> None:
         subprocess.run(
             ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
              "-keyout", CERT_KEY, "-out", CERT_PEM, "-days", "3650",
-             "-subj", "/CN=lanchat-%s" % str(CONFIG.get("id") or "peer"[:8])],
+             "-subj", "/CN=lanchat-%s" % str(STATE.config.get("id") or "peer"[:8])],
             check=True, capture_output=True,
         )
     except (OSError, subprocess.CalledProcessError):
@@ -946,7 +946,7 @@ def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = N
     with _peers_lock:
         existed = pid in STATE.peers
         prev_version = STATE.peers[pid].get("version", "") if existed else ""
-        _peers[pid] = {
+        STATE.peers[pid] = {
             "id": pid,
             "name": name,
             "address": address,
