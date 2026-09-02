@@ -6,22 +6,25 @@ find each other — no accounts, no cloud, no shared secrets to copy.
 
 ## How it connects
 
-Lanchat is **private by default** — safe on public networks out of the box.
+Lanchat is **invisible by default** — safe on public networks out of the box.
+Your visibility is controlled by the **Discoverable** switch in **Settings**
+(it's **Off** by default):
 
-- **Private mode (default):** your machine is **invisible** on the network. It
+- **Discoverable Off:** your machine is **invisible** on the network. It
   doesn't broadcast its presence, doesn't reply to discovery probes, so
   strangers on the same wifi can't find you or even confirm you exist.
-- **Open mode:** you broadcast your presence and are discoverable, and anyone
-  on the LAN can send you a friend request. Use this on **trusted networks**
-  (your own machines at home).
+- **Discoverable On:** you broadcast your presence and are discoverable, and
+  anyone on the LAN can send you a friend request. Use this on **trusted
+  networks** (your own machines at home).
 
 To talk to someone:
 
-- **In private mode** — add them directly by their **cert fingerprint**. Get
-  their fingerprint from *their* Settings → **My ID**, paste it into
-  **Settings → Add friend**, and they're added as a confirmed friend.
-- **In open mode** — they show up in your peer list; click **+** on their card
-  to send a friend request, or they send one to you.
+- **When Discoverable is off** — add them directly by their **cert
+  fingerprint**. Get their fingerprint from *their* Settings → **My ID**,
+  paste it into **Settings → Add friend**, and they're added as a confirmed
+  friend.
+- **When Discoverable is on** — they show up in your peer list; click **+** on
+  their card to send a friend request, or they send one to you.
 
 **The friend handshake is the gate.** Seeing a machine doesn't mean it can
 message you. A stranger can *ask* to be friends, but can't message you until
@@ -56,7 +59,7 @@ run the same recent version.
   with the requester's verified fingerprint to confirm. **Off**: all incoming
   requests are rejected silently.
 - **Add friend** — paste a cert fingerprint here to add a confirmed friend
-  directly (how you connect in private mode).
+  directly (how you connect when Discoverable is off).
 - **Agent full access** — for the optional HTTP API. On = an agent can read
   your chats/peers/files; off = send-only. The API itself is loopback-only.
 

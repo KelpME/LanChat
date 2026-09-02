@@ -34,21 +34,23 @@
 Omarchy Quattro shell plugin. Install it on each machine, enable it, and they
 find each other — no accounts, no cloud, no shared secrets to copy.</p>
 <h2>How it connects</h2>
-<p>Lanchat is <strong>private by default</strong> — safe on public networks out of the box.</p>
+<p>Lanchat is <strong>invisible by default</strong> — safe on public networks out of the box.
+Your visibility is controlled by the <strong>Discoverable</strong> switch in <strong>Settings</strong>
+(it's <strong>Off</strong> by default):</p>
 <ul>
-<li><strong>Private mode (default):</strong> your machine is <strong>invisible</strong> on the network. It
+<li><strong>Discoverable Off:</strong> your machine is <strong>invisible</strong> on the network. It
   doesn't broadcast its presence, doesn't reply to discovery probes, so
   strangers on the same wifi can't find you or even confirm you exist.</li>
-<li><strong>Open mode:</strong> you broadcast your presence and are discoverable, and anyone
-  on the LAN can send you a friend request. Use this on <strong>trusted networks</strong>
-  (your own machines at home).</li>
+<li><strong>Discoverable On:</strong> you broadcast your presence and are discoverable, and
+  anyone on the LAN can send you a friend request. Use this on <strong>trusted
+  networks</strong> (your own machines at home).</li>
 </ul>
 <p>To talk to someone:</p>
 <ul>
-<li><strong>In private mode</strong> — add them directly by their <strong>cert fingerprint</strong>. Get
+<li><strong>When Discoverable is off</strong> — add them directly by their <strong>cert fingerprint</strong>. Get
   their fingerprint from <em>their</em> Settings → <strong>My ID</strong>, paste it into
   <strong>Settings → Add friend</strong>, and they're added as a confirmed friend.</li>
-<li><strong>In open mode</strong> — they show up in your peer list; click <strong>+</strong> on their card
+<li><strong>When Discoverable is on</strong> — they show up in your peer list; click <strong>+</strong> on their card
   to send a friend request, or they send one to you.</li>
 </ul>
 <p><strong>The friend handshake is the gate.</strong> Seeing a machine doesn't mean it can
@@ -79,7 +81,7 @@ run the same recent version.</p>
   with the requester's verified fingerprint to confirm. <strong>Off</strong>: all incoming
   requests are rejected silently.</li>
 <li><strong>Add friend</strong> — paste a cert fingerprint here to add a confirmed friend
-  directly (how you connect in private mode).</li>
+  directly (how you connect when Discoverable is off).</li>
 <li><strong>Agent full access</strong> — for the optional HTTP API. On = an agent can read
   your chats/peers/files; off = send-only. The API itself is loopback-only.</li>
 </ul>
