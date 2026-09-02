@@ -134,7 +134,14 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # 1.5.16 — systemd: add lanchat.path + lanchat-restart.service so the daemon
 #   restarts automatically when server.py/scripts change (e.g. after an update),
 #   so a running daemon never keeps reporting a stale version.
-VERSION = "1.5.18"
+#  1.5.19 — thread header: per-chat actions only show when they can actually
+#   act (Unfriend only for a confirmed friend; Clear chat only when the peer has
+#   history). Update button: when a badge shows, clicking now APPLIES the update
+#   (git fetch origin main + fast-forward, the safe path) — refusing if local
+#   edits block it, and surfacing a "Discard & update" clean-install button; auto-
+#   restarts the daemon (via lanchat.path) and the shell so the new UI loads.
+
+VERSION = "1.5.19"
 
 
 def _git_version() -> str:
