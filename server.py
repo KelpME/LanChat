@@ -134,7 +134,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # 1.5.16 — systemd: add lanchat.path + lanchat-restart.service so the daemon
 #   restarts automatically when server.py/scripts change (e.g. after an update),
 #   so a running daemon never keeps reporting a stale version.
-VERSION = "1.5.17"
+VERSION = "1.5.18"
 
 
 def _git_version() -> str:
