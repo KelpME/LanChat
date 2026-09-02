@@ -286,6 +286,92 @@ def main():
                accepted.get("id") == idb, "A did not mark B as a confirmed friend"
         print("OK  12. two-way UDP handshake: B's accept travels back over UDP and A confirms the friend")
 
+        # ------------------------------------------------------------------
+        # 13) Cancel an OUTGOING friend request (retraction). A fresh pair so
+        #     we don't disturb the A<->B friendship established above.
+        hc = make_home("c", 4961, "Charlie"); hd = make_home("d", 4962, "Delta")
+        c = Daemon(hc, 4961, "Charlie"); d = Daemon(hd, 4962, "Delta")
+        try:
+            c.wait_event("ready"); d.wait_event("ready")
+            idc = _cert_fp(hc); idd = _cert_fp(hd)
+            def disco2(port, pid, name, pport):
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.sendto(json.dumps({"t": "hello", "id": pid, "name": name, "port": pport}).encode(),
+                         ("127.0.0.1", port))
+                s.close()
+            disco2(c.port, idd, "Delta", 4962)
+            disco2(d.port, idc, "Charlie", 4961)
+            time.sleep(1.5)
+
+            # C -> D friend request lands on D.
+            c.cmd(cmd="udpFriendRequest", to=idd, name="Delta")
+            frc = d.wait_event("friend-request")
+            assert frc and frc.get("from") == idc, "D did not receive C's friend request"
+            print("OK  13a. request sent: D received C's friend request")
+
+            # C cancels -> C emits friend-rejected locally (clears C's banner),
+            # D must drop the incoming request (friend-rejected + no friend).
+            c.cmd(cmd="cancelFriendRequest", id=idd)
+            crej = c.wait_event("friend-rejected")
+            assert crej and crej.get("id") == idd, "C did not drop its outgoing request"
+            drej = d.wait_event("friend-rejected")
+            assert drej and drej.get("id") == idc, "D did not drop the incoming request on cancel"
+            time.sleep(0.5)
+            # No friendship may result: D must not have C as a (confirmed) friend,
+            # and D must hold nothing pending for C.
+            dfriends = d.events_of("friends")
+            assert not any(f.get("id") == idc and f.get("confirmed")
+                           for e in dfriends for f in e.get("friends", [])), \
+                "cancel must not leave a confirmed friendship on D"
+            dpe = d.events_of("friend-request")
+            kept = [e for e in dpe if not e.get("outgoing")]
+            assert not any(e.get("from") == idc for e in kept), "D still surfaces the cancelled request"
+            print("OK  13b. cancel retracted on both sides; no friendship formed")
+        finally:
+            c.stop(); d.stop()
+            shutil.rmtree(hc, ignore_errors=True); shutil.rmtree(hd, ignore_errors=True)
+
+        # ------------------------------------------------------------------
+        # 14) RECIPIENT DENIES a request over UDP: the reject must travel back
+        #     signed UDP so the requester learns they were denied (clears its
+        #     "Waiting to accept" banner) and never adds/confirms them.
+        he = make_home("e", 4971, "Echo"); hf = make_home("f", 4972, "Foxtrot")
+        e = Daemon(he, 4971, "Echo"); f = Daemon(hf, 4972, "Foxtrot")
+        try:
+            e.wait_event("ready"); f.wait_event("ready")
+            ide = _cert_fp(he); idf = _cert_fp(hf)
+            def disco3(port, pid, name, pport):
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.sendto(json.dumps({"t": "hello", "id": pid, "name": name, "port": pport}).encode(),
+                         ("127.0.0.1", port))
+                s.close()
+            disco3(e.port, idf, "Foxtrot", 4972)
+            disco3(f.port, ide, "Echo", 4971)
+            time.sleep(1.5)
+
+            # E -> F friend request lands on F.
+            e.cmd(cmd="udpFriendRequest", to=idf, name="Foxtrot")
+            frf = f.wait_event("friend-request")
+            assert frf and frf.get("from") == ide, "F did not receive E's friend request"
+            print("OK  14a. request sent: F received E's friend request")
+
+            # F DENIES -> E must learn via signed UDP reject: E emits
+            # friend-rejected (clears E's outgoing banner) and must NOT have F
+            # as a confirmed friend.
+            f.cmd(cmd="rejectFriend", id=ide)
+            erej = e.wait_event("friend-rejected")
+            assert erej and erej.get("id") == idf, \
+                "E did not learn it was denied (UDP reject not delivered): got %s" % (erej or {})
+            time.sleep(0.5)
+            efriends = e.events_of("friends")
+            assert not any(fr_.get("id") == idf and fr_.get("confirmed")
+                           for ev in efriends for fr_ in ev.get("friends", [])), \
+                "denied request must not leave E with F as a confirmed friend"
+            print("OK  14b. recipient's deny travelled back over UDP; sender banner cleared, no friend")
+        finally:
+            e.stop(); f.stop()
+            shutil.rmtree(he, ignore_errors=True); shutil.rmtree(hf, ignore_errors=True)
+
         print("\nALL FRIEND TESTS PASSED")
         return 0
     finally:

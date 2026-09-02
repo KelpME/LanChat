@@ -474,6 +474,12 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "rejectFriend", id: id }) + "\n")
   }
 
+  // Withdraw a friend request WE sent that is still pending (peer hasn't
+  // accepted). Retracts it on both sides and clears the outgoing banner.
+  function cancelFriendRequest(id) {
+    daemon.write(JSON.stringify({ cmd: "cancelFriendRequest", id: id }) + "\n")
+  }
+
   // Remove a peer from your friends list (unfriend).
   function unfriend(id) {
     daemon.write(JSON.stringify({ cmd: "unfriend", id: id }) + "\n")

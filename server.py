@@ -148,7 +148,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (fetch + fast-forward, daemon/shell reload) rather than only checking; docs
 #   updated to match.
 
-VERSION = "1.5.21"
+VERSION = "1.5.23"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -940,6 +940,20 @@ def unfriend(pid: str) -> bool:
     return len(friends) != before
 
 
+def _unfriend_if_unconfirmed(pid: str) -> bool:
+    """Remove a peer ONLY if they are a pending (unconfirmed) request, never a
+    confirmed friend. Returns True if a record was removed."""
+    friends = CONFIG.get("friends", [])
+    for f in friends:
+        if f.get("id") == pid:
+            if f.get("confirmed"):
+                return False
+            break
+    else:
+        return False
+    return unfriend(pid)
+
+
 def is_trusted(pid: str, address: str = "") -> bool:
     """Accept traffic only from confirmed friends or pending-request peers.
 
@@ -1023,6 +1037,16 @@ def _udp_listener(sock: socket.socket) -> None:
                 # reply is held forever when no connection exists — the one-way
                 # handshake bug). Verify the signed accept and confirm the friend.
                 _handle_udp_friend_accept(sock, pkt, addr[0])
+            elif t == "friend-cancel":
+                # The requester withdrew their friend request. Verify the signed
+                # cancel and clear the pending request + banner on this side.
+                _handle_udp_friend_cancel(sock, pkt, addr[0])
+            elif t == "friend-reject":
+                # The accepter declined the request. Verify the signed reject so
+                # the original requester learns they were denied (a TCP reject is
+                # dropped when no connection exists — the one-way bug) and clears
+                # its pending state + banner.
+                _handle_udp_friend_reject(sock, pkt, addr[0])
         except Exception:
             # Never let one packet kill the discovery listener. Log (rate-safely
             # is hard here; just one line per bad packet is acceptable and rare).
@@ -1210,6 +1234,145 @@ def _handle_udp_friend_accept(sock: socket.socket, pkt: dict, addr: str) -> None
         held = _pending_sent.pop(claimed, [])
     _diag("udp-friend-accepted", peer=claimed[:12], name=pname, revealed=len(held))
     _reveal(held)
+
+
+def _send_udp_friend_cancel(sock: socket.socket, pid: str) -> bool:
+    """Send a SIGNED friend-request cancel back to a peer over UDP (no TCP needed).
+
+    The handshake is bidirectional bootstrap: the requester sent a signed UDP
+    request, so a withdrawal must ride the SAME channel — a TCP cancel is
+    dropped when no connection exists yet (the one-way bug). Like the request,
+    the cancel is signed so the recipient can verify it's genuinely from the
+    peer who originally requested them. Returns True if sent.
+    """
+    peer = find_peer(pid)
+    target = (peer or {}).get("address", "")
+    tport = int((peer or {}).get("port") or DEFAULT_PORT)
+    if not target:
+        for f in CONFIG.get("friends", []):
+            if f.get("id") == pid and f.get("address"):
+                target = f.get("address")
+                tport = int(f.get("port") or DEFAULT_PORT)
+                break
+    if not target:
+        _diag("udp-friend-cancel-failed", to=pid[:12], reason="no-address")
+        return False
+    nonce = secrets.token_hex(16)
+    payload = {"t": "friend-cancel",
+               "id": host_id(),
+               "name": display_name(),
+               "cert": _our_cert_pem(),
+               "nonce": nonce,
+               "sig": _sign((host_id() + nonce).encode("utf-8")),
+               "port": port(),
+               "to": pid}
+    try:
+        sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
+        _diag("udp-friend-cancel-sent", to=target, port=tport, nonce=nonce[:8])
+        return True
+    except OSError as e:
+        _diag("udp-friend-cancel-failed", to=target, errno=getattr(e, "errno", None))
+        return False
+
+
+def _handle_udp_friend_cancel(sock: socket.socket, pkt: dict, addr: str) -> None:
+    """Verify + process an inbound UDP friend-cancel (a request that was withdrawn).
+
+    The canceller proves ownership of its claimed cert id (same signature scheme
+    as the request). On success we drop the pending request: discard the peer's
+    held messages and clear the incoming banner so the user no longer sees a
+    request they could Accept.
+    """
+    claimed = str(pkt.get("id") or "")
+    cert_pem = str(pkt.get("cert") or "")
+    nonce = str(pkt.get("nonce") or "")
+    sig = str(pkt.get("sig") or "")
+    name = str(pkt.get("name") or friendly_name(claimed))
+    if not claimed or claimed == host_id():
+        return
+    if _cert_fingerprint_of_pem(cert_pem) != claimed:
+        _diag("udp-friend-cancel-rejected", from_id=claimed[:12], reason="bad-identity")
+        return
+    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
+        _diag("udp-friend-cancel-rejected", from_id=claimed[:12], reason="bad-signature")
+        return
+    # Withdrawn: drop the peer's held inbound messages and clear the incoming
+    # banner. If the canceller was merely a pending (unconfirmed) request we
+    # recorded, remove that record too — but NEVER unfriend a confirmed friend
+    # (a confirmed relationship is not retractable by a stray cancel).
+    with _pending_lock:
+        _pending_first.pop(claimed, None)
+    _unfriend_if_unconfirmed(claimed)
+    _emit({"event": "friend-rejected", "id": claimed, "name": name})
+    _diag("udp-friend-cancelled", peer=claimed[:12], name=name)
+
+
+def _send_udp_friend_reject(sock: socket.socket, pid: str) -> bool:
+    """Send a SIGNED friend-request decline back to a peer over UDP.
+
+    Rejecting = declining the request. The reject must ride the SAME signed UDP
+    channel as the request/accept: a TCP reject (`send_control`) is dropped when
+    no connection exists yet, so the requester would never learn they were denied
+    (the one-way bug) and its "Waiting to accept" banner would stick forever.
+    """
+    peer = find_peer(pid)
+    target = (peer or {}).get("address", "")
+    tport = int((peer or {}).get("port") or DEFAULT_PORT)
+    if not target:
+        for f in CONFIG.get("friends", []):
+            if f.get("id") == pid and f.get("address"):
+                target = f.get("address")
+                tport = int(f.get("port") or DEFAULT_PORT)
+                break
+    if not target:
+        _diag("udp-friend-reject-failed", to=pid[:12], reason="no-address")
+        return False
+    nonce = secrets.token_hex(16)
+    payload = {"t": "friend-reject",
+               "id": host_id(),
+               "name": display_name(),
+               "cert": _our_cert_pem(),
+               "nonce": nonce,
+               "sig": _sign((host_id() + nonce).encode("utf-8")),
+               "port": port(),
+               "to": pid}
+    try:
+        sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
+        _diag("udp-friend-reject-sent", to=target, port=tport, nonce=nonce[:8])
+        return True
+    except OSError as e:
+        _diag("udp-friend-reject-failed", to=target, errno=getattr(e, "errno", None))
+        return False
+
+
+def _handle_udp_friend_reject(sock: socket.socket, pkt: dict, addr: str) -> None:
+    """Verify + process an inbound UDP friend-reject (the request was declined).
+
+    We were the requester and the peer declined. The peer proves ownership of its
+    claimed cert id (same signature scheme). On success we drop our outbound
+    pending state and clear the "Waiting to accept" banner — the peer is NOT
+    added as a friend, and we never confirm them.
+    """
+    claimed = str(pkt.get("id") or "")
+    cert_pem = str(pkt.get("cert") or "")
+    nonce = str(pkt.get("nonce") or "")
+    sig = str(pkt.get("sig") or "")
+    name = str(pkt.get("name") or friendly_name(claimed))
+    if not claimed or claimed == host_id():
+        return
+    if _cert_fingerprint_of_pem(cert_pem) != claimed:
+        _diag("udp-friend-reject-rejected", from_id=claimed[:12], reason="bad-identity")
+        return
+    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
+        _diag("udp-friend-reject-rejected", from_id=claimed[:12], reason="bad-signature")
+        return
+    # Declined: drop our held-outgoing content and clear the banner. Never add
+    # or confirm them as a friend.
+    with _pending_lock:
+        _pending_sent.pop(claimed, None)
+    _unfriend_if_unconfirmed(claimed)
+    _emit({"event": "friend-rejected", "id": claimed, "name": name})
+    _diag("udp-friend-rejected", peer=claimed[:12], name=name)
 
 
 def _local_subnet_hosts(max_hosts: int = 512) -> list:
@@ -1814,9 +1977,11 @@ def _handle_incoming(msg: dict, addr) -> None:
         return
     if msg.get("t") == "friendReject":
         pid = str(msg.get("from", ""))
-        # They declined: drop our held-outgoing messages for them.
+        # They declined: drop our held-outgoing messages and any pending
+        # (unconfirmed) record so we never treat them as a friend.
         with _pending_lock:
             _pending_sent.pop(pid, None)
+        _unfriend_if_unconfirmed(pid)
         _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
         _diag("inbound-friend-reject", peer=pid[:12])
         return
@@ -2544,6 +2709,23 @@ def handle_command(cmd: dict) -> None:
                        "toName": str(cmd.get("name") or friendly_name(to)),
                        "text": "wants to add you as a friend"})
         return
+    if kind == "cancelFriendRequest":
+        # Withdraw a friend request WE sent that is still pending (the peer
+        # hasn't accepted yet). Retracting = tell the peer their incoming
+        # request is void (signed UDP cancel so it lands even with no TCP
+        # connection), drop any held outbound content, and clear our own
+        # pending-request banner. Only meaningful for an unconfirmed peer; if
+        # they already accepted, this is a no-op banner clear.
+        pid = str(cmd.get("id", ""))
+        if pid and not is_friend(pid):
+            with _pending_lock:
+                _pending_sent.pop(pid, None)
+            if _udp_sock is not None:
+                _send_udp_friend_cancel(_udp_sock, pid)
+        if pid:
+            _emit({"event": "friend-rejected", "id": pid})
+            _diag("cancelled-friend-request", peer=pid[:12])
+        return
     if kind == "send":
         att = cmd.get("attachment")
         if att and att.get("path"):
@@ -2775,10 +2957,15 @@ def handle_command(cmd: dict) -> None:
             _diag("friend-added-by-fingerprint", peer=pid[:12], name=pname, addr=addr)
     elif kind == "rejectFriend":
         pid = str(cmd.get("id", ""))
-        # Rejecting = declining the relationship: send the reject notice and
-        # REMOVE the peer from our friend list (no lingering pending record),
-        # which emits a friends event so the UI reconciles the notification
-        # banner and drops the request.
+        # Rejecting = declining the relationship. Notify the requester over
+        # signed UDP so they learn they were denied even with no TCP connection
+        # (a TCP reject is dropped when no socket exists — the one-way bug that
+        # leaves the sender's "Waiting to accept" banner stuck). Then REMOVE the
+        # peer from our friend list (no lingering pending record), which emits a
+        # friends event so the UI reconciles the notification banner and drops
+        # the request.
+        if pid and _udp_sock is not None:
+            _send_udp_friend_reject(_udp_sock, pid)
         send_control(pid, "friendReject")
         with _pending_lock:
             _pending_first.pop(pid, None)

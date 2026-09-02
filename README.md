@@ -221,9 +221,14 @@ How you connect depends on your mode:
    friends show up in the peer list — click the **+** on their card to send a
    friend request.
 2. **Accept a friend request** — requests appear in the notifications banner
-   pinned below the peer list, showing the requester's **verified fingerprint**.
-   Click **Accept**, then **Confirm** to accept after checking the fingerprint
-   matches, or **Reject**.
+   pinned below the peer list, showing the requester's **verified fingerprint**
+   (shortened to its first 4 and last 4 hex characters, e.g. `a1b2…c3d4`, so you
+   can spot-check the start and end). Click **Accept**, then **Confirm** to
+   accept after checking the fingerprint matches, or **Reject** (the denial
+   travels back to the sender, whose pending request clears).
+   **Retract a request you sent** — while a request is still waiting to be
+   accepted, press **Cancel** on it in the notifications banner to withdraw it
+   on both sides.
 3. **Send a file** — click the paperclip in the compose box, pick one or more
    files. The receiver sees an **"Incoming file"** bar at the bottom of the
    conversation with a **Save** button; accepting streams the transfer with
