@@ -140,8 +140,11 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (git fetch origin main + fast-forward, the safe path) — refusing if local
 #   edits block it, and surfacing a "Discard & update" clean-install button; auto-
 #   restarts the daemon (via lanchat.path) and the shell so the new UI loads.
+#  1.5.20 — docs: the thread-header update button now applies the update on click
+#   (fetch + fast-forward, daemon/shell reload) rather than only checking; docs
+#   updated to match.
 
-VERSION = "1.5.19"
+VERSION = "1.5.20"
 
 
 def _git_version() -> str:

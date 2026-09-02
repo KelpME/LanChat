@@ -40,8 +40,11 @@ no IP addresses, no accounts, no cloud, no shared keys to copy.
   (bottom-right), and a click opens the chat panel (peer list + thread +
   compose box). Right-click toggles online/offline or sets your status.
 - **Update indicator** — a refresh-glyph button in the thread header turns the
-  accent color when a newer version is available on the remote, so you know
-  when to update (checked read-only against the installed git checkout).
+  accent color when a newer version is available on the remote (checked read-only
+  against the installed git checkout). **Click it to apply the update** (fetch +
+  fast-forward the checkout; the daemon restarts and the shell reloads). A
+  **Discard & update** button offers a clean install when local edits block a
+  safe update.
 - **One-command install & updates** — `omarchy plugin add` installs everything
   automatically (daemon, systemd unit, firewall port); the daemon restarts
   itself when its files change after an update.
@@ -71,9 +74,10 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable KelpME.lanchat
 ```
 
-To update, `omarchy plugin update` (fast-forward pulls the git checkout). Lanchat
-surfaces an **update-available** alert in the chat thread header (see Features)
-so you know when there's a newer version.
+To update, click the **refresh button** in the chat thread header (it turns the
+accent color when a newer version is available, and applies the update on click —
+fetch + fast-forward, then the daemon restarts and the shell reloads), or
+`omarchy plugin update` (fast-forward pulls the git checkout).
 
 ### Daemon runs under systemd
 

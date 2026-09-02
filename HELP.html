@@ -98,8 +98,11 @@ online/offline, or pick a status.</p>
 <li><strong>Right column</strong> — the selected peer's conversation and the compose box.</li>
 <li><strong>Update indicator</strong> — when a chat is open, a refresh-glyph button sits in the
   thread header's left corner. It turns the accent color when a newer version is
-  available on the remote (checked read-only against the installed git checkout);
-  click it to re-check.</li>
+  available on the remote (checked read-only against the installed git checkout).
+  <strong>Click it to apply the update</strong> (fetch + fast-forward the git checkout); the
+  daemon restarts automatically and the shell reloads so the new UI appears. If
+  local uncommitted edits block a safe update, a <strong>Discard &amp; update</strong> button
+  offers a clean install of the latest version instead.</li>
 <li><strong>Draggable divider</strong> — drag the thin bar between the peer list and the chat
   to resize the columns.</li>
 <li><strong>Paperclip</strong> — attach and send one or more files. The receiver gets an
@@ -222,8 +225,10 @@ systemctl --user restart lanchat    # restart it
    (same subnet) for discovery broadcasts to reach each other.</li>
 <li><strong>Is Discoverable on?</strong> In <strong>Settings</strong>, switch on <strong>Discoverable (open
    mode)</strong> — it's off by default. Peers appear within ~3 seconds of it being on.</li>
-<li><strong>Both on the same version?</strong> Update each machine with
-   <code>omarchy plugin update KelpME.lanchat --yes</code>, then restart the shell.</li>
+<li><strong>Both on the same version?</strong> Each machine updates itself from the
+   <strong>refresh button</strong> in the chat thread header (when it shows an update
+   available), or with <code>omarchy plugin update KelpME.lanchat --yes</code>, then
+   restart the shell.</li>
 </ol>
 <p>To <strong>fully uninstall</strong> (remove the daemon, systemd unit, and all lanchat data):
 <code>cd ~/.config/omarchy/plugins/KelpME.lanchat &amp;&amp; make systemd-uninstall</code>, then
