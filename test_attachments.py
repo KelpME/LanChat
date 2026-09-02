@@ -143,7 +143,7 @@ def main():
         #   (b) an unknown/expired fileId yields attachmentError, not bytes.
         import server as _s
         _s.CONFIG["token"] = TOKEN
-        _s._stdout = open(os.devnull, "w")  # keep in-process event noise out
+        _s.STATE.stdout = open(os.devnull, "w")  # keep in-process event noise out
 
         # (a) A stranger (not a friend) must not be trusted to pull files.
         stranger_id = "f" * 64
@@ -167,7 +167,7 @@ def main():
         # reported total.
         import server as _s
         _s.CONFIG["token"] = TOKEN
-        _s._stdout = open(os.devnull, "w")
+        _s.STATE.stdout = open(os.devnull, "w")
         inc_dir = os.path.join(hb, "dl-inc"); os.makedirs(inc_dir, exist_ok=True)
         inc_save = os.path.join(inc_dir, "partial.bin")
         assert _s._dl_begin("inc1", ida, inc_save, "", "minc"), "dl_begin failed"
