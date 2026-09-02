@@ -47,6 +47,25 @@ def wait_socket(path, timeout=5.0):
     return False
 
 
+def read_until(bridge, pred, timeout=5.0):
+    """Read bridge stdout events until `pred(ev)` holds (or timeout).
+
+    The daemon interleaves its own events (ready echoes, peer discovery,
+    presence) with the reply to a command, so tests must not assume the reply
+    is the very next line — that made them flaky. Bound the wait so a missing
+    reply fails instead of hanging.
+    """
+    end = time.time() + timeout
+    while time.time() < end:
+        line = bridge.stdout.readline()
+        if not line:
+            break
+        ev = json.loads(line)
+        if pred(ev):
+            return ev
+    raise AssertionError("timed out waiting for expected bridge event")
+
+
 def main():
     rt = tempfile.mkdtemp(prefix="lanchat-sysd-rt-")
     home = make_home("daemon", 4921)
@@ -74,14 +93,12 @@ def main():
 
         # command round-trip over the bridge (QML -> daemon -> event)
         bridge.stdin.write(json.dumps({"cmd": "list"}) + "\n"); bridge.stdin.flush()
-        ev = json.loads(bridge.stdout.readline())
-        assert ev.get("event") == "peers", ev
+        ev = read_until(bridge, lambda e: e.get("event") == "peers")
         print("OK  command (list) proxied over bridge -> peers event")
 
         # a second command (setName) to confirm repeated round-trips
         bridge.stdin.write(json.dumps({"cmd": "setName", "name": "BridgeRenamed"}) + "\n"); bridge.stdin.flush()
-        ev = json.loads(bridge.stdout.readline())
-        assert ev.get("event") == "ready" and ev.get("name") == "BridgeRenamed", ev
+        ev = read_until(bridge, lambda e: e.get("event") == "ready" and e.get("name") == "BridgeRenamed")
         print("OK  second command (setName) proxied -> ready echo")
 
         # --- daemon down: bridge must exit so the QML restarts it -------
