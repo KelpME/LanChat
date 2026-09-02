@@ -168,143 +168,72 @@ VERSION = _git_version()
 class State:
     """Owns the daemon's mutable singletons.
 
-    Every field DELEGATES to the module-level global of the same meaning
-    (getter reads it, setter rebinds it), so the storage location is
-    unchanged and module-attribute rebinding (tests, load_config) keeps
-    working exactly as before. Future subsystems attach coherent state
-    here instead of free-floating globals.
+    State now OWNS the shared state as real instance fields (no
+    module-global delegation): storage lives on the instance, and
+    module-level aliases are late-bound via PEP 562 module __getattr__
+    so rebinding (tests, load_config) keeps working exactly as before.
+    Future subsystems attach coherent state here instead of
+    free-floating globals.
     """
 
-    @property
-    def config(self):
-        return CONFIG
-
-    @config.setter
-    def config(self, v):
-        global CONFIG
-        CONFIG = v
-
-    @property
-    def priv_key(self):
-        return _priv_key
-
-    @priv_key.setter
-    def priv_key(self, v):
-        global _priv_key
-        _priv_key = v
-
-    @property
-    def hist_crypto(self):
-        return _hist_crypto
-
-    @hist_crypto.setter
-    def hist_crypto(self, v):
-        global _hist_crypto
-        _hist_crypto = v
-
-    @property
-    def history(self):
-        return _history
-
-    @history.setter
-    def history(self, v):
-        global _history
-        _history = v
-
-    @property
-    def peers(self):
-        return _peers
-
-    @peers.setter
-    def peers(self, v):
-        global _peers
-        _peers = v
-
-    @property
-    def udp_sock(self):
-        return _udp_sock
-
-    @udp_sock.setter
-    def udp_sock(self, v):
-        global _udp_sock
-        _udp_sock = v
-
-    @property
-    def conns(self):
-        return _conns
-
-    @conns.setter
-    def conns(self, v):
-        global _conns
-        _conns = v
-
-    @property
-    def pending_sent(self):
-        return _pending_sent
-
-    @pending_sent.setter
-    def pending_sent(self, v):
-        global _pending_sent
-        _pending_sent = v
-
-    @property
-    def pending_first(self):
-        return _pending_first
-
-    @pending_first.setter
-    def pending_first(self, v):
-        global _pending_first
-        _pending_first = v
-
-    @property
-    def out_lock(self):
-        return _out_lock
-
-    @out_lock.setter
-    def out_lock(self, v):
-        global _out_lock
-        _out_lock = v
-
-    @property
-    def stdout(self):
-        return _stdout
-
-    @stdout.setter
-    def stdout(self, v):
-        global _stdout
-        _stdout = v
-
-    @property
-    def socket_clients(self):
-        return _socket_clients
-
-    @socket_clients.setter
-    def socket_clients(self, v):
-        global _socket_clients
-        _socket_clients = v
-
-    @property
-    def attachments(self):
-        return _attachments
-
-    @attachments.setter
-    def attachments(self, v):
-        global _attachments
-        _attachments = v
-
-
+    def __init__(self):
+        # shared cross-cutting state
+        self.config = {}
+        self.peers = {}
+        self.conns = {}
+        self.pending_sent = {}
+        self.pending_first = {}
+        self.udp_sock = None
+        self.stdout = sys.stdout
+        self.socket_clients = set()
+        self.out_lock = threading.Lock()
+        # state moving to its own module in Commit 2 (kept here for now)
+        self.history = []
+        self.hist_crypto = None
+        self.attachments = {}
+        self.priv_key = None
+        # locks (moved off module globals — this is the race-hazard fix)
+        self.socket_clients_lock = threading.Lock()
+        self.log_lock = threading.Lock()
+        self.priv_key_lock = threading.Lock()
+        self.hist_lock = threading.Lock()
+        self.peers_lock = threading.Lock()
+        self.conns_lock = threading.Lock()
+        self.inbound_conns_lock = threading.Lock()
+        self.pending_lock = threading.Lock()
+        self.att_lock = threading.Lock()
+        self.dl_lock = threading.Lock()
 STATE = State()
-STATE.config = {}
-STATE.out_lock = threading.Lock()
-STATE.stdout = sys.stdout
+
+
+def __getattr__(name):
+    """PEP 562: late-bound read aliases to the live STATE fields.
+
+    Built fresh on every lookup so aliases track STATE even after
+    load_config rebinds STATE.config. Item-assignment through an alias
+    (srv.CONFIG["k"] = v, _s._peers[id] = ...) reaches the live STATE
+    objects.
+    """
+    _ALIASES = {"CONFIG": STATE.config, "_peers": STATE.peers, "_stdout": STATE.stdout,
+                "_udp_sock": STATE.udp_sock, "_conns": STATE.conns, "_history": STATE.history,
+                "_pending_sent": STATE.pending_sent, "_pending_first": STATE.pending_first,
+                "_socket_clients": STATE.socket_clients, "_attachments": STATE.attachments,
+                "_hist_crypto": STATE.hist_crypto, "_priv_key": STATE.priv_key}
+    if name in _ALIASES:
+        return _ALIASES[name]
+    raise AttributeError(f"module 'server' has no attribute {name!r}")
+
+
+
+
 
 # Unix-socket control channel (systemd mode). When the daemon runs under
 # systemd there is no stdin/stdout pipe to the shell; the QML talks to a
 # bridge process that connects here. Events are broadcast to every connected
 # client; if none are connected we fall back to stdout (legacy stdin mode,
 # used by the test harness).
-STATE.socket_clients = set()
-_socket_clients_lock = threading.Lock()
+
+
 
 NAME_MAX = 32  # maximum length of a display name (generated or custom)
 
@@ -336,7 +265,7 @@ def _emit(event: dict) -> None:
     stdin/stdout mode used by the test harness. Thread-safe.
     """
     line = json.dumps(event, separators=(",", ":")) + "\n"
-    with _socket_clients_lock:
+    with STATE.socket_clients_lock:
         clients = list(STATE.socket_clients)
     if clients:
         for f in clients:
@@ -356,7 +285,7 @@ def _emit(event: dict) -> None:
 
 
 def _drop_socket_client(f) -> None:
-    with _socket_clients_lock:
+    with STATE.socket_clients_lock:
         STATE.socket_clients.discard(f)
     try:
         f.close()
@@ -372,7 +301,7 @@ def _drop_socket_client(f) -> None:
 # the fact. Written best-effort; never raises.
 
 _LOG_PATH = os.path.join(STATE_DIR, "daemon.log")
-_log_lock = threading.Lock()
+
 
 
 def _log(msg: str) -> None:
@@ -380,7 +309,7 @@ def _log(msg: str) -> None:
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
-        with _log_lock:
+        with STATE.log_lock:
             with open(_LOG_PATH, "a", encoding="utf-8") as f:
                 f.write("%s  %s\n" % (ts, msg))
     except OSError:
@@ -588,8 +517,8 @@ def display_name() -> str:
 # claimed cert's private key. A stranger who harvested a friend's fingerprint
 # but not its key cannot sign the nonce, so impersonation is impossible.
 
-STATE.priv_key = None
-_priv_key_lock = threading.Lock()
+
+
 
 
 def _our_cert_pem() -> str:
@@ -602,7 +531,7 @@ def _our_cert_pem() -> str:
 def _load_priv_key():
     if STATE.priv_key is None:
         from cryptography.hazmat.primitives import serialization
-        with _priv_key_lock:
+        with STATE.priv_key_lock:
             if STATE.priv_key is None:
                 if not os.path.exists(CERT_KEY):
                     ensure_tls()
@@ -730,10 +659,10 @@ def accept_requests() -> bool:
 # history.json). If `cryptography` is unavailable, it degrades to plaintext.
 HISTORY_MAGIC = b"LANCHIST1"   # 9-byte magic prefix, kept simple
 HISTORY_KEY = os.path.join(STATE_DIR, "history.key")
-STATE.hist_crypto = None   # True once we know cryptography is usable (lazy)
 
-STATE.history = []
-_hist_lock = threading.Lock()
+
+
+
 _seen_mids = set()    # mids already appended to history (inbound dedupe)
 
 
@@ -840,7 +769,7 @@ def load_history() -> None:
 def append_history(message: dict) -> None:
     if not message.get("mid"):
         message["mid"] = secrets.token_hex(8)
-    with _hist_lock:
+    with STATE.hist_lock:
         _seen_mids.add(message["mid"])
         STATE.history.append(message)
         if len(STATE.history) > HISTORY_LIMIT:
@@ -861,20 +790,20 @@ def _save_history_locked() -> None:
 
 
 def history_snapshot() -> list:
-    with _hist_lock:
+    with STATE.hist_lock:
         return list(STATE.history)
 
 
 def _has_mid(mid: str) -> bool:
     """True if a message with this mid is already in history (dedupe on
     reconnect / re-delivery)."""
-    with _hist_lock:
+    with STATE.hist_lock:
         return mid in _seen_mids
 
 
 def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
     """Lazy-load a peer's thread, newest-last, paged by offset/limit."""
-    with _hist_lock:
+    with STATE.hist_lock:
         peer_msgs = [m for m in STATE.history if (m.get("to") == peer_id or m.get("from") == peer_id)]
     total = len(peer_msgs)
     start = max(0, total - offset - limit)
@@ -883,7 +812,7 @@ def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
 
 
 def clear_history_for_peer(peer_id: str) -> int:
-    with _hist_lock:
+    with STATE.hist_lock:
         before = len(STATE.history)
         STATE.history = [m for m in STATE.history if not (m.get("to") == peer_id or m.get("from") == peer_id)]
         removed = before - len(STATE.history)
@@ -893,7 +822,7 @@ def clear_history_for_peer(peer_id: str) -> int:
 
 def clear_all_history() -> int:
     """Clear every conversation (both sent and received messages)."""
-    with _hist_lock:
+    with STATE.hist_lock:
         removed = len(STATE.history)
         STATE.history = []
         _save_history_locked()
@@ -901,7 +830,7 @@ def clear_all_history() -> int:
 
 
 def delete_message(mid: str) -> bool:
-    with _hist_lock:
+    with STATE.hist_lock:
         before = len(STATE.history)
         STATE.history = [m for m in STATE.history if m.get("mid") != mid]
         removed = before != len(STATE.history)
@@ -915,7 +844,7 @@ def edit_message(mid: str, new_text: str) -> bool:
     new_text = new_text.strip()
     if not new_text:
         return False
-    with _hist_lock:
+    with STATE.hist_lock:
         for m in STATE.history:
             if m.get("mid") == mid:
                 m["text"] = new_text
@@ -929,12 +858,12 @@ def edit_message(mid: str, new_text: str) -> bool:
 # Peers (discovered via UDP)
 # --------------------------------------------------------------------------
 
-STATE.peers = {}          # id -> {id, name, address, port, lastSeen}
-_peers_lock = threading.Lock()
+
+
 
 
 def peer_snapshot() -> list:
-    with _peers_lock:
+    with STATE.peers_lock:
         return sorted(
             STATE.peers.values(),
             key=lambda p: p["name"].lower(),
@@ -943,7 +872,7 @@ def peer_snapshot() -> list:
 
 def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = None, pstatus: str = "available", pversion: str = "") -> None:
     now = time.time()
-    with _peers_lock:
+    with STATE.peers_lock:
         existed = pid in STATE.peers
         prev_version = STATE.peers[pid].get("version", "") if existed else ""
         STATE.peers[pid] = {
@@ -986,7 +915,7 @@ def _sync_friend_name(pid: str, name: str) -> None:
 def expire_peers() -> None:
     now = time.time()
     gone = []
-    with _peers_lock:
+    with STATE.peers_lock:
         for pid in list(STATE.peers.keys()):
             age = now - STATE.peers[pid]["lastSeen"] / 1000.0
             if age > PEER_TIMEOUT_S:
@@ -999,7 +928,7 @@ def expire_peers() -> None:
 
 
 def find_peer(pid: str):
-    with _peers_lock:
+    with STATE.peers_lock:
         return STATE.peers.get(pid)
 
 
@@ -1350,7 +1279,7 @@ def _handle_udp_friend_accept(sock: socket.socket, pkt: dict, addr: str) -> None
     pname = (peer or {}).get("name") or name
     add_friend(claimed, addr, pname, confirmed=True)
     _emit({"event": "friend-accepted", "id": claimed, "name": pname})
-    with _pending_lock:
+    with STATE.pending_lock:
         held = STATE.pending_sent.pop(claimed, [])
     _diag("udp-friend-accepted", peer=claimed[:12], name=pname, revealed=len(held))
     _reveal(held)
@@ -1420,7 +1349,7 @@ def _handle_udp_friend_cancel(sock: socket.socket, pkt: dict, addr: str) -> None
     # banner. If the canceller was merely a pending (unconfirmed) request we
     # recorded, remove that record too — but NEVER unfriend a confirmed friend
     # (a confirmed relationship is not retractable by a stray cancel).
-    with _pending_lock:
+    with STATE.pending_lock:
         STATE.pending_first.pop(claimed, None)
     _unfriend_if_unconfirmed(claimed)
     _emit({"event": "friend-rejected", "id": claimed, "name": name})
@@ -1488,7 +1417,7 @@ def _handle_udp_friend_reject(sock: socket.socket, pkt: dict, addr: str) -> None
         return
     # Declined: drop our held-outgoing content and clear the banner. Never add
     # or confirm them as a friend.
-    with _pending_lock:
+    with STATE.pending_lock:
         STATE.pending_sent.pop(claimed, None)
     _unfriend_if_unconfirmed(claimed)
     _emit({"event": "friend-rejected", "id": claimed, "name": name})
@@ -1579,7 +1508,7 @@ def _announce_to_known(sock: socket.socket) -> None:
     broadcast interval keeps them from expiring — this is what makes steady-
     state discovery reliable where broadcast is unreliable.
     """
-    with _peers_lock:
+    with STATE.peers_lock:
         known = [(p["address"], p["port"]) for p in STATE.peers.values()]
     for addr, pport in known:
         _udp_send(sock, {"t": "hello"}, target=addr)
@@ -1635,7 +1564,7 @@ def udp_loop() -> None:
         time.sleep(0.5)
 
 
-STATE.udp_sock = None
+
 
 
 def broadcast_now() -> None:
@@ -1659,13 +1588,13 @@ def broadcast_now() -> None:
 # inbound socket presents no client cert, so its peer id is learned from the
 # first message's "from" field (the existing self-claimed-id trust model).
 
-STATE.conns = {}          # pid -> connection state dict
-_conns_lock = threading.Lock()
+
+
 _RECONNECT_MAX_BACKOFF = 16.0
 
 
 def _conn(pid: str) -> dict:
-    with _conns_lock:
+    with STATE.conns_lock:
         c = STATE.conns.get(pid)
         if c is None:
             c = {
@@ -1752,7 +1681,7 @@ def _drop_conn(pid: str) -> None:
 
 
 def _drop_all_conns() -> None:
-    with _conns_lock:
+    with STATE.conns_lock:
         pids = list(STATE.conns.keys())
     for pid in pids:
         _drop_conn(pid)
@@ -1950,7 +1879,7 @@ def _peer_dial_targets() -> list:
     """Known peers + confirmed friends to keep a connection to. Friends we
     haven't seen recently are still dialed from their stored address."""
     targets = {}
-    with _peers_lock:
+    with STATE.peers_lock:
         for pid, p in STATE.peers.items():
             targets[pid] = (p["address"], p["port"])
     for f in STATE.config.get("friends", []):
@@ -2009,13 +1938,13 @@ def conn_loop() -> None:
 # Cap concurrent inbound connections so a connection-flooding peer can't spawn
 # unbounded reader threads. Guarded by a lock; decremented when the reader exits.
 _inbound_conns = 0
-_inbound_conns_lock = threading.Lock()
+
 
 
 def _conn_slot_taken() -> bool:
     """Try to take an inbound-connection slot. True if under the cap; False if full."""
     global _inbound_conns
-    with _inbound_conns_lock:
+    with STATE.inbound_conns_lock:
         if _inbound_conns >= MAX_INBOUND_CONNS:
             return False
         _inbound_conns += 1
@@ -2024,7 +1953,7 @@ def _conn_slot_taken() -> bool:
 
 def _conn_slot_release() -> None:
     global _inbound_conns
-    with _inbound_conns_lock:
+    with STATE.inbound_conns_lock:
         if _inbound_conns > 0:
             _inbound_conns -= 1
 
@@ -2067,9 +1996,9 @@ def tcp_loop() -> None:
 # Handshake hold: pid -> list of held messages awaiting the recipient's accept.
 # _pending_first = inbound requests we received and are holding (revealed on accept).
 # _pending_sent  = outbound requests we sent and are holding (revealed on accept).
-STATE.pending_first = {}
-STATE.pending_sent = {}
-_pending_lock = threading.Lock()
+
+
+
 
 
 def _reveal(held, outgoing: bool = False) -> None:
@@ -2089,7 +2018,7 @@ def _handle_incoming(msg: dict, addr) -> None:
             add_friend(pid, addr[0], pname, confirmed=True)
             _emit({"event": "friend-accepted", "id": pid, "name": pname})
             # They accepted: reveal the messages we held until then.
-            with _pending_lock:
+            with STATE.pending_lock:
                 held = STATE.pending_sent.pop(pid, [])
             _diag("inbound-friend-accept", peer=pid[:12], name=pname, revealed=len(held))
             _reveal(held)
@@ -2098,7 +2027,7 @@ def _handle_incoming(msg: dict, addr) -> None:
         pid = str(msg.get("from", ""))
         # They declined: drop our held-outgoing messages and any pending
         # (unconfirmed) record so we never treat them as a friend.
-        with _pending_lock:
+        with STATE.pending_lock:
             STATE.pending_sent.pop(pid, None)
         _unfriend_if_unconfirmed(pid)
         _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
@@ -2213,7 +2142,7 @@ def _handle_incoming(msg: dict, addr) -> None:
         if not message.get("mid"):
             message["mid"] = secrets.token_hex(8)
         message["held"] = True
-        with _pending_lock:
+        with STATE.pending_lock:
             STATE.pending_first.setdefault(pid, []).append(message)
         # Emit the request WITH the requester's verified cert fingerprint
         # (pid is the identity `_reader_inbound` cryptographically proved),
@@ -2232,8 +2161,8 @@ def _handle_incoming(msg: dict, addr) -> None:
 # Sending
 # --------------------------------------------------------------------------
 
-STATE.attachments = {}   # fileId -> {"path": str, "name": str, "expires": float}
-_att_lock = threading.Lock()
+
+
 
 
 def _file_sha256(path: str) -> str:
@@ -2272,12 +2201,12 @@ def _safe_filename(name: str) -> str:
 
 
 def register_attachment(file_id: str, path: str, name: str, ttl: float = 600.0) -> None:
-    with _att_lock:
+    with STATE.att_lock:
         STATE.attachments[file_id] = {"path": path, "name": name, "expires": time.time() + ttl}
 
 
 def get_attachment(file_id: str):
-    with _att_lock:
+    with STATE.att_lock:
         a = STATE.attachments.get(file_id)
         if a and a["expires"] > time.time():
             return a
@@ -2306,7 +2235,7 @@ ATT_CHUNK_RAW = 128 * 1024   # raw bytes per chunk; base64 ~1.33x, well under MA
 
 # Recipient-side reassembly state, keyed by fileId.
 _dl = {}                 # fileId -> {save_to,tmp,fh,mid,sha256,total,written,peer,ts}
-_dl_lock = threading.Lock()
+
 _DL_TTL_S = 600.0
 
 
@@ -2314,7 +2243,7 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str):
     """Register an in-progress download and open its .part file. Purges any
     stale transfer first. Returns True on success."""
     now = time.time()
-    with _dl_lock:
+    with STATE.dl_lock:
         for fid in list(_dl):
             if now - _dl[fid]["ts"] > _DL_TTL_S:
                 old = _dl.pop(fid)
@@ -2340,7 +2269,7 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str):
 
 def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
     """Decode + append one chunk from the sender. Returns (ok, total, written)."""
-    with _dl_lock:
+    with STATE.dl_lock:
         d = _dl.get(file_id)
         if not d or d.get("peer") != peer_id:
             return (False, 0, 0)
@@ -2363,7 +2292,7 @@ def _dl_finish(file_id: str, peer_id: str, ok: bool):
     """Complete (or abort) a transfer. Returns (status, save_to, mid, total):
     status in ('saved','mismatch','aborted'), or None if the transfer was not
     registered for this peer (unknown/stale)."""
-    with _dl_lock:
+    with STATE.dl_lock:
         d = _dl.pop(file_id, None)
     if not d or d.get("peer") != peer_id:
         return None
@@ -2837,7 +2766,7 @@ def handle_command(cmd: dict) -> None:
         # they already accepted, this is a no-op banner clear.
         pid = str(cmd.get("id", ""))
         if pid and not is_friend(pid):
-            with _pending_lock:
+            with STATE.pending_lock:
                 STATE.pending_sent.pop(pid, None)
             if STATE.udp_sock is not None:
                 _send_udp_friend_cancel(STATE.udp_sock, pid)
@@ -3050,7 +2979,7 @@ def handle_command(cmd: dict) -> None:
         # completes on both sides.
         add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
         _emit({"event": "friend-accepted", "id": pid, "name": pname})
-        with _pending_lock:
+        with STATE.pending_lock:
             held = STATE.pending_first.pop(pid, [])
         _diag("accepted-friend-request", peer=pid[:12], name=pname, revealed=len(held))
         _reveal(held)
@@ -3086,7 +3015,7 @@ def handle_command(cmd: dict) -> None:
         if pid and STATE.udp_sock is not None:
             _send_udp_friend_reject(STATE.udp_sock, pid)
         send_control(pid, "friendReject")
-        with _pending_lock:
+        with STATE.pending_lock:
             STATE.pending_first.pop(pid, None)
         unfriend(pid)
         _emit({"event": "friend-rejected", "id": pid})
@@ -3162,7 +3091,7 @@ def _socket_control_server() -> None:
         except OSError:
             continue
         f = conn.makefile("rw", encoding="utf-8", newline="\n")
-        with _socket_clients_lock:
+        with STATE.socket_clients_lock:
             STATE.socket_clients.add(f)
         try:
             f.write(json.dumps(_ready_event(), separators=(",", ":")) + "\n")
