@@ -134,7 +134,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # 1.5.16 — systemd: add lanchat.path + lanchat-restart.service so the daemon
 #   restarts automatically when server.py/scripts change (e.g. after an update),
 #   so a running daemon never keeps reporting a stale version.
-VERSION = "1.5.16"
+VERSION = "1.5.17"
 
 
 def _git_version() -> str:
@@ -2777,6 +2777,10 @@ def handle_command(cmd: dict) -> None:
         pid = str(cmd.get("id", ""))
         if unfriend(pid):
             _emit({"event": "friend-removed", "id": pid})
+            # Unfriending also clears the chat history for that peer — both the
+            # persisted history and the UI list (via chat-cleared).
+            removed = clear_history_for_peer(pid)
+            _emit({"event": "chat-cleared", "peer": pid, "removed": removed})
     elif kind == "typing":
         send_control(str(cmd.get("to", "")), "typing")
     elif kind == "typingStopped":
