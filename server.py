@@ -165,16 +165,145 @@ def _git_version() -> str:
 
 VERSION = _git_version()
 
-CONFIG = {}
-_out_lock = threading.Lock()
-_stdout = sys.stdout
+class State:
+    """Owns the daemon's mutable singletons.
+
+    Every field DELEGATES to the module-level global of the same meaning
+    (getter reads it, setter rebinds it), so the storage location is
+    unchanged and module-attribute rebinding (tests, load_config) keeps
+    working exactly as before. Future subsystems attach coherent state
+    here instead of free-floating globals.
+    """
+
+    @property
+    def config(self):
+        return CONFIG
+
+    @config.setter
+    def config(self, v):
+        global CONFIG
+        CONFIG = v
+
+    @property
+    def priv_key(self):
+        return _priv_key
+
+    @priv_key.setter
+    def priv_key(self, v):
+        global _priv_key
+        _priv_key = v
+
+    @property
+    def hist_crypto(self):
+        return _hist_crypto
+
+    @hist_crypto.setter
+    def hist_crypto(self, v):
+        global _hist_crypto
+        _hist_crypto = v
+
+    @property
+    def history(self):
+        return _history
+
+    @history.setter
+    def history(self, v):
+        global _history
+        _history = v
+
+    @property
+    def peers(self):
+        return _peers
+
+    @peers.setter
+    def peers(self, v):
+        global _peers
+        _peers = v
+
+    @property
+    def udp_sock(self):
+        return _udp_sock
+
+    @udp_sock.setter
+    def udp_sock(self, v):
+        global _udp_sock
+        _udp_sock = v
+
+    @property
+    def conns(self):
+        return _conns
+
+    @conns.setter
+    def conns(self, v):
+        global _conns
+        _conns = v
+
+    @property
+    def pending_sent(self):
+        return _pending_sent
+
+    @pending_sent.setter
+    def pending_sent(self, v):
+        global _pending_sent
+        _pending_sent = v
+
+    @property
+    def pending_first(self):
+        return _pending_first
+
+    @pending_first.setter
+    def pending_first(self, v):
+        global _pending_first
+        _pending_first = v
+
+    @property
+    def out_lock(self):
+        return _out_lock
+
+    @out_lock.setter
+    def out_lock(self, v):
+        global _out_lock
+        _out_lock = v
+
+    @property
+    def stdout(self):
+        return _stdout
+
+    @stdout.setter
+    def stdout(self, v):
+        global _stdout
+        _stdout = v
+
+    @property
+    def socket_clients(self):
+        return _socket_clients
+
+    @socket_clients.setter
+    def socket_clients(self, v):
+        global _socket_clients
+        _socket_clients = v
+
+    @property
+    def attachments(self):
+        return _attachments
+
+    @attachments.setter
+    def attachments(self, v):
+        global _attachments
+        _attachments = v
+
+
+STATE = State()
+STATE.config = {}
+STATE.out_lock = threading.Lock()
+STATE.stdout = sys.stdout
 
 # Unix-socket control channel (systemd mode). When the daemon runs under
 # systemd there is no stdin/stdout pipe to the shell; the QML talks to a
 # bridge process that connects here. Events are broadcast to every connected
 # client; if none are connected we fall back to stdout (legacy stdin mode,
 # used by the test harness).
-_socket_clients = set()
+STATE.socket_clients = set()
 _socket_clients_lock = threading.Lock()
 
 NAME_MAX = 32  # maximum length of a display name (generated or custom)
@@ -208,7 +337,7 @@ def _emit(event: dict) -> None:
     """
     line = json.dumps(event, separators=(",", ":")) + "\n"
     with _socket_clients_lock:
-        clients = list(_socket_clients)
+        clients = list(STATE.socket_clients)
     if clients:
         for f in clients:
             try:
@@ -217,10 +346,10 @@ def _emit(event: dict) -> None:
             except (BrokenPipeError, OSError):
                 _drop_socket_client(f)
         return
-    with _out_lock:
+    with STATE.out_lock:
         try:
-            _stdout.write(line)
-            _stdout.flush()
+            STATE.stdout.write(line)
+            STATE.stdout.flush()
         except (BrokenPipeError, OSError):
             # The shell went away; nothing more we can do.
             os._exit(0)
@@ -228,7 +357,7 @@ def _emit(event: dict) -> None:
 
 def _drop_socket_client(f) -> None:
     with _socket_clients_lock:
-        _socket_clients.discard(f)
+        STATE.socket_clients.discard(f)
     try:
         f.close()
     except OSError:
@@ -269,19 +398,18 @@ def _diag(msg: str, **fields) -> None:
 
 def _save_config() -> None:
     try:
-        atomic_write(CONFIG_PATH, json.dumps(CONFIG, indent=2) + "\n")
+        atomic_write(CONFIG_PATH, json.dumps(STATE.config, indent=2) + "\n")
     except OSError:
         pass
 
 
 def load_config() -> None:
-    global CONFIG
     os.makedirs(CONFIG_DIR, exist_ok=True)
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            CONFIG = json.load(f)
+            STATE.config = json.load(f)
     else:
-        CONFIG = {
+        STATE.config = {
             "token": secrets.token_hex(16),
             "port": DEFAULT_PORT,
             # default self-name: a deterministic friendly {modifier}{trick} name
@@ -296,12 +424,12 @@ def load_config() -> None:
         })
 
     # Defaults for the optional HTTP API (always present so toggling is simple).
-    CONFIG.setdefault("httpEnabled", False)
-    CONFIG.setdefault("httpPort", DEFAULT_HTTP_PORT)
+    STATE.config.setdefault("httpEnabled", False)
+    STATE.config.setdefault("httpPort", DEFAULT_HTTP_PORT)
     # API bind address. Loopback-only by default so the token-authenticated API
     # isn't exposed to the LAN; set to "0.0.0.0" to allow remote agents
     # (e.g. other machines holding the token) to reach it.
-    CONFIG.setdefault("httpBind", "127.0.0.1")
+    STATE.config.setdefault("httpBind", "127.0.0.1")
     # Discovery / friend-request model (1.3).
     #   visibility: "open"   — broadcast + scan, anyone can discover and
     #                request you (trusted-LAN behavior).
@@ -309,51 +437,51 @@ def load_config() -> None:
     #                you connect by adding fingerprints directly.
     #   acceptRequests: whether inbound friend requests are accepted (and shown
     #                with the requester's verified identity) or rejected.
-    CONFIG.setdefault("visibility", "private")
-    CONFIG.setdefault("acceptRequests", True)
+    STATE.config.setdefault("visibility", "private")
+    STATE.config.setdefault("acceptRequests", True)
     # Default self-name: a deterministic friendly {modifier}{trick} name. If a
     # config was written without a displayName (or it's null/empty), fill in a
     # skateboard name — NEVER fall back to the bare hostname (a machine name is
     # not a friendly display name). Persisted so it sticks.
-    if not CONFIG.get("displayName"):
-        CONFIG["displayName"] = friendly_name(socket.gethostname())
+    if not STATE.config.get("displayName"):
+        STATE.config["displayName"] = friendly_name(socket.gethostname())
         _save_config()
     # Full API access to chat data (read history/peers) vs send-only.
     # When False, the agent can send messages to friends but cannot read
     # history, list peers, or download attachments.
-    CONFIG.setdefault("apiFullAccess", False)
+    STATE.config.setdefault("apiFullAccess", False)
     # Panel size: "small" | "medium" | "large" | "xl" | "full".
-    CONFIG.setdefault("panelSize", "medium")
+    STATE.config.setdefault("panelSize", "medium")
     # Manual pixel override for panel size (0 = follow the preset).
-    CONFIG.setdefault("customW", 0)
-    CONFIG.setdefault("customH", 0)
+    STATE.config.setdefault("customW", 0)
+    STATE.config.setdefault("customH", 0)
     # Left peer-column width set by the draggable divider (0 = UI default).
-    CONFIG.setdefault("peerColW", 0)
+    STATE.config.setdefault("peerColW", 0)
     # User status: "available" | "dnd" | "away" | "brb". Broadcast to friends.
-    CONFIG.setdefault("status", "available")
+    STATE.config.setdefault("status", "available")
     # Play a sound on incoming messages.
-    CONFIG.setdefault("soundEnabled", True)
+    STATE.config.setdefault("soundEnabled", True)
     # Presence indicators (each direction independently toggleable).
-    CONFIG.setdefault("typingEnabled", True)        # send my typing to peers
-    CONFIG.setdefault("showTyping", True)           # show peers' typing in my UI
-    CONFIG.setdefault("readReceiptsEnabled", True)  # send my read receipts to peers
-    CONFIG.setdefault("showReadReceipts", True)     # show read receipts in my UI
+    STATE.config.setdefault("typingEnabled", True)        # send my typing to peers
+    STATE.config.setdefault("showTyping", True)           # show peers' typing in my UI
+    STATE.config.setdefault("readReceiptsEnabled", True)  # send my read receipts to peers
+    STATE.config.setdefault("showReadReceipts", True)     # show read receipts in my UI
     # Online presence + friend list (persisted).
-    CONFIG.setdefault("online", True)
-    CONFIG.setdefault("friends", [])
+    STATE.config.setdefault("online", True)
+    STATE.config.setdefault("friends", [])
     # Attachment download folder (defaults to the system Downloads dir).
-    CONFIG.setdefault("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads"))
+    STATE.config.setdefault("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads"))
     # Send-delay/undo window in seconds (0 = disabled).
-    CONFIG.setdefault("sendDelay", 0)
+    STATE.config.setdefault("sendDelay", 0)
     # Stable, unique per-install id (independent of hostname so two machines
     # with the same hostname still distinguish each other).
-    CONFIG.setdefault("id", secrets.token_hex(6))
+    STATE.config.setdefault("id", secrets.token_hex(6))
     _save_config()
 
-    token = str(CONFIG.get("token", "")).strip()
+    token = str(STATE.config.get("token", "")).strip()
     if len(token) < 8:
         _emit({"event": "error", "message": "lanchat token must be at least 8 chars. Edit ~/.config/omarchy/lanchat.json"})
-    CONFIG["token"] = token
+    STATE.config["token"] = token
 
 
 def host_id() -> str:
@@ -442,7 +570,7 @@ def display_name() -> str:
     # Never return a bare hostname as the display name — always a friendly
     # skateboard name (or the user's custom name). load_config ensures a
     # friendly default is persisted, so this fallback is only a safety net.
-    name = CONFIG.get("displayName")
+    name = STATE.config.get("displayName")
     if name:
         return str(name)
     return friendly_name(socket.gethostname())
@@ -460,7 +588,7 @@ def display_name() -> str:
 # claimed cert's private key. A stranger who harvested a friend's fingerprint
 # but not its key cannot sign the nonce, so impersonation is impossible.
 
-_priv_key = None
+STATE.priv_key = None
 _priv_key_lock = threading.Lock()
 
 
@@ -472,16 +600,15 @@ def _our_cert_pem() -> str:
 
 
 def _load_priv_key():
-    global _priv_key
-    if _priv_key is None:
+    if STATE.priv_key is None:
         from cryptography.hazmat.primitives import serialization
         with _priv_key_lock:
-            if _priv_key is None:
+            if STATE.priv_key is None:
                 if not os.path.exists(CERT_KEY):
                     ensure_tls()
                 with open(CERT_KEY, "rb") as f:
-                    _priv_key = serialization.load_pem_private_key(f.read(), password=None)
-    return _priv_key
+                    STATE.priv_key = serialization.load_pem_private_key(f.read(), password=None)
+    return STATE.priv_key
 
 
 def _sign(data: bytes) -> str:
@@ -522,22 +649,22 @@ def _cert_fingerprint_of_pem(cert_pem: str) -> str:
 
 def port() -> int:
     try:
-        return int(CONFIG.get("port", DEFAULT_PORT))
+        return int(STATE.config.get("port", DEFAULT_PORT))
     except (TypeError, ValueError):
         return DEFAULT_PORT
 
 
 def http_enabled() -> bool:
-    return bool(CONFIG.get("httpEnabled", False))
+    return bool(STATE.config.get("httpEnabled", False))
 
 
 def api_full_access() -> bool:
     """Whether the API can read chat data (history/peers/attachments) or is send-only."""
-    return bool(CONFIG.get("apiFullAccess", False))
+    return bool(STATE.config.get("apiFullAccess", False))
 
 
 def panel_size() -> str:
-    size = str(CONFIG.get("panelSize", "medium"))
+    size = str(STATE.config.get("panelSize", "medium"))
     return size if size in ("small", "medium", "large", "xl", "full") else "medium"
 
 
@@ -545,50 +672,50 @@ STATUSES = ("available", "dnd", "away", "brb")
 
 
 def status() -> str:
-    s = str(CONFIG.get("status", "available"))
+    s = str(STATE.config.get("status", "available"))
     return s if s in STATUSES else "available"
 
 
 def sound_enabled() -> bool:
-    return bool(CONFIG.get("soundEnabled", True))
+    return bool(STATE.config.get("soundEnabled", True))
 
 
 def typing_enabled() -> bool:
-    return bool(CONFIG.get("typingEnabled", True))
+    return bool(STATE.config.get("typingEnabled", True))
 
 
 def show_typing() -> bool:
-    return bool(CONFIG.get("showTyping", True))
+    return bool(STATE.config.get("showTyping", True))
 
 
 def read_receipts_enabled() -> bool:
-    return bool(CONFIG.get("readReceiptsEnabled", True))
+    return bool(STATE.config.get("readReceiptsEnabled", True))
 
 
 def show_read_receipts() -> bool:
-    return bool(CONFIG.get("showReadReceipts", True))
+    return bool(STATE.config.get("showReadReceipts", True))
 
 
 def http_port() -> int:
     try:
-        return int(CONFIG.get("httpPort", DEFAULT_HTTP_PORT))
+        return int(STATE.config.get("httpPort", DEFAULT_HTTP_PORT))
     except (TypeError, ValueError):
         return DEFAULT_HTTP_PORT
 
 
 def http_bind() -> str:
     """Loopback by default; "0.0.0.0" opts into LAN exposure."""
-    return str(CONFIG.get("httpBind") or "127.0.0.1")
+    return str(STATE.config.get("httpBind") or "127.0.0.1")
 
 
 def visibility() -> str:
     """"open" (discoverable) or "private" (invisible)."""
-    return str(CONFIG.get("visibility") or "private")
+    return str(STATE.config.get("visibility") or "private")
 
 
 def accept_requests() -> bool:
     """Whether inbound friend requests are accepted."""
-    return bool(CONFIG.get("acceptRequests", True))
+    return bool(STATE.config.get("acceptRequests", True))
 
 
 # --------------------------------------------------------------------------
@@ -603,22 +730,21 @@ def accept_requests() -> bool:
 # history.json). If `cryptography` is unavailable, it degrades to plaintext.
 HISTORY_MAGIC = b"LANCHIST1"   # 9-byte magic prefix, kept simple
 HISTORY_KEY = os.path.join(STATE_DIR, "history.key")
-_hist_crypto = None   # True once we know cryptography is usable (lazy)
+STATE.hist_crypto = None   # True once we know cryptography is usable (lazy)
 
-_history = []
+STATE.history = []
 _hist_lock = threading.Lock()
 _seen_mids = set()    # mids already appended to history (inbound dedupe)
 
 
 def _hist_crypto_ok() -> bool:
-    global _hist_crypto
-    if _hist_crypto is None:
+    if STATE.hist_crypto is None:
         try:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _AESGCM
-            _hist_crypto = callable(_AESGCM)  # reference so ruff keeps the import
+            STATE.hist_crypto = callable(_AESGCM)  # reference so ruff keeps the import
         except Exception:
-            _hist_crypto = False
-    return _hist_crypto
+            STATE.hist_crypto = False
+    return STATE.hist_crypto
 
 
 def _hist_key() -> bytes:
@@ -685,8 +811,7 @@ def _history_write_bytes(data: bytes) -> None:
 
 
 def load_history() -> None:
-    global _history
-    _history = []
+    STATE.history = []
     if not os.path.exists(HISTORY_PATH):
         return
     try:
@@ -707,27 +832,26 @@ def load_history() -> None:
         except (ValueError, OSError):
             data = None
     if isinstance(data, list):
-        _history = data[-HISTORY_LIMIT:]
+        STATE.history = data[-HISTORY_LIMIT:]
     else:
-        _history = []
+        STATE.history = []
 
 
 def append_history(message: dict) -> None:
-    global _history
     if not message.get("mid"):
         message["mid"] = secrets.token_hex(8)
     with _hist_lock:
         _seen_mids.add(message["mid"])
-        _history.append(message)
-        if len(_history) > HISTORY_LIMIT:
-            _history = _history[-HISTORY_LIMIT:]
+        STATE.history.append(message)
+        if len(STATE.history) > HISTORY_LIMIT:
+            STATE.history = STATE.history[-HISTORY_LIMIT:]
         _save_history_locked()
 
 
 def _save_history_locked() -> None:
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
-        plain = json.dumps(_history, separators=(",", ":")).encode("utf-8")
+        plain = json.dumps(STATE.history, separators=(",", ":")).encode("utf-8")
         if _hist_crypto_ok():
             _history_write_bytes(_history_encrypt(plain).encode("ascii"))
         else:
@@ -738,7 +862,7 @@ def _save_history_locked() -> None:
 
 def history_snapshot() -> list:
     with _hist_lock:
-        return list(_history)
+        return list(STATE.history)
 
 
 def _has_mid(mid: str) -> bool:
@@ -751,7 +875,7 @@ def _has_mid(mid: str) -> bool:
 def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
     """Lazy-load a peer's thread, newest-last, paged by offset/limit."""
     with _hist_lock:
-        peer_msgs = [m for m in _history if (m.get("to") == peer_id or m.get("from") == peer_id)]
+        peer_msgs = [m for m in STATE.history if (m.get("to") == peer_id or m.get("from") == peer_id)]
     total = len(peer_msgs)
     start = max(0, total - offset - limit)
     page = peer_msgs[start:max(start + limit, total - offset)] if total else []
@@ -759,31 +883,28 @@ def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
 
 
 def clear_history_for_peer(peer_id: str) -> int:
-    global _history
     with _hist_lock:
-        before = len(_history)
-        _history = [m for m in _history if not (m.get("to") == peer_id or m.get("from") == peer_id)]
-        removed = before - len(_history)
+        before = len(STATE.history)
+        STATE.history = [m for m in STATE.history if not (m.get("to") == peer_id or m.get("from") == peer_id)]
+        removed = before - len(STATE.history)
         _save_history_locked()
     return removed
 
 
 def clear_all_history() -> int:
     """Clear every conversation (both sent and received messages)."""
-    global _history
     with _hist_lock:
-        removed = len(_history)
-        _history = []
+        removed = len(STATE.history)
+        STATE.history = []
         _save_history_locked()
     return removed
 
 
 def delete_message(mid: str) -> bool:
-    global _history
     with _hist_lock:
-        before = len(_history)
-        _history = [m for m in _history if m.get("mid") != mid]
-        removed = before != len(_history)
+        before = len(STATE.history)
+        STATE.history = [m for m in STATE.history if m.get("mid") != mid]
+        removed = before != len(STATE.history)
         if removed:
             _save_history_locked()
     return removed
@@ -791,12 +912,11 @@ def delete_message(mid: str) -> bool:
 
 def edit_message(mid: str, new_text: str) -> bool:
     """Replace a message's text (by mid). Returns True if found and edited."""
-    global _history
     new_text = new_text.strip()
     if not new_text:
         return False
     with _hist_lock:
-        for m in _history:
+        for m in STATE.history:
             if m.get("mid") == mid:
                 m["text"] = new_text
                 m["edited"] = True
@@ -809,14 +929,14 @@ def edit_message(mid: str, new_text: str) -> bool:
 # Peers (discovered via UDP)
 # --------------------------------------------------------------------------
 
-_peers = {}          # id -> {id, name, address, port, lastSeen}
+STATE.peers = {}          # id -> {id, name, address, port, lastSeen}
 _peers_lock = threading.Lock()
 
 
 def peer_snapshot() -> list:
     with _peers_lock:
         return sorted(
-            _peers.values(),
+            STATE.peers.values(),
             key=lambda p: p["name"].lower(),
         )
 
@@ -824,8 +944,8 @@ def peer_snapshot() -> list:
 def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = None, pstatus: str = "available", pversion: str = "") -> None:
     now = time.time()
     with _peers_lock:
-        existed = pid in _peers
-        prev_version = _peers[pid].get("version", "") if existed else ""
+        existed = pid in STATE.peers
+        prev_version = STATE.peers[pid].get("version", "") if existed else ""
         _peers[pid] = {
             "id": pid,
             "name": name,
@@ -838,9 +958,9 @@ def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = N
         }
     if not existed:
         _diag("peer-discovered", id=pid[:12], name=name, address=address, port=pport, version=pversion)
-        _emit({"event": "peer", "peer": _peers[pid]})
+        _emit({"event": "peer", "peer": STATE.peers[pid]})
     else:
-        _emit({"event": "peer", "peer": _peers[pid]})
+        _emit({"event": "peer", "peer": STATE.peers[pid]})
     # If a confirmed friend broadcasts with a real name, sync it into their
     # friend record so an "Unknown" (added-by-fingerprint) friend gets their
     # real display name once discovery connects them.
@@ -850,7 +970,7 @@ def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = N
 
 def _sync_friend_name(pid: str, name: str) -> None:
     """Update a confirmed friend's stored name if we now know a real one."""
-    friends = CONFIG.get("friends", [])
+    friends = STATE.config.get("friends", [])
     changed = False
     for f in friends:
         if f.get("id") == pid and (not f.get("name") or f.get("name") == "Unknown"):
@@ -858,7 +978,7 @@ def _sync_friend_name(pid: str, name: str) -> None:
             changed = True
             break
     if changed:
-        CONFIG["friends"] = friends
+        STATE.config["friends"] = friends
         _save_config()
         _emit({"event": "friends", "friends": friends_list()})
 
@@ -867,11 +987,11 @@ def expire_peers() -> None:
     now = time.time()
     gone = []
     with _peers_lock:
-        for pid in list(_peers.keys()):
-            age = now - _peers[pid]["lastSeen"] / 1000.0
+        for pid in list(STATE.peers.keys()):
+            age = now - STATE.peers[pid]["lastSeen"] / 1000.0
             if age > PEER_TIMEOUT_S:
                 gone.append((pid, age))
-                del _peers[pid]
+                del STATE.peers[pid]
     for pid, age in gone:
         _drop_conn(pid)  # close any persistent socket to the expired peer
         _diag("peer-expired", id=pid[:12], age_s=round(age, 1), timeout_s=PEER_TIMEOUT_S)
@@ -880,7 +1000,7 @@ def expire_peers() -> None:
 
 def find_peer(pid: str):
     with _peers_lock:
-        return _peers.get(pid)
+        return STATE.peers.get(pid)
 
 
 # --------------------------------------------------------------------------
@@ -888,7 +1008,7 @@ def find_peer(pid: str):
 # --------------------------------------------------------------------------
 
 def friends_list() -> list:
-    return list(CONFIG.get("friends", []))
+    return list(STATE.config.get("friends", []))
 
 
 def _friends_lock():
@@ -896,7 +1016,7 @@ def _friends_lock():
 
 
 def is_friend(pid: str, address: str = "") -> bool:
-    for f in CONFIG.get("friends", []):
+    for f in STATE.config.get("friends", []):
         if f.get("id") == pid and f.get("confirmed"):
             return True
     return False
@@ -904,18 +1024,18 @@ def is_friend(pid: str, address: str = "") -> bool:
 
 def is_pending(pid: str) -> bool:
     """True if we've sent this peer a friend request but they haven't accepted."""
-    for f in CONFIG.get("friends", []):
+    for f in STATE.config.get("friends", []):
         if f.get("id") == pid and not f.get("confirmed"):
             return True
     return False
 
 
 def is_online() -> bool:
-    return bool(CONFIG.get("online", True))
+    return bool(STATE.config.get("online", True))
 
 
 def add_friend(pid: str, address: str, name: str, confirmed: bool) -> None:
-    friends = CONFIG.get("friends", [])
+    friends = STATE.config.get("friends", [])
     for f in friends:
         if f.get("id") == pid:
             f["address"] = address
@@ -924,17 +1044,17 @@ def add_friend(pid: str, address: str, name: str, confirmed: bool) -> None:
             break
     else:
         friends.append({"id": pid, "address": address, "name": name, "confirmed": confirmed})
-    CONFIG["friends"] = friends
+    STATE.config["friends"] = friends
     _save_config()
     _emit({"event": "friends", "friends": friends_list()})
 
 
 def unfriend(pid: str) -> bool:
     """Remove a peer from friends (unfriend). Returns True if they were removed."""
-    friends = CONFIG.get("friends", [])
+    friends = STATE.config.get("friends", [])
     before = len(friends)
     friends = [f for f in friends if f.get("id") != pid]
-    CONFIG["friends"] = friends
+    STATE.config["friends"] = friends
     _save_config()
     _emit({"event": "friends", "friends": friends_list()})
     return len(friends) != before
@@ -943,7 +1063,7 @@ def unfriend(pid: str) -> bool:
 def _unfriend_if_unconfirmed(pid: str) -> bool:
     """Remove a peer ONLY if they are a pending (unconfirmed) request, never a
     confirmed friend. Returns True if a record was removed."""
-    friends = CONFIG.get("friends", [])
+    friends = STATE.config.get("friends", [])
     for f in friends:
         if f.get("id") == pid:
             if f.get("confirmed"):
@@ -963,7 +1083,7 @@ def is_trusted(pid: str, address: str = "") -> bool:
     """
     if not is_online():
         return False
-    for f in CONFIG.get("friends", []):
+    for f in STATE.config.get("friends", []):
         if f.get("id") == pid:
             return True  # confirmed friend OR a peer we're requesting (we initiated)
     return False
@@ -1101,7 +1221,7 @@ def _send_udp_friend_request(sock: socket.socket, pid: str) -> bool:
     target = (peer or {}).get("address", "")
     tport = int((peer or {}).get("port") or DEFAULT_PORT)
     if not target:
-        for f in CONFIG.get("friends", []):
+        for f in STATE.config.get("friends", []):
             if f.get("id") == pid and f.get("address"):
                 target = f.get("address")
                 tport = int(f.get("port") or DEFAULT_PORT)
@@ -1177,7 +1297,7 @@ def _send_udp_friend_accept(sock: socket.socket, pid: str) -> bool:
     target = (peer or {}).get("address", "")
     tport = int((peer or {}).get("port") or DEFAULT_PORT)
     if not target:
-        for f in CONFIG.get("friends", []):
+        for f in STATE.config.get("friends", []):
             if f.get("id") == pid and f.get("address"):
                 target = f.get("address")
                 tport = int(f.get("port") or DEFAULT_PORT)
@@ -1231,7 +1351,7 @@ def _handle_udp_friend_accept(sock: socket.socket, pkt: dict, addr: str) -> None
     add_friend(claimed, addr, pname, confirmed=True)
     _emit({"event": "friend-accepted", "id": claimed, "name": pname})
     with _pending_lock:
-        held = _pending_sent.pop(claimed, [])
+        held = STATE.pending_sent.pop(claimed, [])
     _diag("udp-friend-accepted", peer=claimed[:12], name=pname, revealed=len(held))
     _reveal(held)
 
@@ -1249,7 +1369,7 @@ def _send_udp_friend_cancel(sock: socket.socket, pid: str) -> bool:
     target = (peer or {}).get("address", "")
     tport = int((peer or {}).get("port") or DEFAULT_PORT)
     if not target:
-        for f in CONFIG.get("friends", []):
+        for f in STATE.config.get("friends", []):
             if f.get("id") == pid and f.get("address"):
                 target = f.get("address")
                 tport = int(f.get("port") or DEFAULT_PORT)
@@ -1301,7 +1421,7 @@ def _handle_udp_friend_cancel(sock: socket.socket, pkt: dict, addr: str) -> None
     # recorded, remove that record too — but NEVER unfriend a confirmed friend
     # (a confirmed relationship is not retractable by a stray cancel).
     with _pending_lock:
-        _pending_first.pop(claimed, None)
+        STATE.pending_first.pop(claimed, None)
     _unfriend_if_unconfirmed(claimed)
     _emit({"event": "friend-rejected", "id": claimed, "name": name})
     _diag("udp-friend-cancelled", peer=claimed[:12], name=name)
@@ -1319,7 +1439,7 @@ def _send_udp_friend_reject(sock: socket.socket, pid: str) -> bool:
     target = (peer or {}).get("address", "")
     tport = int((peer or {}).get("port") or DEFAULT_PORT)
     if not target:
-        for f in CONFIG.get("friends", []):
+        for f in STATE.config.get("friends", []):
             if f.get("id") == pid and f.get("address"):
                 target = f.get("address")
                 tport = int(f.get("port") or DEFAULT_PORT)
@@ -1369,7 +1489,7 @@ def _handle_udp_friend_reject(sock: socket.socket, pkt: dict, addr: str) -> None
     # Declined: drop our held-outgoing content and clear the banner. Never add
     # or confirm them as a friend.
     with _pending_lock:
-        _pending_sent.pop(claimed, None)
+        STATE.pending_sent.pop(claimed, None)
     _unfriend_if_unconfirmed(claimed)
     _emit({"event": "friend-rejected", "id": claimed, "name": name})
     _diag("udp-friend-rejected", peer=claimed[:12], name=name)
@@ -1460,13 +1580,12 @@ def _announce_to_known(sock: socket.socket) -> None:
     state discovery reliable where broadcast is unreliable.
     """
     with _peers_lock:
-        known = [(p["address"], p["port"]) for p in _peers.values()]
+        known = [(p["address"], p["port"]) for p in STATE.peers.values()]
     for addr, pport in known:
         _udp_send(sock, {"t": "hello"}, target=addr)
 
 
 def udp_loop() -> None:
-    global _udp_sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -1475,7 +1594,7 @@ def udp_loop() -> None:
     except OSError as e:
         _emit({"event": "error", "message": "lanchat UDP bind failed on port %d: %s" % (port(), e)})
         return
-    _udp_sock = sock
+    STATE.udp_sock = sock
     threading.Thread(target=_udp_listener, args=(sock,), daemon=True).start()
 
     last_broadcast = 0.0
@@ -1516,13 +1635,13 @@ def udp_loop() -> None:
         time.sleep(0.5)
 
 
-_udp_sock = None
+STATE.udp_sock = None
 
 
 def broadcast_now() -> None:
     """Immediately announce ourselves so a name change reaches peers right away."""
-    if _udp_sock is not None and visibility() == "open":
-        _udp_send(_udp_sock, {"t": "hello"})
+    if STATE.udp_sock is not None and visibility() == "open":
+        _udp_send(STATE.udp_sock, {"t": "hello"})
 
 
 # --------------------------------------------------------------------------
@@ -1540,14 +1659,14 @@ def broadcast_now() -> None:
 # inbound socket presents no client cert, so its peer id is learned from the
 # first message's "from" field (the existing self-claimed-id trust model).
 
-_conns = {}          # pid -> connection state dict
+STATE.conns = {}          # pid -> connection state dict
 _conns_lock = threading.Lock()
 _RECONNECT_MAX_BACKOFF = 16.0
 
 
 def _conn(pid: str) -> dict:
     with _conns_lock:
-        c = _conns.get(pid)
+        c = STATE.conns.get(pid)
         if c is None:
             c = {
                 "pid": pid,
@@ -1560,7 +1679,7 @@ def _conn(pid: str) -> dict:
                 "hold": [],             # outbound msgs awaiting a socket
                 "sent_mids": set(),     # mids already written (dedupe on flush)
             }
-            _conns[pid] = c
+            STATE.conns[pid] = c
         return c
 
 
@@ -1634,7 +1753,7 @@ def _drop_conn(pid: str) -> None:
 
 def _drop_all_conns() -> None:
     with _conns_lock:
-        pids = list(_conns.keys())
+        pids = list(STATE.conns.keys())
     for pid in pids:
         _drop_conn(pid)
 
@@ -1832,9 +1951,9 @@ def _peer_dial_targets() -> list:
     haven't seen recently are still dialed from their stored address."""
     targets = {}
     with _peers_lock:
-        for pid, p in _peers.items():
+        for pid, p in STATE.peers.items():
             targets[pid] = (p["address"], p["port"])
-    for f in CONFIG.get("friends", []):
+    for f in STATE.config.get("friends", []):
         if f.get("confirmed") and f.get("address"):
             targets.setdefault(f["id"], (f["address"], f.get("port") or DEFAULT_PORT))
     return [(pid, addr, pport) for pid, (addr, pport) in targets.items()]
@@ -1948,8 +2067,8 @@ def tcp_loop() -> None:
 # Handshake hold: pid -> list of held messages awaiting the recipient's accept.
 # _pending_first = inbound requests we received and are holding (revealed on accept).
 # _pending_sent  = outbound requests we sent and are holding (revealed on accept).
-_pending_first = {}
-_pending_sent = {}
+STATE.pending_first = {}
+STATE.pending_sent = {}
 _pending_lock = threading.Lock()
 
 
@@ -1971,7 +2090,7 @@ def _handle_incoming(msg: dict, addr) -> None:
             _emit({"event": "friend-accepted", "id": pid, "name": pname})
             # They accepted: reveal the messages we held until then.
             with _pending_lock:
-                held = _pending_sent.pop(pid, [])
+                held = STATE.pending_sent.pop(pid, [])
             _diag("inbound-friend-accept", peer=pid[:12], name=pname, revealed=len(held))
             _reveal(held)
         return
@@ -1980,7 +2099,7 @@ def _handle_incoming(msg: dict, addr) -> None:
         # They declined: drop our held-outgoing messages and any pending
         # (unconfirmed) record so we never treat them as a friend.
         with _pending_lock:
-            _pending_sent.pop(pid, None)
+            STATE.pending_sent.pop(pid, None)
         _unfriend_if_unconfirmed(pid)
         _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
         _diag("inbound-friend-reject", peer=pid[:12])
@@ -2095,7 +2214,7 @@ def _handle_incoming(msg: dict, addr) -> None:
             message["mid"] = secrets.token_hex(8)
         message["held"] = True
         with _pending_lock:
-            _pending_first.setdefault(pid, []).append(message)
+            STATE.pending_first.setdefault(pid, []).append(message)
         # Emit the request WITH the requester's verified cert fingerprint
         # (pid is the identity `_reader_inbound` cryptographically proved),
         # so the UI can show it and require confirmation it matches what the
@@ -2113,7 +2232,7 @@ def _handle_incoming(msg: dict, addr) -> None:
 # Sending
 # --------------------------------------------------------------------------
 
-_attachments = {}   # fileId -> {"path": str, "name": str, "expires": float}
+STATE.attachments = {}   # fileId -> {"path": str, "name": str, "expires": float}
 _att_lock = threading.Lock()
 
 
@@ -2154,12 +2273,12 @@ def _safe_filename(name: str) -> str:
 
 def register_attachment(file_id: str, path: str, name: str, ttl: float = 600.0) -> None:
     with _att_lock:
-        _attachments[file_id] = {"path": path, "name": name, "expires": time.time() + ttl}
+        STATE.attachments[file_id] = {"path": path, "name": name, "expires": time.time() + ttl}
 
 
 def get_attachment(file_id: str):
     with _att_lock:
-        a = _attachments.get(file_id)
+        a = STATE.attachments.get(file_id)
         if a and a["expires"] > time.time():
             return a
         return None
@@ -2422,8 +2541,8 @@ def _notify_accept(peer_id: str) -> bool:
     request "sent", accepter accepts locally, but the accept never reaches the
     requester). Falls back to the TCP socket if UDP is unavailable.
     """
-    if _udp_sock is not None:
-        if _send_udp_friend_accept(_udp_sock, peer_id):
+    if STATE.udp_sock is not None:
+        if _send_udp_friend_accept(STATE.udp_sock, peer_id):
             return True
     return send_control(peer_id, "friendAccept")
 
@@ -2467,7 +2586,7 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
             return True
 
     def _auth_ok(self, token):
-        ok = bool(token) and token == CONFIG.get("token")
+        ok = bool(token) and token == STATE.config.get("token")
         if not ok:
             # Count the failure for the brute-force throttle.
             self._throttle(self._auth_fail_ts, self._AUTH_MAX, self._AUTH_WINDOW_S, time.time())
@@ -2702,8 +2821,8 @@ def handle_command(cmd: dict) -> None:
         # needs no pre-existing TCP connection. The recipient verifies our
         # signature and surfaces it. Falls back gracefully if UDP is down.
         to = str(cmd.get("to") or "")
-        if to and _udp_sock is not None:
-            sent = _send_udp_friend_request(_udp_sock, to)
+        if to and STATE.udp_sock is not None:
+            sent = _send_udp_friend_request(STATE.udp_sock, to)
             if sent:
                 _emit({"event": "friend-request", "outgoing": True, "to": to,
                        "toName": str(cmd.get("name") or friendly_name(to)),
@@ -2719,9 +2838,9 @@ def handle_command(cmd: dict) -> None:
         pid = str(cmd.get("id", ""))
         if pid and not is_friend(pid):
             with _pending_lock:
-                _pending_sent.pop(pid, None)
-            if _udp_sock is not None:
-                _send_udp_friend_cancel(_udp_sock, pid)
+                STATE.pending_sent.pop(pid, None)
+            if STATE.udp_sock is not None:
+                _send_udp_friend_cancel(STATE.udp_sock, pid)
         if pid:
             _emit({"event": "friend-rejected", "id": pid})
             _diag("cancelled-friend-request", peer=pid[:12])
@@ -2766,13 +2885,13 @@ def handle_command(cmd: dict) -> None:
         ok = edit_message(str(cmd.get("mid", "")), str(cmd.get("text", "")))
         _emit({"event": "message-edited", "mid": str(cmd.get("mid", "")), "text": str(cmd.get("text", "")), "ok": ok})
     elif kind == "setDownloadDir":
-        CONFIG["downloadDir"] = str(cmd.get("dir", ""))
+        STATE.config["downloadDir"] = str(cmd.get("dir", ""))
         _save_config()
-        _emit({"event": "download-dir", "dir": CONFIG["downloadDir"]})
+        _emit({"event": "download-dir", "dir": STATE.config["downloadDir"]})
     elif kind == "setSendDelay":
-        CONFIG["sendDelay"] = int(cmd.get("seconds", 0))
+        STATE.config["sendDelay"] = int(cmd.get("seconds", 0))
         _save_config()
-        _emit({"event": "send-delay", "seconds": CONFIG["sendDelay"]})
+        _emit({"event": "send-delay", "seconds": STATE.config["sendDelay"]})
     elif kind == "acceptAttachment":
         peer_id = str(cmd.get("from", ""))
         if not peer_id or find_peer(peer_id) is None:
@@ -2782,7 +2901,7 @@ def handle_command(cmd: dict) -> None:
         name = _safe_filename(str(cmd.get("name", "download")))
         mid = str(cmd.get("mid", ""))
         sha256 = str(cmd.get("sha256", ""))
-        save_to = os.path.join(CONFIG.get("downloadDir", os.path.expanduser("~/Downloads")), name)
+        save_to = os.path.join(STATE.config.get("downloadDir", os.path.expanduser("~/Downloads")), name)
         if not _dl_begin(file_id, peer_id, save_to, sha256, mid):
             _emit({"event": "attachment-saved", "ok": False, "path": save_to,
                    "mid": mid, "fileId": file_id, "error": "cannot open download file"})
@@ -2811,34 +2930,34 @@ def handle_command(cmd: dict) -> None:
             _start_http()
         else:
             _stop_http()
-        CONFIG["httpEnabled"] = enabled
+        STATE.config["httpEnabled"] = enabled
         _save_config()
     elif kind == "setHttpBind":
         # Bind address for the HTTP API: "127.0.0.1" (default, loopback-only)
         # or "0.0.0.0" (LAN exposure). Applies on the next enable/restart.
         bind = str(cmd.get("bind") or "127.0.0.1")
-        CONFIG["httpBind"] = bind
+        STATE.config["httpBind"] = bind
         _save_config()
         _emit({"event": "http-bind", "bind": bind})
     elif kind == "setApiFullAccess":
-        CONFIG["apiFullAccess"] = bool(cmd.get("enabled"))
+        STATE.config["apiFullAccess"] = bool(cmd.get("enabled"))
         _save_config()
         _emit({"event": "api-full-access", "enabled": bool(cmd.get("enabled"))})
     elif kind == "setVisibility":
         # "open" (discoverable) or "private" (invisible). Re-reads the flag
         # in the UDP loop each tick, so it takes effect immediately.
         vis = str(cmd.get("visibility") or "private")
-        CONFIG["visibility"] = "open" if vis == "open" else "private"
+        STATE.config["visibility"] = "open" if vis == "open" else "private"
         _save_config()
-        _emit({"event": "visibility", "visibility": CONFIG["visibility"]})
+        _emit({"event": "visibility", "visibility": STATE.config["visibility"]})
     elif kind == "setAcceptRequests":
-        CONFIG["acceptRequests"] = bool(cmd.get("enabled", True))
+        STATE.config["acceptRequests"] = bool(cmd.get("enabled", True))
         _save_config()
-        _emit({"event": "accept-requests", "enabled": bool(CONFIG["acceptRequests"])})
+        _emit({"event": "accept-requests", "enabled": bool(STATE.config["acceptRequests"])})
     elif kind == "setPanelSize":
         size = str(cmd.get("size", "medium"))
         if size in ("small", "medium", "large", "xl", "full"):
-            CONFIG["panelSize"] = size
+            STATE.config["panelSize"] = size
             _save_config()
             _emit({"event": "panel-size", "size": size})
     elif kind == "setCustomSize":
@@ -2847,8 +2966,8 @@ def handle_command(cmd: dict) -> None:
             h = max(0, int(cmd.get("h", 0)))
         except (TypeError, ValueError):
             w, h = 0, 0
-        CONFIG["customW"] = w
-        CONFIG["customH"] = h
+        STATE.config["customW"] = w
+        STATE.config["customH"] = h
         _save_config()
         _emit({"event": "custom-size", "w": w, "h": h})
     elif kind == "setPeerColW":
@@ -2859,40 +2978,40 @@ def handle_command(cmd: dict) -> None:
             w = max(0, int(cmd.get("w", 0)))
         except (TypeError, ValueError):
             w = 0
-        CONFIG["peerColW"] = w
+        STATE.config["peerColW"] = w
         _save_config()
         _emit({"event": "peer-col-w", "w": w})
     elif kind == "setStatus":
         s = str(cmd.get("status", "available"))
         if s in STATUSES:
-            CONFIG["status"] = s
+            STATE.config["status"] = s
             _save_config()
             broadcast_now()  # peers see the new status right away
             _emit({"event": "status", "status": s})
     elif kind == "setSoundEnabled":
-        CONFIG["soundEnabled"] = bool(cmd.get("enabled"))
+        STATE.config["soundEnabled"] = bool(cmd.get("enabled"))
         _save_config()
         _emit({"event": "sound-enabled", "enabled": bool(cmd.get("enabled"))})
     elif kind == "setTypingEnabled":
-        CONFIG["typingEnabled"] = bool(cmd.get("enabled"))
+        STATE.config["typingEnabled"] = bool(cmd.get("enabled"))
         _save_config()
         _emit({"event": "typing-enabled", "enabled": bool(cmd.get("enabled"))})
     elif kind == "setShowTyping":
-        CONFIG["showTyping"] = bool(cmd.get("enabled"))
+        STATE.config["showTyping"] = bool(cmd.get("enabled"))
         _save_config()
         _emit({"event": "show-typing", "enabled": bool(cmd.get("enabled"))})
     elif kind == "setReadReceiptsEnabled":
-        CONFIG["readReceiptsEnabled"] = bool(cmd.get("enabled"))
+        STATE.config["readReceiptsEnabled"] = bool(cmd.get("enabled"))
         _save_config()
         _emit({"event": "read-receipts-enabled", "enabled": bool(cmd.get("enabled"))})
     elif kind == "setShowReadReceipts":
-        CONFIG["showReadReceipts"] = bool(cmd.get("enabled"))
+        STATE.config["showReadReceipts"] = bool(cmd.get("enabled"))
         _save_config()
         _emit({"event": "show-read-receipts", "enabled": bool(cmd.get("enabled"))})
     elif kind == "setName":
         name = str(cmd.get("name", "")).strip()[:NAME_MAX]
         if name:
-            CONFIG["displayName"] = name
+            STATE.config["displayName"] = name
             _save_config()
             broadcast_now()
             _emit(_ready_event())
@@ -2905,13 +3024,13 @@ def handle_command(cmd: dict) -> None:
         trick = rng.choice(_SKATE_TRICKS)
         modifier = rng.choice(_TRICK_MODIFIERS)
         name = f"{modifier}{trick}"[:NAME_MAX]
-        CONFIG["displayName"] = name
+        STATE.config["displayName"] = name
         _save_config()
         broadcast_now()
         _emit(_ready_event())
     elif kind == "setOnline":
         on = bool(cmd.get("online"))
-        CONFIG["online"] = on
+        STATE.config["online"] = on
         _save_config()
         _emit({"event": "online", "online": on})
         if on:
@@ -2932,7 +3051,7 @@ def handle_command(cmd: dict) -> None:
         add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
         _emit({"event": "friend-accepted", "id": pid, "name": pname})
         with _pending_lock:
-            held = _pending_first.pop(pid, [])
+            held = STATE.pending_first.pop(pid, [])
         _diag("accepted-friend-request", peer=pid[:12], name=pname, revealed=len(held))
         _reveal(held)
         if not _notify_accept(pid):
@@ -2964,11 +3083,11 @@ def handle_command(cmd: dict) -> None:
         # peer from our friend list (no lingering pending record), which emits a
         # friends event so the UI reconciles the notification banner and drops
         # the request.
-        if pid and _udp_sock is not None:
-            _send_udp_friend_reject(_udp_sock, pid)
+        if pid and STATE.udp_sock is not None:
+            _send_udp_friend_reject(STATE.udp_sock, pid)
         send_control(pid, "friendReject")
         with _pending_lock:
-            _pending_first.pop(pid, None)
+            STATE.pending_first.pop(pid, None)
         unfriend(pid)
         _emit({"event": "friend-rejected", "id": pid})
         _diag("rejected-friend-request", peer=pid[:12])
@@ -3044,7 +3163,7 @@ def _socket_control_server() -> None:
             continue
         f = conn.makefile("rw", encoding="utf-8", newline="\n")
         with _socket_clients_lock:
-            _socket_clients.add(f)
+            STATE.socket_clients.add(f)
         try:
             f.write(json.dumps(_ready_event(), separators=(",", ":")) + "\n")
             f.flush()
@@ -3098,13 +3217,13 @@ def _ready_event() -> dict:
         "acceptRequests": accept_requests(),
         "online": is_online(),
         "friends": friends_list(),
-        "downloadDir": CONFIG.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),
-        "sendDelay": CONFIG.get("sendDelay", 0),
+        "downloadDir": STATE.config.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),
+        "sendDelay": STATE.config.get("sendDelay", 0),
         "apiFullAccess": api_full_access(),
         "panelSize": panel_size(),
-        "customW": int(CONFIG.get("customW", 0) or 0),
-        "customH": int(CONFIG.get("customH", 0) or 0),
-        "peerColW": int(CONFIG.get("peerColW", 0) or 0),
+        "customW": int(STATE.config.get("customW", 0) or 0),
+        "customH": int(STATE.config.get("customH", 0) or 0),
+        "peerColW": int(STATE.config.get("peerColW", 0) or 0),
         "status": status(),
         "soundEnabled": sound_enabled(),
         "typingEnabled": typing_enabled(),
