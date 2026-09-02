@@ -75,6 +75,10 @@ online/offline, or pick a status.
 - **Left column** — your peers (each with a status dot; friends stay visible
   even when offline, shown grayed out), the peer count, and Settings.
 - **Right column** — the selected peer's conversation and the compose box.
+- **Update indicator** — when a chat is open, a refresh-glyph button sits in the
+  thread header's left corner. It turns the accent color when a newer version is
+  available on the remote (checked read-only against the installed git checkout);
+  click it to re-check.
 - **Draggable divider** — drag the thin bar between the peer list and the chat
   to resize the columns.
 - **Paperclip** — attach and send one or more files. The receiver gets an

@@ -632,7 +632,7 @@ Panel {
                   Item {
                     id: friendBadge
                     anchors.verticalCenter: parent.verticalCenter
-                    anchors.right: statusText.left
+                    anchors.right: parent.right
                     anchors.rightMargin: Style.spacing.sm
                     width: root.friendState(modelData.id) === "" ? Style.space(30)
                          : root.friendState(modelData.id) === "friend" ? Style.space(44)
@@ -659,21 +659,6 @@ Panel {
                       font.pixelSize: Style.font.caption
                       font.weight: Font.DemiBold
                     }
-                  }
-
-                  Text {
-                    id: statusText
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.right: parent.right
-                    anchors.rightMargin: Style.spacing.sm
-                    text: modelData.status === "offline" ? "Offline"
-                      : modelData.status === "dnd" ? "\u2715"  // ✕ Do Not Disturb
-                      : modelData.status === "away" ? "\u23F0"   // ⏰ Away
-                      : modelData.status === "brb" ? "\u23EB"    // ⏫ Be Right Back
-                      : "\u2713"                                  // ✓ Available
-                    color: Color.muted
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
                   }
                 }
 
@@ -2086,7 +2071,7 @@ Panel {
               }
 
               Text {
-                anchors.left: parent.left
+                anchors.left: updateBtn.right
                 anchors.leftMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.typingForPeer !== ""
@@ -2107,12 +2092,35 @@ Panel {
                 onClicked: root.unfriendSelected()
               }
               Button {
+                id: clearChatBtn
                 anchors.right: unfriendBtn.left
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
                 text: "Clear chat"
                 fontSize: Style.font.caption
                 onClicked: root.clearChat()
+              }
+
+              // Update-availability alert: shows a highlighted refresh icon when
+              // a newer commit is on the remote, and a plain one to re-check.
+              // Read-only (ls-remote + rev-parse), so it never touches the
+              // checkout or a sibling session's work. Uses `foreground` (icon
+              // color) not `color` (fill) so its transparent background matches
+              // the Unfriend/Clear-chat buttons beside it.
+              Button {
+                id: updateBtn
+                anchors.left: parent.left
+                anchors.leftMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                text: "\uF021" // nf-fa-refresh
+                fontSize: Style.font.caption
+                foreground: Lanchat.updateAvailable ? Color.accent
+                  : Lanchat.updateChecking ? Color.muted
+                  : Color.foreground
+                tooltipText: Lanchat.updateAvailable ? "Update available — click to re-check"
+                  : Lanchat.updateChecking ? "Checking for updates…"
+                  : "Check for updates"
+                onClicked: Lanchat.checkForUpdate()
               }
             }
 

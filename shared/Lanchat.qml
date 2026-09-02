@@ -123,6 +123,40 @@ QtObject {
   // Last error string when an open/close action failed (e.g. sudoers missing).
   property string firewallError: ""
 
+  // ---- update availability ----------------------------------------------
+  // The plugin is a git checkout, so an update is available when the local
+  // HEAD differs from the remote's HEAD. The check is read-only (ls-remote +
+  // rev-parse) — it never modifies the checkout, so it won't disturb a
+  // parallel session or block an update. updateError is set when the check
+  // couldn't run (offline / no git).
+  property bool updateAvailable: false
+  property bool updateChecking: false
+  property string updateError: ""
+
+  // Absolute path of the installed plugin directory (resolved from server.py,
+  // so it's portable across machines and works even if the plugin is relocated).
+  function pluginDir() {
+    var sp = lanchat.serverPath()
+    var idx = sp.lastIndexOf("/")
+    return idx > 0 ? sp.slice(0, idx) : ""
+  }
+
+  // Compare local HEAD vs remote HEAD (read-only). Runs in a background
+  // Process so the UI never blocks; tolerant of an offline machine.
+  function checkForUpdate() {
+    var dir = lanchat.pluginDir()
+    if (!dir) { lanchat.updateError = "unknown plugin directory"; return }
+    lanchat.updateChecking = true
+    lanchat.updateError = ""
+    var cmd = "cd " + dir + " && local=$(git rev-parse HEAD 2>/dev/null); " +
+      "remote=$(git ls-remote origin HEAD 2>/dev/null | awk '{print $1}'); " +
+      "if [ -z \"$remote\" ]; then echo \"UNKNOWN\"; " +
+      "elif [ \"$local\" = \"$remote\" ]; then echo \"CURRENT\"; " +
+      "else echo \"UPDATE\"; fi"
+    updateProc.command = ["bash", "-c", cmd]
+    updateProc.running = true
+  }
+
   // Path to the systemd-ensure helper (installs/enables the daemon's systemd
   // unit on first run so a fresh plugin install is fully automatic).
   function ensureSystemdPath() {
@@ -578,6 +612,7 @@ QtObject {
       lanchat.rebuildDisplayPeers()
       lanchat.refreshHistory()
       lanchat.refreshPeers()
+      lanchat.checkForUpdate()
       break
 
     case "show-typing":
@@ -977,6 +1012,25 @@ QtObject {
         lanchat.pushDiagnostic("Lanchat systemd unit not ready (exit " + code + ") — retrying…")
         lanchat.restartTimer.restart()
       }
+    }
+  }
+
+  // Background process for the update-availability check (see checkForUpdate).
+  // Parses the single-token stdout: UPDATE / CURRENT / UNKNOWN.
+  property Process updateProc: Process {
+    id: updateProc
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(data) {
+        var t = String(data).trim()
+        lanchat.updateChecking = false
+        if (t === "CURRENT") lanchat.updateAvailable = false
+        else if (t === "UPDATE") lanchat.updateAvailable = true
+        else if (t === "UNKNOWN") lanchat.updateError = "Could not check for updates"
+      }
+    }
+    onExited: function(code) {
+      lanchat.updateChecking = false
     }
   }
 

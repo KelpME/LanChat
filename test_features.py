@@ -96,6 +96,18 @@ def main():
         assert he is not None and len(he.get("messages", [])) == 0, "history should be empty after clearAllChats"
         print("OK  clearAllChats wipes all history")
 
+        # ---- unfriend also clears that peer's chat ----------------------
+        # Seed a confirmed friend, then unfriend: expect BOTH friend-removed
+        # and chat-cleared (with that peer) so the UI + persisted history drop.
+        a.cmd(cmd="setFriend", id="beta", name="Beta")
+        a.wait_event("friends")
+        a.cmd(cmd="unfriend", id="beta")
+        fr = a.wait_event("friend-removed")
+        assert fr and fr["id"] == "beta", "unfriend should emit friend-removed"
+        cc = a.wait_event("chat-cleared")
+        assert cc and cc["peer"] == "beta", "unfriend should also clear that peer's chat"
+        print("OK  unfriend emits friend-removed AND chat-cleared for that peer")
+
         # ---- config: download-dir + send-delay --------------------------
         a.cmd(cmd="setDownloadDir", dir="/tmp/lnc-dl")
         de = a.wait_event("download-dir")

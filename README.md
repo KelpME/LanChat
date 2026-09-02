@@ -39,6 +39,15 @@ no IP addresses, no accounts, no cloud, no shared keys to copy.
   status, an unread-count badge (top-right), a pending-friend-request badge
   (bottom-right), and a click opens the chat panel (peer list + thread +
   compose box). Right-click toggles online/offline or sets your status.
+- **Update indicator** — a refresh-glyph button in the thread header turns the
+  accent color when a newer version is available on the remote, so you know
+  when to update (checked read-only against the installed git checkout).
+- **One-command install & updates** — `omarchy plugin add` installs everything
+  automatically (daemon, systemd unit, firewall port); the daemon restarts
+  itself when its files change after an update.
+- **Firewall-aware** — a **Settings → Port 4812** toggle opens/closes the
+  port to your LAN (prompting via polkit), with a persistent warning when the
+  port is blocked.
 
 ## Requirements
 
@@ -62,7 +71,9 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable KelpME.lanchat
 ```
 
-To update, `omarchy plugin update` (fast-forward pulls the git checkout).
+To update, `omarchy plugin update` (fast-forward pulls the git checkout). Lanchat
+surfaces an **update-available** alert in the chat thread header (see Features)
+so you know when there's a newer version.
 
 ### Daemon runs under systemd
 
@@ -262,8 +273,9 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 
 > The API serves **HTTPS** with the per-install self-signed cert, so `-k` skips
 > verification for local scripting. The `to` id is a peer's cert fingerprint
-> (not its hostname). The API binds all interfaces, reachable by any machine
-> with the token.
+> (not its hostname). By default the API binds **loopback only** (`127.0.0.1`);
+> set `httpBind: "0.0.0.0"` in `lanchat.json` to expose it to the LAN (then any
+> machine with the token can reach it).
 
 ## Security model
 
