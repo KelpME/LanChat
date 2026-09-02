@@ -47,20 +47,32 @@ Your visibility is controlled by the <strong>Discoverable</strong> switch in <st
 </ul>
 <p>To talk to someone:</p>
 <ul>
-<li><strong>When Discoverable is off</strong> — add them directly by their <strong>cert fingerprint</strong>. Get
-  their fingerprint from <em>their</em> Settings → <strong>My ID</strong>, paste it into
-  <strong>Settings → Add friend</strong>, and they're added as a confirmed friend.</li>
-<li><strong>When Discoverable is on</strong> — they show up in your peer list; click <strong>+</strong> on their card
-  to send a friend request, or they send one to you.</li>
+<li><strong>When Discoverable is off</strong> — add them directly by their <strong>cert
+  fingerprint</strong>. Get their fingerprint from <em>their</em> Settings → <strong>My ID</strong>,
+  paste it into <strong>Settings → Add friend</strong>, and they're added as a confirmed
+  friend.</li>
+<li><strong>When Discoverable is on</strong> — they show up in your peer list; click <strong>+</strong> on
+  their card to send a friend request, or they send one to you.</li>
 </ul>
 <p><strong>The friend handshake is the gate.</strong> Seeing a machine doesn't mean it can
 message you. A stranger can <em>ask</em> to be friends, but can't message you until
 you accept.</p>
 <p><strong>Verified friend requests.</strong> Every incoming friend request shows the
-requester's <strong>verified certificate fingerprint</strong>. When you accept, you confirm
-the fingerprint matches the person you expect — so a stranger can't impersonate
-a friend by faking a name. Their identity is locked to their certificate, and
-they can't forge yours.</p>
+requester's <strong>verified certificate fingerprint</strong> — shortened to its first 4
+and last 4 hex characters (<code>a1b2…c3d4</code>) so you can spot-check the start and end
+at a glance without the full 64-character string overflowing the panel. When
+you accept, you confirm the fingerprint matches the person you expect — so a
+stranger can't impersonate a friend by faking a name. Their identity is locked
+to their certificate, and they can't forge yours.</p>
+<p><strong>Retracting a request.</strong> If you sent a friend request that's still waiting to
+be accepted, open the friend-request notifications and press <strong>Cancel</strong> on it.
+That withdraws the request on both sides: the recipient's incoming banner is
+cleared (so they can't Accept a request you've retracted) and no friendship is
+formed.</p>
+<p><strong>Denying a request.</strong> When you decline an incoming request with <strong>Reject</strong>, the
+denial travels back to the sender automatically — their "Waiting to accept"
+banner clears and they don't add you as a friend. If you sent a request that
+was denied, it simply disappears from your pending requests.</p>
 <h2>Encrypted by default</h2>
 <p>Every message and file transfer runs over TLS with a per-install self-signed
 certificate. Your device's identity is that cert's fingerprint — permanent and

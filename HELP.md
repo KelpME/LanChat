@@ -31,10 +31,23 @@ message you. A stranger can *ask* to be friends, but can't message you until
 you accept.
 
 **Verified friend requests.** Every incoming friend request shows the
-requester's **verified certificate fingerprint**. When you accept, you confirm
-the fingerprint matches the person you expect — so a stranger can't impersonate
-a friend by faking a name. Their identity is locked to their certificate, and
-they can't forge yours.
+requester's **verified certificate fingerprint** — shortened to its first 4
+and last 4 hex characters (`a1b2…c3d4`) so you can spot-check the start and end
+at a glance without the full 64-character string overflowing the panel. When
+you accept, you confirm the fingerprint matches the person you expect — so a
+stranger can't impersonate a friend by faking a name. Their identity is locked
+to their certificate, and they can't forge yours.
+
+**Retracting a request.** If you sent a friend request that's still waiting to
+be accepted, open the friend-request notifications and press **Cancel** on it.
+That withdraws the request on both sides: the recipient's incoming banner is
+cleared (so they can't Accept a request you've retracted) and no friendship is
+formed.
+
+**Denying a request.** When you decline an incoming request with **Reject**, the
+denial travels back to the sender automatically — their "Waiting to accept"
+banner clears and they don't add you as a friend. If you sent a request that
+was denied, it simply disappears from your pending requests.
 
 ## Encrypted by default
 

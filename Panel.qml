@@ -332,6 +332,19 @@ Panel {
   function rejectFriend(id) {
     Lanchat.rejectFriend(id)
   }
+  // Withdraw a friend request WE sent that is still pending.
+  function cancelFriend(id) {
+    Lanchat.cancelFriendRequest(id)
+  }
+
+  // Shorten a cert fingerprint to show its beginning AND end (4 hex chars
+  // each side, middle elided) so you can spot-verify identity without the
+  // 64-char string overflowing the narrow panel.
+  function shortFp(fp) {
+    var s = String(fp || "")
+    if (s.length <= 8) return s
+    return s.slice(0, 4) + "\u2026" + s.slice(-4)
+  }
 
   // (1.3) Read the "Add friend by fingerprint" field and add the friend.
   // The friend's address is learned automatically from discovery; the
@@ -789,7 +802,8 @@ Panel {
                       anchors.horizontalCenter: parent.horizontalCenter
                       spacing: Style.spacing.xs
 
-                      // Line 1: who + Accept/Reject.
+                      // Line 1: who + Accept/Reject (incoming) or Cancel
+                      // (outgoing — retract a request we sent).
                       Row {
                         width: parent.width
                         spacing: Style.spacing.sm
@@ -818,6 +832,31 @@ Panel {
                           fontSize: Style.font.caption
                           onClicked: root.rejectFriend(modelData.peerId)
                         }
+                        Button {
+                          visible: modelData.outgoing
+                          text: "Cancel"
+                          fontSize: Style.font.caption
+                          tooltipText: "Withdraw this friend request"
+                          onClicked: root.cancelFriend(modelData.peerId)
+                        }
+                      }
+
+                      // Verified requester fingerprint (short: start…end) on the
+                      // incoming request, so you can spot-check identity before
+                      // accepting. Shown on its own row so it never overflows.
+                      Row {
+                        visible: !modelData.outgoing
+                        width: parent.width
+                        spacing: Style.spacing.sm
+                        Text {
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: parent.width - Style.space(96)
+                          text: "Fingerprint: " + root.shortFp(modelData.fingerprint || modelData.peerId)
+                          color: Color.popups.mutedText
+                          font.family: Style.font.mono || Style.font.family
+                          font.pixelSize: Style.font.micro
+                          elide: Text.ElideRight
+                        }
                       }
 
                       // (1.3) Line 2 (only when confirming): verified fingerprint
@@ -831,7 +870,7 @@ Panel {
                         Text {
                           anchors.verticalCenter: parent.verticalCenter
                           width: parent.width - Style.space(150)
-                          text: "Fingerprint: " + (root.confirmFrFingerprint || modelData.peerId || "")
+                          text: "Fingerprint: " + root.shortFp(root.confirmFrFingerprint || modelData.peerId || "")
                           color: Color.popups.mutedText
                           font.family: Style.font.mono || Style.font.family
                           font.pixelSize: Style.font.micro
