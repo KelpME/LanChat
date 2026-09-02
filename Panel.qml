@@ -2087,7 +2087,7 @@ Panel {
               }
 
               Text {
-                anchors.left: updateBtn.right
+                anchors.left: discardBtn.visible ? discardBtn.right : updateBtn.right
                 anchors.leftMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.typingForPeer !== ""
@@ -2124,12 +2124,15 @@ Panel {
                 onClicked: root.clearChat()
               }
 
-              // Update-availability alert: shows a highlighted refresh icon when
-              // a newer commit is on the remote, and a plain one to re-check.
-              // Read-only (ls-remote + rev-parse), so it never touches the
-              // checkout or a sibling session's work. Uses `foreground` (icon
-              // color) not `color` (fill) so its transparent background matches
-              // the Unfriend/Clear-chat buttons beside it.
+              // Update-availability alert + apply: shows a highlighted refresh
+              // icon when a newer commit is on the remote, and a plain one to
+              // re-check. The check is read-only (ls-remote + rev-parse) and
+              // never touches the checkout; CLICKING while a badge shows runs
+              // the update (Lanchat.applyUpdate) — safe unless local edits
+              // block it, in which case the Discard & update button offers a
+              // clean install. Uses `foreground` (icon color) not `color`
+              // (fill) so its transparent background matches the Unfriend /
+              // Clear-chat buttons beside it.
               Button {
                 id: updateBtn
                 anchors.left: parent.left
@@ -2137,13 +2140,65 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "\uF021" // nf-fa-refresh
                 fontSize: Style.font.caption
-                foreground: Lanchat.updateAvailable ? Color.accent
+                foreground: Lanchat.updateApplyState === "dirty" ? Color.urgent
+                  : Lanchat.updateApplying ? Color.muted
+                  : Lanchat.updateAvailable ? Color.accent
                   : Lanchat.updateChecking ? Color.muted
                   : Color.foreground
-                tooltipText: Lanchat.updateAvailable ? "Update available — click to re-check"
+                tooltipText: Lanchat.updateApplyState === "dirty" ? "Local changes block the update — use \u201CDiscard & update\u201D"
+                  : Lanchat.updateApplying ? "Updating…"
+                  : Lanchat.updateAvailable ? "Update available — click to update"
                   : Lanchat.updateChecking ? "Checking for updates…"
                   : "Check for updates"
-                onClicked: Lanchat.checkForUpdate()
+                onClicked: Lanchat.updateAvailable ? Lanchat.applyUpdate(false) : Lanchat.checkForUpdate()
+              }
+
+              // Clean-install button: appears only when a safe update is
+              // blocked by local (uncommitted) edits in the installed checkout
+              // (e.g. a parallel session's in-flight work). Clicking discards
+              // those edits and resets the checkout to the remote commit — a
+              // clean install of the latest version. Config/certs/history live
+              // outside the plugin folder, so they are NOT touched.
+              Button {
+                id: discardBtn
+                visible: Lanchat.updateApplyState === "dirty"
+                anchors.left: updateBtn.right
+                anchors.leftMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Discard & update"
+                fontSize: Style.font.caption
+                foreground: Color.urgent
+                tooltipText: "Discard local changes and install the latest version (clean install)"
+                onClicked: Lanchat.applyUpdate(true)
+              }
+
+              // Update-available alert pill, pinned to the refresh button's
+              // top-right corner and nudged off it so it reads as a badge —
+              // mirrors the bar widget's friend-request pill (accent fill on
+              // a background-ringed dot). Shows "!" whenever the read-only git
+              // probe reports a newer commit on the remote.
+              Rectangle {
+                id: updateBadge
+                visible: Lanchat.updateAvailable
+                anchors.top: updateBtn.top
+                anchors.right: updateBtn.right
+                anchors.topMargin: -3
+                anchors.rightMargin: -3
+                width: Style.space(12)
+                height: Style.space(12)
+                radius: height / 2
+                color: Color.accent
+                border.color: Color.background
+                border.width: 1
+
+                Text {
+                  anchors.centerIn: parent
+                  text: "\u0021" // "!"
+                  color: Color.background
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                  font.weight: Font.Bold
+                }
               }
             }
 

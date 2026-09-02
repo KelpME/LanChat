@@ -133,6 +133,12 @@ QtObject {
   property bool updateChecking: false
   property string updateError: ""
 
+  // Update-apply state. updateApplying is true while a background update runs;
+  // updateApplyState is "" (idle), "dirty" (local edits block a safe update —
+  // the UI offers a clean install), or "applied" (success, shell restarting).
+  property bool updateApplying: false
+  property string updateApplyState: ""
+
   // Absolute path of the installed plugin directory (resolved from server.py,
   // so it's portable across machines and works even if the plugin is relocated).
   function pluginDir() {
@@ -155,6 +161,44 @@ QtObject {
       "else echo \"UPDATE\"; fi"
     updateProc.command = ["bash", "-c", cmd]
     updateProc.running = true
+  }
+
+  // Apply the remote update to the installed checkout. SAFE by default
+  // (force=false): if the checkout has local (uncommitted) edits — e.g. a
+  // parallel session's in-flight work — we refuse to touch it and report
+  // "dirty" so the UI can offer a clean install. force=true discards local
+  // edits and resets to the remote commit (a clean install of the latest).
+  // Uses `git fetch origin main` (the real branch ref) + `git reset --hard
+  // origin/main` — the reliable path; `omarchy plugin update`'s HEAD-fetch is
+  // known to leave origin/main stale. Runs in a background Process. The daemon
+  // auto-restarts via the lanchat.path watcher (server.py change); QML reloads
+  // on the shell restart that restartShell() schedules after APPLIED.
+  function applyUpdate(force) {
+    var dir = lanchat.pluginDir()
+    if (!dir) { lanchat.updateError = "unknown plugin directory"; return }
+    if (lanchat.updateApplying) return
+    lanchat.updateApplying = true
+    lanchat.updateApplyState = ""
+    lanchat.updateError = ""
+    // Skip the dirty-guard when force=true (clean install): reset regardless.
+    var safe = force ? "" :
+      "test -z \"$(git status --porcelain)\" || { echo DIRTY; exit 0; }; "
+    var cmd = "cd " + dir + " && git fetch origin main 2>/dev/null && { " + safe +
+      "git reset --hard origin/main 2>/dev/null && echo APPLIED || echo ERROR; } || echo ERROR"
+    applyProc.command = ["bash", "-c", cmd]
+    applyProc.running = true
+  }
+
+  // Restart the Omarchy shell after an update so the newly-checked-out QML
+  // (compiled into quickshell at startup, cached) actually loads. Clears the
+  // QML cache first, then detaches the restart via setsid so it survives this
+  // shell being torn down. A short sleep lets the UI paint the "applied" state
+  // (and the chat alert) before the shell goes away.
+  function restartShell() {
+    var cmd = "sleep 0.8; rm -rf \"$HOME/.cache/quickshell/qmlcache\"; " +
+      "setsid /usr/sbin/omarchy-restart-shell >/dev/null 2>&1 &"
+    restartProc.command = ["bash", "-c", cmd]
+    restartProc.running = true
   }
 
   // Path to the systemd-ensure helper (installs/enables the daemon's systemd
@@ -1032,6 +1076,39 @@ QtObject {
     onExited: function(code) {
       lanchat.updateChecking = false
     }
+  }
+
+  // Background process for applying an update (see applyUpdate). Parses the
+  // single-token stdout: APPLIED (success -> restart shell), DIRTY (local
+  // edits blocked the safe update -> offer a clean install), ERROR.
+  property Process applyProc: Process {
+    id: applyProc
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(data) {
+        var t = String(data).trim()
+        if (t === "APPLIED") {
+          lanchat.updateApplyState = "applied"
+          lanchat.updateAvailable = false
+          lanchat.showChatAlert("Update applied — restarting shell…", false, "")
+          lanchat.restartShell()
+        } else if (t === "DIRTY") {
+          lanchat.updateApplyState = "dirty"
+          lanchat.showChatAlert("Local changes block the update — use \u201CDiscard & update\u201D for a clean install.",
+            true, "")
+        } else {
+          lanchat.updateApplyState = ""
+          lanchat.showChatAlert("Update failed — check your connection and try again.", true, "")
+        }
+      }
+    }
+    onExited: function(code) { lanchat.updateApplying = false }
+  }
+
+  // Background process that restarts the Omarchy shell after an update (see
+  // restartShell). Nothing to parse — it's detached and outlives this shell.
+  property Process restartProc: Process {
+    id: restartProc
   }
 
   Component.onCompleted: lanchat.startDaemon()
