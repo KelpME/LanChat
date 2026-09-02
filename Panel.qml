@@ -2098,8 +2098,14 @@ Panel {
                 font.italic: true
               }
 
+              // Per-chat actions only show when they can actually act.
+              // "Unfriend" needs a real (confirmed) friend relationship —
+              // pointless over a stranger's or a still-pending request's
+              // thread. "Clear chat" needs history to clear — pointless for
+              // a brand-new conversation with no messages yet.
               Button {
                 id: unfriendBtn
+                visible: root.friendState(root.selectedPeerId) === "friend"
                 anchors.right: parent.right
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
@@ -2109,6 +2115,7 @@ Panel {
               }
               Button {
                 id: clearChatBtn
+                visible: root.hasThread
                 anchors.right: unfriendBtn.left
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
