@@ -947,6 +947,22 @@ Panel {
                     font.pixelSize: Style.font.caption
                     font.weight: Font.Bold
                   }
+
+                  // Help "?" — opens the built-in HELP.html in the default
+                  // viewer. Sits on top of the header's toggle MouseArea (a
+                  // later sibling, so it wins the click) and must not toggle
+                  // the settings expand/collapse.
+                  Button {
+                    id: helpBtn
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.spacing.sm
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "?"
+                    fontSize: Style.font.caption
+                    foreground: Color.popups.text
+                    tooltipText: "Open help (HELP.html)"
+                    onClicked: root.openHelp()
+                  }
                 }
 
                 // body (name + online + API + undo + save) — compact rows,
