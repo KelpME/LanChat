@@ -77,8 +77,11 @@ online/offline, or pick a status.
 - **Right column** — the selected peer's conversation and the compose box.
 - **Update indicator** — when a chat is open, a refresh-glyph button sits in the
   thread header's left corner. It turns the accent color when a newer version is
-  available on the remote (checked read-only against the installed git checkout);
-  click it to re-check.
+  available on the remote (checked read-only against the installed git checkout).
+  **Click it to apply the update** (fetch + fast-forward the git checkout); the
+  daemon restarts automatically and the shell reloads so the new UI appears. If
+  local uncommitted edits block a safe update, a **Discard & update** button
+  offers a clean install of the latest version instead.
 - **Draggable divider** — drag the thin bar between the peer list and the chat
   to resize the columns.
 - **Paperclip** — attach and send one or more files. The receiver gets an
@@ -178,8 +181,10 @@ If a machine isn't showing up in your peer list:
    (same subnet) for discovery broadcasts to reach each other.
 4. **Is Discoverable on?** In **Settings**, switch on **Discoverable (open
    mode)** — it's off by default. Peers appear within ~3 seconds of it being on.
-5. **Both on the same version?** Update each machine with
-   `omarchy plugin update KelpME.lanchat --yes`, then restart the shell.
+5. **Both on the same version?** Each machine updates itself from the
+   **refresh button** in the chat thread header (when it shows an update
+   available), or with `omarchy plugin update KelpME.lanchat --yes`, then
+   restart the shell.
 
 To **fully uninstall** (remove the daemon, systemd unit, and all lanchat data):
 `cd ~/.config/omarchy/plugins/KelpME.lanchat && make systemd-uninstall`, then
