@@ -26,9 +26,9 @@ Security model:
     offline.
 """
 
-import base64
+import base64  # noqa: F401  (used by extracted modules via server.<name>)
 import hashlib
-import http.server
+import http.server  # noqa: F401  (BaseHTTPRequestHandler base for http_api)
 import json
 import os
 import random
@@ -37,11 +37,86 @@ import socket
 import ssl
 import subprocess
 import sys
-import tempfile
+import tempfile  # noqa: F401  (re-imported locally in atomic_write)
 import threading
 import time
-import urllib.parse
+import urllib.parse  # noqa: F401  (used by http_api via server.<name>)
 
+import attachments
+import history
+import http_api
+
+# Subsystem modules extracted from this file (Commit 2). They are imported
+# here at module top level; each of them imports server only INSIDE function
+# bodies (deferred, late-bound), so there is no import-time cycle.
+import identity
+
+# attachments.py — attachment registry + socket file transfer
+from attachments import (  # noqa: F401
+    _DL_TTL_S,
+    ATT_CHUNK_RAW,
+    _dl,
+    _dl_begin,
+    _dl_chunk,
+    _dl_finish,
+    _file_sha256,
+    _finalize_download,
+    _remove_file,
+    _safe_filename,
+    _serve_attachment,
+    get_attachment,
+    register_attachment,
+)
+
+# history.py — message history + at-rest crypto (constants re-exported: tests
+# and the daemon log path read them as server module attributes)
+from history import (  # noqa: F401
+    HISTORY_KEY,
+    HISTORY_LIMIT,
+    HISTORY_MAGIC,
+    HISTORY_PATH,
+    STATE_DIR,
+    _has_mid,
+    _hist_crypto_ok,
+    _hist_key,
+    _history_decrypt,
+    _history_encrypt,
+    _history_write_bytes,
+    _save_history_locked,
+    append_history,
+    clear_all_history,
+    clear_history_for_peer,
+    delete_message,
+    edit_message,
+    history_for_peer,
+    history_snapshot,
+    load_history,
+)
+
+# http_api.py — optional token-authenticated HTTP API
+from http_api import _ApiHandler, _start_http, _stop_http  # noqa: F401
+
+# Re-export shims: the moved functions keep working BY SYMBOL for internal
+# callers (handle_command, _handle_incoming, main, ...) and for tests that
+# read them as server module attributes. identity/history/attachments/
+# http_api operate on the SAME State instance (see the .init(STATE) calls
+# below), so state stays shared and live.
+# identity.py — TLS cert + identity-proof pair (re-exports: the test contract
+# and internal callers resolve these as server.<name>; noqa = intentional)
+from identity import (  # noqa: F401
+    CERT_DIR,
+    CERT_KEY,
+    CERT_PEM,
+    _cert_fingerprint_of_pem,
+    _gen_cert,
+    _load_priv_key,
+    _our_cert_pem,
+    _sign,
+    _verify,
+    cert_fingerprint,
+    ensure_tls,
+    host_id,
+)
 from naming import _SKATE_TRICKS, _TRICK_MODIFIERS, friendly_name  # noqa: E402
 
 # --------------------------------------------------------------------------
@@ -51,14 +126,11 @@ from naming import _SKATE_TRICKS, _TRICK_MODIFIERS, friendly_name  # noqa: E402
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "omarchy")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "lanchat.json")
-STATE_DIR = os.path.join(os.path.expanduser("~"), ".local", "state", "lanchat")
-HISTORY_PATH = os.path.join(STATE_DIR, "history.json")
 
 DEFAULT_PORT = 4812
 DEFAULT_HTTP_PORT = 4814
 PEER_TIMEOUT_S = 6.0       # drop a peer after this long without a hello
 BROADCAST_INTERVAL_S = 3.0
-HISTORY_LIMIT = 500
 
 # Transport hardening (1.2.2): bound an individual connection's buffered input
 # and the number of concurrent inbound connections, so a malicious/flooding LAN
@@ -224,6 +296,14 @@ def __getattr__(name):
     raise AttributeError(f"module 'server' has no attribute {name!r}")
 
 
+# Bind the extracted subsystem modules to the shared State. None of them call
+# back into server at init time (their `import server` is deferred into
+# function bodies), so this is safe right after STATE exists.
+identity.init(STATE)
+history.init(STATE)
+attachments.init(STATE)
+http_api.init(STATE)
+
 
 
 
@@ -242,7 +322,6 @@ def atomic_write(path: str, text: str) -> None:
     """Write a file atomically (write temp + rename) so a crash mid-write
     never leaves a truncated/corrupt file. Caller is responsible for making
     the parent directory exist."""
-    import tempfile
     d = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-", suffix=".json")
     try:
@@ -413,87 +492,9 @@ def load_config() -> None:
     STATE.config["token"] = token
 
 
-def host_id() -> str:
-    """The device's true, stable identity — the cert fingerprint.
-
-    Unlike the cosmetic display name, this never changes (the cert persists),
-    so renaming/re-rolling a name cannot break a friend link.
-    """
-    return cert_fingerprint()
-
-
-# --------------------------------------------------------------------------
-# TLS identity
-# --------------------------------------------------------------------------
-# Each install generates a persistent self-signed certificate. The SHA-256
-# fingerprint of that cert is the device's true, stable identity — independent
-# of the cosmetic display name. The fingerprint is what friends are keyed on.
-
-CERT_DIR = os.path.join(os.path.expanduser("~"), ".config", "omarchy", "lanchat-certs")
-CERT_KEY = os.path.join(CERT_DIR, "key.pem")
-CERT_PEM = os.path.join(CERT_DIR, "cert.pem")
-
-
-def _gen_cert() -> None:
-    os.makedirs(CERT_DIR, exist_ok=True)
-    try:
-        subprocess.run(
-            ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-             "-keyout", CERT_KEY, "-out", CERT_PEM, "-days", "3650",
-             "-subj", "/CN=lanchat-%s" % str(STATE.config.get("id") or "peer"[:8])],
-            check=True, capture_output=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        # Fallback: try the cryptography library if openssl isn't available.
-        try:
-            import datetime as _dt
-
-            from cryptography import x509
-            from cryptography.hazmat.primitives import hashes, serialization
-            from cryptography.hazmat.primitives.asymmetric import rsa
-            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-            subject = issuer = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "lanchat")])
-            cert = (x509.CertificateBuilder()
-                    .subject_name(subject).issuer_name(issuer)
-                    .public_key(key.public_key())
-                    .serial_number(x509.random_serial_number())
-                    .not_valid_before(_dt.datetime.utcnow())
-                    .not_valid_after(_dt.datetime.utcnow() + _dt.timedelta(days=3650))
-                    .sign(key, hashes.SHA256()))
-            with open(CERT_KEY, "wb") as f:
-                f.write(key.private_bytes(serialization.Encoding.PEM,
-                    serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
-            with open(CERT_PEM, "wb") as f:
-                f.write(cert.public_bytes(serialization.Encoding.PEM))
-        except Exception as e:
-            _emit({"event": "error", "message": "lanchat TLS cert generation failed: %s" % e})
-
-
-def ensure_tls() -> ssl.SSLContext:
-    """Generate the cert if needed and return a server SSL context."""
-    if not (os.path.exists(CERT_KEY) and os.path.exists(CERT_PEM)):
-        _gen_cert()
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(CERT_PEM, CERT_KEY)
-    return ctx
-
-
-def cert_fingerprint() -> str:
-    """SHA-256 fingerprint of our cert — the stable device identity."""
-    if not os.path.exists(CERT_PEM):
-        ensure_tls()
-    with open(CERT_PEM, "rb") as f:
-        data = f.read()
-    # Parse the DER cert via the cryptography lib (robust across Python/OpenSSL).
-    try:
-        from cryptography import x509
-        from cryptography.hazmat.primitives import serialization
-        cert = x509.load_pem_x509_certificate(data)
-        return hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
-    except Exception:
-        # Fallback: raw PEM fingerprint (still stable per cert)
-        return hashlib.sha256(data).hexdigest()
-
+# host_id/_gen_cert/ensure_tls/cert_fingerprint and the identity-proof pair
+# (_sign/_verify/_cert_fingerprint_of_pem/_our_cert_pem/_load_priv_key) moved
+# to identity.py (Commit 2) and are re-exported from it below.
 
 def display_name() -> str:
     # Never return a bare hostname as the display name — always a friendly
@@ -521,59 +522,9 @@ def display_name() -> str:
 
 
 
-def _our_cert_pem() -> str:
-    if not os.path.exists(CERT_PEM):
-        ensure_tls()
-    with open(CERT_PEM, "r", encoding="utf-8") as f:
-        return f.read()
-
-
-def _load_priv_key():
-    if STATE.priv_key is None:
-        from cryptography.hazmat.primitives import serialization
-        with STATE.priv_key_lock:
-            if STATE.priv_key is None:
-                if not os.path.exists(CERT_KEY):
-                    ensure_tls()
-                with open(CERT_KEY, "rb") as f:
-                    STATE.priv_key = serialization.load_pem_private_key(f.read(), password=None)
-    return STATE.priv_key
-
-
-def _sign(data: bytes) -> str:
-    """Sign bytes with our private key (RSA PKCS1v15-SHA256), hex-encoded."""
-    import binascii
-
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.asymmetric import padding
-    sig = _load_priv_key().sign(data, padding.PKCS1v15(), hashes.SHA256())
-    return binascii.hexlify(sig).decode("ascii")
-
-
-def _verify(cert_pem: str, data: bytes, sig_hex: str) -> bool:
-    """Verify a signature over `data` using the public key in `cert_pem`."""
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.asymmetric import padding
-    try:
-        cert = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
-        pub = cert.public_key()
-        sig = bytes.fromhex(sig_hex)
-        pub.verify(sig, data, padding.PKCS1v15(), hashes.SHA256())
-        return True
-    except Exception:
-        return False
-
-
-def _cert_fingerprint_of_pem(cert_pem: str) -> str:
-    """SHA-256 fingerprint of the cert in `cert_pem` (empty on parse failure)."""
-    try:
-        from cryptography import x509
-        from cryptography.hazmat.primitives import serialization
-        cert = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
-        return hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
-    except Exception:
-        return ""
+# The identity-proof helpers (_our_cert_pem/_load_priv_key/_sign/_verify/
+# _cert_fingerprint_of_pem) moved to identity.py (Commit 2) and are
+# re-exported from it below.
 
 
 def port() -> int:
@@ -648,211 +599,9 @@ def accept_requests() -> bool:
 
 
 # --------------------------------------------------------------------------
-# Message history (per-machine persistence)
+# Message history (per-machine persistence) — moved to history.py (Commit 2);
+# all symbols re-exported at the top of this file.
 # --------------------------------------------------------------------------
-
-# At-rest encryption (1.2.3): history is encrypted with AES-256-GCM so the file
-# on disk isn't human-readable. The key is a dedicated random 32-byte key at
-# 0600 (HISTORY_KEY). This protects against the history file being read in
-# isolation (a backup, a casual copy, sync, a grabbed file) — NOT against full
-# compromise of the machine (an attacker who can read history.key can also read
-# history.json). If `cryptography` is unavailable, it degrades to plaintext.
-HISTORY_MAGIC = b"LANCHIST1"   # 9-byte magic prefix, kept simple
-HISTORY_KEY = os.path.join(STATE_DIR, "history.key")
-
-
-
-
-_seen_mids = set()    # mids already appended to history (inbound dedupe)
-
-
-def _hist_crypto_ok() -> bool:
-    if STATE.hist_crypto is None:
-        try:
-            from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _AESGCM
-            STATE.hist_crypto = callable(_AESGCM)  # reference so ruff keeps the import
-        except Exception:
-            STATE.hist_crypto = False
-    return STATE.hist_crypto
-
-
-def _hist_key() -> bytes:
-    """Load or generate the 32-byte AES key (0600)."""
-    if os.path.exists(HISTORY_KEY):
-        with open(HISTORY_KEY, "rb") as f:
-            k = f.read()
-        if len(k) == 32:
-            return k
-    k = secrets.token_bytes(32)
-    os.makedirs(STATE_DIR, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=STATE_DIR, prefix=".hk-")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(k)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, HISTORY_KEY)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-    return k
-
-
-def _history_encrypt(plain: bytes) -> str:
-    """Encrypt history bytes to a base64 string for storage."""
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    key = _hist_key()
-    nonce = secrets.token_bytes(12)
-    ct = AESGCM(key).encrypt(nonce, plain, None)
-    import base64
-    return base64.b64encode(HISTORY_MAGIC + nonce + ct).decode("ascii")
-
-
-def _history_decrypt(b64: str) -> bytes:
-    """Decrypt a base64 history string back to bytes, or raise on failure."""
-    import base64
-
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    raw = base64.b64decode(b64)
-    if raw[:9] != HISTORY_MAGIC or len(raw) < 9 + 12 + 16:
-        raise ValueError("bad history blob")
-    nonce = raw[9:21]
-    ct = raw[21:]
-    return AESGCM(_hist_key()).decrypt(nonce, ct, None)
-
-
-def _history_write_bytes(data: bytes) -> None:
-    """Atomically write bytes to HISTORY_PATH (binary sibling of atomic_write)."""
-    d = os.path.dirname(HISTORY_PATH) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-", suffix=".json")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        os.replace(tmp, HISTORY_PATH)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
-def load_history() -> None:
-    STATE.history = []
-    if not os.path.exists(HISTORY_PATH):
-        return
-    try:
-        with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-            text = f.read()
-    except OSError:
-        return
-    # Try decrypted first (current format), then plaintext (pre-1.2.3).
-    data = None
-    if _hist_crypto_ok() and text:
-        try:
-            data = json.loads(_history_decrypt(text).decode("utf-8"))
-        except Exception:
-            data = None
-    if data is None:
-        try:
-            data = json.loads(text)  # legacy plaintext
-        except (ValueError, OSError):
-            data = None
-    if isinstance(data, list):
-        STATE.history = data[-HISTORY_LIMIT:]
-    else:
-        STATE.history = []
-
-
-def append_history(message: dict) -> None:
-    if not message.get("mid"):
-        message["mid"] = secrets.token_hex(8)
-    with STATE.hist_lock:
-        _seen_mids.add(message["mid"])
-        STATE.history.append(message)
-        if len(STATE.history) > HISTORY_LIMIT:
-            STATE.history = STATE.history[-HISTORY_LIMIT:]
-        _save_history_locked()
-
-
-def _save_history_locked() -> None:
-    try:
-        os.makedirs(STATE_DIR, exist_ok=True)
-        plain = json.dumps(STATE.history, separators=(",", ":")).encode("utf-8")
-        if _hist_crypto_ok():
-            _history_write_bytes(_history_encrypt(plain).encode("ascii"))
-        else:
-            _history_write_bytes(plain)
-    except OSError:
-        pass
-
-
-def history_snapshot() -> list:
-    with STATE.hist_lock:
-        return list(STATE.history)
-
-
-def _has_mid(mid: str) -> bool:
-    """True if a message with this mid is already in history (dedupe on
-    reconnect / re-delivery)."""
-    with STATE.hist_lock:
-        return mid in _seen_mids
-
-
-def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
-    """Lazy-load a peer's thread, newest-last, paged by offset/limit."""
-    with STATE.hist_lock:
-        peer_msgs = [m for m in STATE.history if (m.get("to") == peer_id or m.get("from") == peer_id)]
-    total = len(peer_msgs)
-    start = max(0, total - offset - limit)
-    page = peer_msgs[start:max(start + limit, total - offset)] if total else []
-    return {"peer": peer_id, "total": total, "messages": page}
-
-
-def clear_history_for_peer(peer_id: str) -> int:
-    with STATE.hist_lock:
-        before = len(STATE.history)
-        STATE.history = [m for m in STATE.history if not (m.get("to") == peer_id or m.get("from") == peer_id)]
-        removed = before - len(STATE.history)
-        _save_history_locked()
-    return removed
-
-
-def clear_all_history() -> int:
-    """Clear every conversation (both sent and received messages)."""
-    with STATE.hist_lock:
-        removed = len(STATE.history)
-        STATE.history = []
-        _save_history_locked()
-    return removed
-
-
-def delete_message(mid: str) -> bool:
-    with STATE.hist_lock:
-        before = len(STATE.history)
-        STATE.history = [m for m in STATE.history if m.get("mid") != mid]
-        removed = before != len(STATE.history)
-        if removed:
-            _save_history_locked()
-    return removed
-
-
-def edit_message(mid: str, new_text: str) -> bool:
-    """Replace a message's text (by mid). Returns True if found and edited."""
-    new_text = new_text.strip()
-    if not new_text:
-        return False
-    with STATE.hist_lock:
-        for m in STATE.history:
-            if m.get("mid") == mid:
-                m["text"] = new_text
-                m["edited"] = True
-                _save_history_locked()
-                return True
-    return False
-
 
 # --------------------------------------------------------------------------
 # Peers (discovered via UDP)
@@ -2165,220 +1914,9 @@ def _handle_incoming(msg: dict, addr) -> None:
 
 
 
-def _file_sha256(path: str) -> str:
-    h = hashlib.sha256()
-    try:
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-    except OSError:
-        return ""
-    return h.hexdigest()
-
-
-def _remove_file(path: str) -> None:
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-
-
-def _safe_filename(name: str) -> str:
-    """Reduce an untrusted attachment name to a safe basename.
-
-    The name arrives inside a peer's message and is joined straight into the
-    download directory, so it must never carry a path separator, dot-dot, or
-    control character (blocks path-traversal writes outside downloadDir).
-    """
-    if not name:
-        return "download"
-    # Normalize both separator styles, then keep only the final component.
-    name = str(name).replace("\\", "/").rsplit("/", 1)[-1]
-    # Drop control characters and leading/trailing dots + whitespace.
-    name = "".join(c for c in name if c.isprintable() and ord(c) >= 0x20)
-    name = name.strip(" .")
-    return name or "download"
-
-
-def register_attachment(file_id: str, path: str, name: str, ttl: float = 600.0) -> None:
-    with STATE.att_lock:
-        STATE.attachments[file_id] = {"path": path, "name": name, "expires": time.time() + ttl}
-
-
-def get_attachment(file_id: str):
-    with STATE.att_lock:
-        a = STATE.attachments.get(file_id)
-        if a and a["expires"] > time.time():
-            return a
-        return None
-
-
-# --------------------------------------------------------------------------
-# Attachment file transfer — over the authenticated message socket
-# --------------------------------------------------------------------------
-#
-# Files are carried over the SAME persistent TLS socket as messages (the peer
-# is already authenticated by the connect handshake), NOT over a separate HTTP
-# server. This removes the HTTP / loopback-bind / port dependency that made
-# cross-LAN saves fail: no new port, no LAN bind, no token in a URL, no extra
-# firewall rule, and no separate cert-pinning path — the socket transport's
-# identity proof covers the file bytes too. The sender streams the registered
-# file as base64 chunks; the recipient reassembles to downloadDir, verifies
-# the sha256, and renames atomically.
-#
-# Wire messages (all over the friend's active socket, `from`/`to` like any msg):
-#   attachmentRequest  recipient -> sender : {fileId, mid}
-#   attachmentChunk    sender   -> recipient: {fileId, mid, seq, total, data=b64}
-#   attachmentEnd      sender   -> recipient: {fileId, mid, total}
-#   attachmentError    either   -> other   : {fileId, mid, error}
-ATT_CHUNK_RAW = 128 * 1024   # raw bytes per chunk; base64 ~1.33x, well under MAX_FRAME_BUF
-
-# Recipient-side reassembly state, keyed by fileId.
-_dl = {}                 # fileId -> {save_to,tmp,fh,mid,sha256,total,written,peer,ts}
-
-_DL_TTL_S = 600.0
-
-
-def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str):
-    """Register an in-progress download and open its .part file. Purges any
-    stale transfer first. Returns True on success."""
-    now = time.time()
-    with STATE.dl_lock:
-        for fid in list(_dl):
-            if now - _dl[fid]["ts"] > _DL_TTL_S:
-                old = _dl.pop(fid)
-                try:
-                    old["fh"].close()
-                except OSError:
-                    pass
-                _remove_file(old["tmp"])
-        try:
-            os.makedirs(os.path.dirname(save_to) or ".", exist_ok=True)
-        except OSError:
-            return False
-        tmp = save_to + ".part"
-        try:
-            fh = open(tmp, "wb")
-        except OSError:
-            return False
-        _dl[file_id] = {"save_to": save_to, "tmp": tmp, "fh": fh, "mid": mid,
-                        "sha256": sha256, "total": 0, "written": 0,
-                        "peer": peer_id, "ts": now}
-    return True
-
-
-def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
-    """Decode + append one chunk from the sender. Returns (ok, total, written)."""
-    with STATE.dl_lock:
-        d = _dl.get(file_id)
-        if not d or d.get("peer") != peer_id:
-            return (False, 0, 0)
-        if total:
-            d["total"] = total
-        try:
-            raw = base64.b64decode(data_b64)
-        except Exception:
-            return (False, d["total"], d["written"])
-        try:
-            d["fh"].write(raw)
-        except OSError:
-            return (False, d["total"], d["written"])
-        d["written"] += len(raw)
-        d["ts"] = time.time()
-        return (True, d["total"], d["written"])
-
-
-def _dl_finish(file_id: str, peer_id: str, ok: bool):
-    """Complete (or abort) a transfer. Returns (status, save_to, mid, total):
-    status in ('saved','mismatch','aborted'), or None if the transfer was not
-    registered for this peer (unknown/stale)."""
-    with STATE.dl_lock:
-        d = _dl.pop(file_id, None)
-    if not d or d.get("peer") != peer_id:
-        return None
-    try:
-        d["fh"].close()
-    except OSError:
-        pass
-    save_to, tmp = d["save_to"], d["tmp"]
-    if not ok:
-        _remove_file(tmp)
-        return ("aborted", save_to, d["mid"], d["total"])
-    # Completeness: if the sender told us the total size, require every byte.
-    # A dropped trailing chunk would otherwise go unnoticed even if it hashed
-    # the same (extremely unlikely) — this is the size half of the check.
-    if d["total"] > 0 and d["written"] != d["total"]:
-        _remove_file(tmp)
-        return ("incomplete", save_to, d["mid"], d["total"])
-    digest = _file_sha256(tmp)
-    if d["sha256"] and digest != d["sha256"]:
-        _remove_file(tmp)
-        return ("mismatch", save_to, d["mid"], d["total"])
-    try:
-        os.replace(tmp, save_to)
-    except OSError:
-        _remove_file(tmp)
-        return ("aborted", save_to, d["mid"], d["total"])
-    return ("saved", save_to, d["mid"], d["total"])
-
-
-def _finalize_download(res, mid: str, file_id: str, error: str = "") -> None:
-    """Map a _dl_finish result to the attachment-saved event the UI watches."""
-    if res is None:
-        return  # not our transfer (unknown/stale/other peer)
-    status, save_to, _mid, _total = res
-    if status == "saved":
-        _log("attachment-saved file=%s" % os.path.basename(save_to))
-        _emit({"event": "attachment-saved", "ok": True, "path": save_to,
-               "mid": mid, "fileId": file_id})
-    else:
-        if status == "mismatch":
-            msg = error or "checksum mismatch"
-        elif status == "incomplete":
-            msg = error or "incomplete transfer (bytes missing)"
-        else:
-            msg = error or "transfer aborted"
-        _emit({"event": "attachment-saved", "ok": False, "path": save_to,
-               "mid": mid, "fileId": file_id, "error": msg})
-
-
-def _serve_attachment(peer_id: str, file_id: str, mid: str) -> None:
-    """Sender: stream a registered file to the requesting peer over the socket."""
-    att = get_attachment(file_id)
-    if not att:
-        _write(peer_id, {"t": "attachmentError", "from": host_id(), "to": peer_id,
-                         "fileId": file_id, "mid": mid, "error": "not found"})
-        return
-    path, name = att["path"], att["name"]
-    try:
-        size = os.path.getsize(path)
-    except OSError:
-        _write(peer_id, {"t": "attachmentError", "from": host_id(), "to": peer_id,
-                         "fileId": file_id, "mid": mid, "error": "file missing"})
-        return
-    try:
-        with open(path, "rb") as f:
-            seq = 0
-            while True:
-                chunk = f.read(ATT_CHUNK_RAW)
-                if not chunk:
-                    break
-                ok = _write(peer_id, {
-                    "t": "attachmentChunk", "from": host_id(), "to": peer_id,
-                    "fileId": file_id, "mid": mid, "seq": seq, "total": size,
-                    "data": base64.b64encode(chunk).decode("ascii")})
-                if not ok:
-                    _log("attachment-stream-aborted peer=%s file=%s err=socket-down"
-                         % (peer_id[:12], name))
-                    return
-                seq += 1
-        _write(peer_id, {"t": "attachmentEnd", "from": host_id(), "to": peer_id,
-                         "fileId": file_id, "mid": mid, "total": size})
-        _log("attachment-streamed peer=%s file=%s size=%s" % (peer_id[:12], name, size))
-    except OSError as e:
-        _log("attachment-stream-failed peer=%s file=%s err=%s" % (peer_id[:12], name, e))
-        _write(peer_id, {"t": "attachmentError", "from": host_id(), "to": peer_id,
-                         "fileId": file_id, "mid": mid, "error": str(e)})
+# Attachment registry + socket file transfer (_safe_filename, register/get,
+# _dl_* reassembly, _serve_attachment) moved to attachments.py (Commit 2);
+# all symbols re-exported at the top of this file.
 
 
 def _tls_connect_host(addr: str, port: int, name: str, expected_fingerprint: str = ""):
@@ -2477,184 +2015,9 @@ def _notify_accept(peer_id: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Optional HTTP API
+# Optional HTTP API — moved to http_api.py (Commit 2); _ApiHandler,
+# _start_http and _stop_http are re-exported at the top of this file.
 # --------------------------------------------------------------------------
-# A small stdlib HTTP server for sending messages / reading state from other
-# tools (curl, scripts, an agent). Disabled by default; toggled on/off from the
-# panel UI. Authenticated with the same shared token as the TCP/UDP layer.
-
-_http_server = None
-_http_server_thread = None
-
-
-class _ApiHandler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *args):  # silence request logging
-        pass
-
-    # --- rate limiting ------------------------------------------------------
-    # Class-level shared state: a simple sliding-window throttle on outbound
-    # sends and on failed auth (brute-force guard). Rates are modest; a legit
-    # local agent won't hit them, but a scanner/attacker quickly does.
-    _MAX_BODY = 256 * 1024            # reject bodies larger than this
-    _SEND_WINDOW_S = 10.0             # allow up to _SEND_MAX per window
-    _SEND_MAX = 40
-    _AUTH_WINDOW_S = 10.0             # allow up to _AUTH_MAX failed auths
-    _AUTH_MAX = 10
-    _send_ts = []                     # timestamps of recent /send calls
-    _auth_fail_ts = []                # timestamps of recent failed auths
-    _rl_lock = threading.Lock()
-
-    @classmethod
-    def _throttle(cls, bucket, limit, window, now):
-        """Return True if the request is allowed; else False (over the limit)."""
-        with cls._rl_lock:
-            bucket[:] = [t for t in bucket if now - t < window]
-            if len(bucket) >= limit:
-                return False
-            bucket.append(now)
-            return True
-
-    def _auth_ok(self, token):
-        ok = bool(token) and token == STATE.config.get("token")
-        if not ok:
-            # Count the failure for the brute-force throttle.
-            self._throttle(self._auth_fail_ts, self._AUTH_MAX, self._AUTH_WINDOW_S, time.time())
-        return ok
-
-    def _auth_blocked(self):
-        """True if the recent failed-auth window is full (too many bad tokens)."""
-        now = time.time()
-        with self._rl_lock:
-            self._auth_fail_ts[:] = [t for t in self._auth_fail_ts if now - t < self._AUTH_WINDOW_S]
-            return len(self._auth_fail_ts) >= self._AUTH_MAX
-
-    def _send_json(self, code, obj):
-        data = json.dumps(obj).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _body(self):
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            length = 0
-        if length <= 0:
-            return {}
-        if length > self._MAX_BODY:
-            self._send_json(413, {"ok": False, "error": "request body too large"})
-            return None
-        raw = self.rfile.read(length)
-        try:
-            return json.loads(raw.decode("utf-8"))
-        except ValueError:
-            return {}
-
-    def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
-        qs = urllib.parse.parse_qs(parsed.query)
-        token = (qs.get("token") or [""])[0]
-        if parsed.path == "/health":
-            return self._send_json(200, {"ok": True})
-        if self._auth_blocked():
-            return self._send_json(429, {"ok": False, "error": "rate limited"})
-        if not self._auth_ok(token):
-            return self._send_json(401, {"ok": False, "error": "unauthorized"})
-        if parsed.path == "/peers":
-            if not api_full_access():
-                return self._send_json(403, {"ok": False, "error": "read access disabled"})
-            return self._send_json(200, {"ok": True, "peers": peer_snapshot()})
-        if parsed.path == "/messages":
-            if not api_full_access():
-                return self._send_json(403, {"ok": False, "error": "read access disabled"})
-            return self._send_json(200, {"ok": True, "messages": history_snapshot()})
-        if parsed.path == "/attachment":
-            # Serving a registered file to a confirmed friend (token in the
-            # query) is peer-to-peer file transfer, not script read-access — so
-            # it must NOT be gated behind apiFullAccess. Auth is enforced above.
-            file_id = (qs.get("fileId") or [""])[0]
-            att = get_attachment(file_id)
-            if not att:
-                return self._send_json(404, {"ok": False, "error": "not found"})
-            try:
-                with open(att["path"], "rb") as f:
-                    data = f.read()
-            except OSError:
-                return self._send_json(404, {"ok": False, "error": "file missing"})
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Content-Disposition", "attachment; filename=%s" % att["name"])
-            self.end_headers()
-            self.wfile.write(data)
-            return
-        self._send_json(404, {"ok": False, "error": "not found"})
-
-    def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        body = self._body()
-        if body is None:  # oversized body already answered with 413
-            return
-        if parsed.path == "/send":
-            token = body.get("token")
-            if self._auth_blocked():
-                return self._send_json(429, {"ok": False, "error": "rate limited"})
-            if not self._auth_ok(token):
-                return self._send_json(401, {"ok": False, "error": "unauthorized"})
-            if not self._throttle(self._send_ts, self._SEND_MAX, self._SEND_WINDOW_S, time.time()):
-                return self._send_json(429, {"ok": False, "error": "rate limited"})
-            to = str(body.get("to", ""))
-            text = str(body.get("text", ""))
-            if not to or not text.strip():
-                return self._send_json(400, {"ok": False, "error": "to and text required"})
-            if find_peer(to) is None:
-                return self._send_json(404, {"ok": False, "error": "peer offline"})
-            if not send_message(to, text):
-                return self._send_json(500, {"ok": False, "error": "delivery failed"})
-            return self._send_json(200, {"ok": True})
-        self._send_json(404, {"ok": False, "error": "not found"})
-
-
-def _start_http() -> bool:
-    global _http_server, _http_server_thread
-    if _http_server is not None:
-        return True
-    # Retry briefly: after a daemon restart the previous HTTP socket may still
-    # be settling, and a single failed bind would otherwise leave the API off
-    # until the toggle is flipped. Each attempt is cheap (immediate on success).
-    last_err = None
-    for attempt in range(5):
-        try:
-            srv = http.server.ThreadingHTTPServer((http_bind(), http_port()), _ApiHandler)
-            srv.socket = ensure_tls().wrap_socket(srv.socket, server_side=True)
-            _http_server = srv
-            _http_server_thread = threading.Thread(target=srv.serve_forever, daemon=True)
-            _http_server_thread.start()
-            _emit({"event": "http", "enabled": True, "port": http_port(), "bind": http_bind()})
-            return True
-        except OSError as e:
-            last_err = e
-            time.sleep(0.4)
-    _emit({"event": "http", "enabled": False, "port": http_port(), "error": str(last_err)})
-    return False
-
-
-def _stop_http() -> None:
-    global _http_server, _http_server_thread
-    srv = _http_server
-    _http_server = None
-    if srv is not None:
-        try:
-            srv.shutdown()
-        except Exception:
-            pass
-        try:
-            srv.server_close()
-        except Exception:
-            pass
-    _emit({"event": "http", "enabled": False, "port": http_port()})
 
 
 # --------------------------------------------------------------------------
@@ -3166,6 +2529,16 @@ def _ready_event() -> dict:
 
 def main() -> None:
     import argparse
+    # Self-register under the name 'server' so deferred `import server`
+    # statements inside the extracted modules (http_api.py, history.py,
+    # attachments.py, identity.py) resolve to THIS running module when
+    # server.py is executed directly as __main__ — otherwise Python would
+    # load a second copy of server.py as module 'server' with its own
+    # (empty) State, splitting daemon state. When server.py is imported
+    # normally (tests), __name__ == "server" and this is a no-op.
+    _SELF = sys.modules[__name__]
+    if __name__ != "server" and "server" not in sys.modules:
+        sys.modules["server"] = _SELF
     ap = argparse.ArgumentParser(description="Lanchat daemon")
     ap.add_argument("--socket", action="store_true",
                     help="run under systemd: serve the unix-socket control channel "
