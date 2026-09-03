@@ -791,8 +791,9 @@ Panel {
                       anchors.horizontalCenter: parent.horizontalCenter
                       spacing: Style.spacing.xs
 
-                      // Line 1: who + Accept/Reject (incoming) or Cancel
-                      // (outgoing — retract a request we sent).
+                      // Line 1: label + Accept/Reject (incoming) or Cancel
+                      // (outgoing — retract a request we sent). The requester's
+                      // name sits on its own line below so it reads clearly.
                       Row {
                         width: parent.width
                         spacing: Style.spacing.sm
@@ -801,8 +802,8 @@ Panel {
                           anchors.verticalCenter: parent.verticalCenter
                           width: parent.width - Style.space(96)
                           text: modelData.outgoing
-                            ? "Waiting for " + (modelData.name || "them") + " to accept"
-                            : "Friend request from " + (modelData.name || "someone")
+                            ? "Waiting for them to accept"
+                            : "Friend request from"
                           color: Color.popups.text
                           font.family: Style.font.family
                           font.pixelSize: Style.font.caption
@@ -827,6 +828,24 @@ Panel {
                           fontSize: Style.font.caption
                           tooltipText: "Withdraw this friend request"
                           onClicked: root.cancelFriend(modelData.peerId)
+                        }
+                      }
+
+                      // Line 2: the requester's display name — its own row so
+                      // it's prominent and never crowds the buttons above.
+                      Row {
+                        visible: !modelData.outgoing
+                        width: parent.width
+                        spacing: Style.spacing.sm
+                        Text {
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: parent.width
+                          text: modelData.name || "Someone"
+                          color: Color.popups.text
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.body
+                          font.weight: Font.DemiBold
+                          elide: Text.ElideRight
                         }
                       }
 
