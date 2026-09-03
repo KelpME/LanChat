@@ -96,6 +96,7 @@ Panel {
   }
 
   function selectPeer(id) {
+    root.confirmUnfriend = false
     selectedPeerId = id
     Lanchat.resetHistoryMeta(id)
     Lanchat.refreshHistory(id, 0, 50)
@@ -147,6 +148,7 @@ Panel {
   }
 
   function unfriendSelected() {
+    root.confirmUnfriend = false
     if (selectedPeerId) {
       Lanchat.unfriend(selectedPeerId)
       selectedPeerId = ""
@@ -156,6 +158,7 @@ Panel {
   // Deselect the active peer so no chat shows on the right. Also stops the
   // typing indicator and abandons any in-progress edit.
   function closeChat() {
+    root.confirmUnfriend = false
     if (selectedPeerId) Lanchat.sendTypingStopped(selectedPeerId)
     editingMid = ""
     selectedPeerId = ""
@@ -197,6 +200,16 @@ Panel {
   property Timer clearConfirmTimer: Timer {
     interval: 2500
     onTriggered: root.confirmClearAll = false
+  }
+
+  // Two-step guard on the thread header's Unfriend button: the first click
+  // arms a "Confirm?" state (auto-disarms after a few seconds so it doesn't
+  // stay hot); the second click actually unfriends. Mirrors the "Clear all
+  // chats" confirm pattern.
+  property bool confirmUnfriend: false
+  property Timer unfriendConfirmTimer: Timer {
+    interval: 2500
+    onTriggered: root.confirmUnfriend = false
   }
 
   // Shows a brief checkmark next to the "Clear all chats" button after a
@@ -2210,12 +2223,28 @@ Panel {
               Button {
                 id: unfriendBtn
                 visible: root.friendState(root.selectedPeerId) === "friend"
+                // If the button disappears while armed (e.g. the peer is no
+                // longer a friend), drop the pending confirm so it can't
+                // re-surface against another peer.
+                onVisibleChanged: if (!visible) root.confirmUnfriend = false
                 anchors.right: chatActionsSep.left
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Unfriend"
+                text: root.confirmUnfriend ? "Confirm unfriend?" : "Unfriend"
                 fontSize: Style.font.caption
-                onClicked: root.unfriendSelected()
+                foreground: root.confirmUnfriend ? Color.urgent : Color.foreground
+                onClicked: {
+                  if (!root.confirmUnfriend) {
+                    // First click: arm the confirm state (auto-disarms shortly).
+                    root.confirmUnfriend = true
+                    root.unfriendConfirmTimer.restart()
+                  } else {
+                    // Second click: actually unfriend.
+                    root.confirmUnfriend = false
+                    root.unfriendConfirmTimer.stop()
+                    root.unfriendSelected()
+                  }
+                }
               }
               Button {
                 id: clearChatBtn
