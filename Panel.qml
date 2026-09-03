@@ -2084,13 +2084,16 @@ Panel {
             height: parent.height
 
             // Pinned thread header: stays fixed at the top while messages
-            // scroll beneath. Holds the typing indicator and per-chat
-            // actions (Clear chat, Unfriend).
+            // scroll beneath. Holds the typing indicator, per-chat actions
+            // (Clear chat, Unfriend) AND the app-level Check-for-updates /
+            // Discard controls, which must stay visible even with no peer
+            // selected — so this bar is always shown; only the two per-peer
+            // buttons below hide when nothing is selected.
             Rectangle {
               id: threadHeader
               width: parent.width
-              height: root.selectedPeerId ? Style.space(30) : 0
-              visible: root.selectedPeerId !== ""
+              height: Style.space(30)
+              visible: true
               color: Style.normalFill
 
               Rectangle {
