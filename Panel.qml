@@ -1072,7 +1072,8 @@ Panel {
                       anchors.right: parent.right
                       anchors.rightMargin: Style.spacing.sm
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "\uF046"
+                      text: "\uF074" // nf-fa-random (shuffle) — re-roll the name
+                      tooltipText: "Randomize name"
                       onClicked: Lanchat.regenerateName()
                     }
                   }
