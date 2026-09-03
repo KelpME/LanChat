@@ -170,20 +170,10 @@ Panel {
   // permanent config flag.
   property bool showOnboarding: true
 
-  // (1.3) Option-B friend-request accept: when non-empty, the banner row for
-  // this peer shows its verified fingerprint and a "Confirm" button instead of
-  // a blind Accept — the user must confirm the fingerprint matches what they
-  // expected before the request is accepted.
-  property string confirmFrPeerId: ""
-  property string confirmFrFingerprint: ""
-  function beginConfirmFriend(peerId, fingerprint) {
-    root.confirmFrPeerId = peerId
-    root.confirmFrFingerprint = fingerprint || ""
-  }
-  function cancelConfirmFriend() {
-    root.confirmFrPeerId = ""
-    root.confirmFrFingerprint = ""
-  }
+  // Friend requests accept in a single step — the requester's verified
+  // fingerprint (first 6 digits) is shown inline on the request banner, and
+  // Accept confirms immediately. No separate confirm page.
+
 
   // Two-step confirm for the "Clear all chats" action. Resets after a couple
   // of seconds so the button doesn't stay armed.
@@ -337,13 +327,12 @@ Panel {
     Lanchat.cancelFriendRequest(id)
   }
 
-  // Shorten a cert fingerprint to show its beginning AND end (4 hex chars
-  // each side, middle elided) so you can spot-verify identity without the
-  // 64-char string overflowing the narrow panel.
+  // Shorten a cert fingerprint to its first 6 hex digits for a quick identity
+  // spot-check without the 64-char string overflowing the narrow panel.
   function shortFp(fp) {
     var s = String(fp || "")
-    if (s.length <= 8) return s
-    return s.slice(0, 4) + "\u2026" + s.slice(-4)
+    if (s.length <= 6) return s
+    return s.slice(0, 6)
   }
 
   // (1.3) Read the "Add friend by fingerprint" field and add the friend.
@@ -821,10 +810,10 @@ Panel {
                         }
                         Item { width: Style.space(4) }
                         Button {
-                          visible: !modelData.outgoing && root.confirmFrPeerId !== modelData.peerId
+                          visible: !modelData.outgoing
                           text: "Accept"
                           fontSize: Style.font.caption
-                          onClicked: root.beginConfirmFriend(modelData.peerId, modelData.fingerprint)
+                          onClicked: root.acceptFriend(modelData.peerId)
                         }
                         Button {
                           visible: !modelData.outgoing
@@ -841,7 +830,7 @@ Panel {
                         }
                       }
 
-                      // Verified requester fingerprint (short: start…end) on the
+                      // Verified requester fingerprint (first 6 digits) on the
                       // incoming request, so you can spot-check identity before
                       // accepting. Shown on its own row so it never overflows.
                       Row {
@@ -856,38 +845,6 @@ Panel {
                           font.family: Style.font.mono || Style.font.family
                           font.pixelSize: Style.font.micro
                           elide: Text.ElideRight
-                        }
-                      }
-
-                      // (1.3) Line 2 (only when confirming): verified fingerprint
-                      // + Confirm/Back. Shown on its own row so it never
-                      // overflows the banner width.
-                      Row {
-                        visible: !modelData.outgoing && root.confirmFrPeerId === modelData.peerId
-                        width: parent.width
-                        spacing: Style.spacing.sm
-
-                        Text {
-                          anchors.verticalCenter: parent.verticalCenter
-                          width: parent.width - Style.space(150)
-                          text: "Fingerprint: " + root.shortFp(root.confirmFrFingerprint || modelData.peerId || "")
-                          color: Color.popups.mutedText
-                          font.family: Style.font.mono || Style.font.family
-                          font.pixelSize: Style.font.micro
-                          elide: Text.ElideRight
-                        }
-                        Button {
-                          text: "Confirm"
-                          fontSize: Style.font.caption
-                          onClicked: {
-                            root.acceptFriend(modelData.peerId)
-                            root.cancelConfirmFriend()
-                          }
-                        }
-                        Button {
-                          text: "Back"
-                          fontSize: Style.font.caption
-                          onClicked: root.cancelConfirmFriend()
                         }
                       }
                     }
