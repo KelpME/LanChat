@@ -153,6 +153,14 @@ Panel {
     }
   }
 
+  // Deselect the active peer so no chat shows on the right. Also stops the
+  // typing indicator and abandons any in-progress edit.
+  function closeChat() {
+    if (selectedPeerId) Lanchat.sendTypingStopped(selectedPeerId)
+    editingMid = ""
+    selectedPeerId = ""
+  }
+
   // Commit the display-name field if it holds a non-empty value. Guarded so a
   // transient empty state (field cleared mid-edit) doesn't wipe the name; only
   // a real value is saved.
@@ -567,6 +575,27 @@ Panel {
               anchors.fill: parent
 
               // ---- peers list (scrollable) ---------------------------
+              // Clicking blank space in the peer list (below the last row,
+              // or anywhere when no peers are listed) deselects the active
+              // peer so no chat shows on the right. This area sits BEHIND
+              // the ListView, so clicks on an actual peer row still land on
+              // the row's own MouseArea and select it; only clicks that fall
+              // through (empty space) reach here and close the conversation.
+              // The ListView is only interactive (grabber) when it actually
+              // overflows — exactly when rows fill the column and no blank
+              // space exists to click.
+              MouseArea {
+                id: peerListBlankArea
+                anchors.top: notifBanner.bottom
+                anchors.topMargin: Style.spacing.sm
+                anchors.bottom: settings.top
+                anchors.bottomMargin: Style.spacing.xs
+                anchors.left: parent.left
+                anchors.right: parent.right
+                visible: root.selectedPeerId !== ""
+                onClicked: root.closeChat()
+              }
+
               ListView {
                 id: peerList
                 width: parent.width
@@ -577,6 +606,7 @@ Panel {
                 anchors.bottom: settings.top
                 anchors.bottomMargin: Style.spacing.xs
                 clip: true
+                interactive: peerList.contentHeight > peerList.height
                 model: Lanchat.displayPeers
                 spacing: Style.spacing.xs
 
@@ -2140,10 +2170,43 @@ Panel {
               // pointless over a stranger's or a still-pending request's
               // thread. "Clear chat" needs history to clear — pointless for
               // a brand-new conversation with no messages yet.
+              //
+              // Rightmost is a Close button (deselect the peer so no chat
+              // shows) with a thin vertical divider between it and the
+              // Unfriend / Clear-chat cluster. All per-chat controls hide
+              // when nothing is selected; the divider tracks the Close
+              // button so it never floats alone.
+              Rectangle {
+                id: chatActionsSep
+                visible: closeChatBtn.visible && (unfriendBtn.visible || clearChatBtn.visible)
+                width: 1
+                height: Math.min(16, parent.height - Style.space(8))
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: closeChatBtn.left
+                anchors.rightMargin: Style.spacing.sm
+                color: Color.popups.border
+              }
+
+              // Close the current conversation: deselect the peer so no chat
+              // shows on the right (mirrors clicking empty space in the peer
+              // list). Shown whenever a peer is selected.
+              Button {
+                id: closeChatBtn
+                visible: root.selectedPeerId !== ""
+                anchors.right: parent.right
+                anchors.rightMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                text: "\u2715"  // ✕
+                fontSize: Style.font.caption
+                foreground: Color.muted
+                tooltipText: "Close conversation (deselect peer)"
+                onClicked: root.closeChat()
+              }
+
               Button {
                 id: unfriendBtn
                 visible: root.friendState(root.selectedPeerId) === "friend"
-                anchors.right: parent.right
+                anchors.right: chatActionsSep.left
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
                 text: "Unfriend"
