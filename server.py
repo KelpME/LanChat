@@ -738,6 +738,20 @@ def unfriend(pid: str) -> bool:
     return len(friends) != before
 
 
+def _do_unfriend(pid: str) -> bool:
+    """Remove a peer and clear their chat history + surface the UI events.
+
+    Shared by the local unfriend command and the remote (notified) unfriend
+    path so both sides reconcile identically: the friend drops, the history
+    clears, and the UI gets friend-removed + chat-cleared.
+    """
+    removed = unfriend(pid)
+    history_cleared = clear_history_for_peer(pid)
+    _emit({"event": "friend-removed", "id": pid})
+    _emit({"event": "chat-cleared", "peer": pid, "removed": history_cleared})
+    return removed
+
+
 def _unfriend_if_unconfirmed(pid: str) -> bool:
     """Remove a peer ONLY if they are a pending (unconfirmed) request, never a
     confirmed friend. Returns True if a record was removed."""
@@ -845,6 +859,11 @@ def _udp_listener(sock: socket.socket) -> None:
                 # dropped when no connection exists — the one-way bug) and clears
                 # its pending state + banner.
                 _handle_udp_friend_reject(sock, pkt, addr[0])
+            elif t == "friend-unfriend":
+                # The peer unfriended us. Verify the signed unfriend so both
+                # sides drop the link even when no TCP connection exists
+                # (mirror of the one-way bug: A unfriends B, B keeps A).
+                _handle_udp_friend_unfriend(sock, pkt, addr[0])
         except Exception:
             # Never let one packet kill the discovery listener. Log (rate-safely
             # is hard here; just one line per bad packet is acceptable and rare).
@@ -1143,6 +1162,45 @@ def _send_udp_friend_reject(sock: socket.socket, pid: str) -> bool:
         return False
 
 
+def _send_udp_friend_unfriend(sock: socket.socket, pid: str) -> bool:
+    """Send a SIGNED friend-unfriend to a peer over UDP (no TCP needed).
+
+    When we unfriend someone, we notify the peer over the SAME bootstrap
+    channel (UDP) so BOTH sides drop the link — otherwise B would keep us as a
+    friend after we unfriend them (the one-way bug, mirror of the handshake).
+    Like the other friend packets, it's signed so the recipient can verify
+    it's genuinely from the peer they friended. Returns True if sent.
+    """
+    peer = find_peer(pid)
+    target = (peer or {}).get("address", "")
+    tport = int((peer or {}).get("port") or DEFAULT_PORT)
+    if not target:
+        for f in STATE.config.get("friends", []):
+            if f.get("id") == pid and f.get("address"):
+                target = f.get("address")
+                tport = int(f.get("port") or DEFAULT_PORT)
+                break
+    if not target:
+        _diag("udp-friend-unfriend-failed", to=pid[:12], reason="no-address")
+        return False
+    nonce = secrets.token_hex(16)
+    payload = {"t": "friend-unfriend",
+               "id": host_id(),
+               "name": display_name(),
+               "cert": _our_cert_pem(),
+               "nonce": nonce,
+               "sig": _sign((host_id() + nonce).encode("utf-8")),
+               "port": port(),
+               "to": pid}
+    try:
+        sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
+        _diag("udp-friend-unfriend-sent", to=target, port=tport, nonce=nonce[:8])
+        return True
+    except OSError as e:
+        _diag("udp-friend-unfriend-failed", to=target, errno=getattr(e, "errno", None))
+        return False
+
+
 def _handle_udp_friend_reject(sock: socket.socket, pkt: dict, addr: str) -> None:
     """Verify + process an inbound UDP friend-reject (the request was declined).
 
@@ -1171,6 +1229,34 @@ def _handle_udp_friend_reject(sock: socket.socket, pkt: dict, addr: str) -> None
     _unfriend_if_unconfirmed(claimed)
     _emit({"event": "friend-rejected", "id": claimed, "name": name})
     _diag("udp-friend-rejected", peer=claimed[:12], name=name)
+
+
+def _handle_udp_friend_unfriend(sock: socket.socket, pkt: dict, addr: str) -> None:
+    """Verify + process an inbound UDP friend-unfriend (we were unfriended).
+
+    The peer proves ownership of its claimed cert id (same signature scheme as
+    the other friend packets). On success we remove them as a CONFIRMED friend
+    unconditionally and clear their history — mirroring the local unfriend so
+    both sides drop the link even when no TCP connection exists. A spurious
+    (unverified) packet is dropped: we never remove a friend on unauthenticated
+    UDP.
+    """
+    claimed = str(pkt.get("id") or "")
+    cert_pem = str(pkt.get("cert") or "")
+    nonce = str(pkt.get("nonce") or "")
+    sig = str(pkt.get("sig") or "")
+    name = str(pkt.get("name") or friendly_name(claimed))
+    if not claimed or claimed == host_id():
+        return
+    if _cert_fingerprint_of_pem(cert_pem) != claimed:
+        _diag("udp-friend-unfriend-rejected", from_id=claimed[:12], reason="bad-identity")
+        return
+    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
+        _diag("udp-friend-unfriend-rejected", from_id=claimed[:12], reason="bad-signature")
+        return
+    # Verified: they unfriended us. Drop the confirmed friend + clear history.
+    _do_unfriend(claimed)
+    _diag("udp-friend-unfriended", peer=claimed[:12], name=name)
 
 
 def _local_subnet_hosts(max_hosts: int = 512) -> list:
@@ -1782,6 +1868,15 @@ def _handle_incoming(msg: dict, addr) -> None:
         _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
         _diag("inbound-friend-reject", peer=pid[:12])
         return
+    if msg.get("t") == "friendRemove":
+        # They unfriended us over TCP (the UDP path uses friend-unfriend; this
+        # is the fallback when the socket exists). Drop the confirmed friend +
+        # clear history so both sides remove the link.
+        pid = str(msg.get("from", ""))
+        if pid:
+            _do_unfriend(pid)
+            _diag("inbound-friend-remove", peer=pid[:12])
+        return
     if msg.get("t") == "typing":
         _emit({"event": "typing", "from": str(msg.get("from", "")), "fromName": str(msg.get("fromName") or friendly_name(msg.get("from", "")))})
         return
@@ -2385,12 +2480,20 @@ def handle_command(cmd: dict) -> None:
         _diag("rejected-friend-request", peer=pid[:12])
     elif kind == "unfriend":
         pid = str(cmd.get("id", ""))
-        if unfriend(pid):
-            _emit({"event": "friend-removed", "id": pid})
-            # Unfriending also clears the chat history for that peer — both the
-            # persisted history and the UI list (via chat-cleared).
-            removed = clear_history_for_peer(pid)
-            _emit({"event": "chat-cleared", "peer": pid, "removed": removed})
+        # Unfriend is LOCAL removal + a notify-back to the peer so BOTH sides
+        # drop the link (a local-only unfriend leaves the peer thinking we're
+        # still friends — the one-way bug, mirror of the handshake). The notify
+        # rides signed UDP (friend-unfriend) and falls back to TCP (friendRemove)
+        # if UDP is unavailable, mirroring the accept/reject paths.
+        _do_unfriend(pid)
+        if pid:
+            if STATE.udp_sock is not None:
+                if _send_udp_friend_unfriend(STATE.udp_sock, pid):
+                    _diag("unfriend-notify-udp", peer=pid[:12])
+                else:
+                    send_control(pid, "friendRemove")
+            else:
+                send_control(pid, "friendRemove")
     elif kind == "typing":
         send_control(str(cmd.get("to", "")), "typing")
     elif kind == "typingStopped":
