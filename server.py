@@ -220,7 +220,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (fetch + fast-forward, daemon/shell reload) rather than only checking; docs
 #   updated to match.
 
-VERSION = "1.5.23"
+VERSION = "1.5.24"
 def _git_version() -> str:
     try:
         import subprocess as _sp
