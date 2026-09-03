@@ -763,7 +763,12 @@ QtObject {
       // friend is its own flow, separate from messaging.
       var fr = {
         peerId: obj.outgoing ? (obj.to || "") : (obj.from || ""),
-        name: obj.outgoing ? (obj.toName || obj.to || "") : (obj.fromName || obj.from || ""),
+        // Name resolution: the UDP bootstrap path sends the requester's name
+        // in `name`; the TCP path sends it in `fromName`. Accept either so we
+        // never fall back to showing the raw fingerprint as a display name.
+        name: obj.outgoing
+          ? (obj.toName || obj.to || "")
+          : (obj.name || obj.fromName || obj.from || ""),
         outgoing: !!obj.outgoing,
         ts: obj.ts || Date.now(),
         mid: obj.mid || "",
