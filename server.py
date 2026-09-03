@@ -621,10 +621,12 @@ def peer_snapshot() -> list:
 
 def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = None, pstatus: str = "available", pversion: str = "") -> None:
     now = time.time()
+    changed = False
     with STATE.peers_lock:
         existed = pid in STATE.peers
-        prev_version = STATE.peers[pid].get("version", "") if existed else ""
-        STATE.peers[pid] = {
+        prev = STATE.peers.get(pid)
+        prev_version = prev.get("version", "") if existed else ""
+        newrec = {
             "id": pid,
             "name": name,
             "address": address,
@@ -634,10 +636,20 @@ def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = N
             "lastSeen": int(now * 1000),
             "version": pversion or prev_version,
         }
-    if not existed:
-        _diag("peer-discovered", id=pid[:12], name=name, address=address, port=pport, version=pversion)
-        _emit({"event": "peer", "peer": STATE.peers[pid]})
-    else:
+        # Emit only when something meaningful changed (a new peer, or a change
+        # to name/address/port/status/version). A pure discovery heartbeat
+        # (peers re-broadcast every ~3s) only bumps lastSeen and must NOT emit —
+        # otherwise the UI rebuilds the peer list on every hello, which
+        # re-renders the panel and makes hovered controls flicker.
+        if not existed or any(
+            newrec[k] != prev.get(k)
+            for k in ("name", "address", "port", "httpPort", "status", "version")
+        ):
+            changed = True
+        STATE.peers[pid] = newrec
+    if changed:
+        if not existed:
+            _diag("peer-discovered", id=pid[:12], name=name, address=address, port=pport, version=pversion)
         _emit({"event": "peer", "peer": STATE.peers[pid]})
     # If a confirmed friend broadcasts with a real name, sync it into their
     # friend record so an "Unknown" (added-by-fingerprint) friend gets their
