@@ -153,6 +153,14 @@ Panel {
     }
   }
 
+  // Commit the display-name field if it holds a non-empty value. Guarded so a
+  // transient empty state (field cleared mid-edit) doesn't wipe the name; only
+  // a real value is saved.
+  function commitName() {
+    var t = nameInput.text.trim()
+    if (t !== "") Lanchat.setMyName(t)
+  }
+
   function deleteMsg(mid) {
     Lanchat.deleteMessage(mid)
   }
@@ -1044,8 +1052,18 @@ Panel {
                       placeholderText: "your name"
                       horizontalPadding: Style.space(8)
                       verticalPadding: Style.space(4)
-                      onAccepted: Lanchat.setMyName(nameInput.text)
-                      onEditingFinished: if (nameInput.text.trim() !== "") Lanchat.setMyName(nameInput.text)
+                      // Commit the name automatically a moment after typing
+                      // stops (debounced) — no Enter needed. `editingFinished`
+                      // only fires on genuine focus loss, which clicking
+                      // non-focusable panel areas doesn't always trigger.
+                      onTextChanged: nameSaveTimer.restart()
+                      onAccepted: root.commitName()
+                      onEditingFinished: root.commitName()
+                      Timer {
+                        id: nameSaveTimer
+                        interval: 600
+                        onTriggered: root.commitName()
+                      }
                     }
 
                     // Re-roll to a fresh random friendly name.
