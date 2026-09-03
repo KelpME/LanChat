@@ -2189,16 +2189,20 @@ Panel {
 
               // Close the current conversation: deselect the peer so no chat
               // shows on the right (mirrors clicking empty space in the peer
-              // list). Shown whenever a peer is selected.
+              // list). Shown only when a conversation is actually open (the
+              // peer is selected AND has history); the glyph is FontAwesome's
+              // fa-times (\uF00D) so it renders thin and matches the refresh
+              // icon and text labels around it, colored with the row's default
+              // foreground (no muted override) so it reads like the other
+              // controls in the header.
               Button {
                 id: closeChatBtn
-                visible: root.selectedPeerId !== ""
+                visible: root.selectedPeerId !== "" && root.hasThread
                 anchors.right: parent.right
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
-                text: "\u2715"  // ✕
+                text: "\uF00D"  // fa-times (thin close glyph)
                 fontSize: Style.font.caption
-                foreground: Color.muted
                 tooltipText: "Close conversation (deselect peer)"
                 onClicked: root.closeChat()
               }
