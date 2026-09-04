@@ -691,6 +691,21 @@ QtObject {
 
   // Insert or replace a message in the list keyed by mid (dedup on reveal).
   function upsertMessage(m) {
+    // Room messages live in their own store (roomMessages) so the room view
+    // updates live — a message carrying a room id must never land in the 1:1
+    // message list (that would double-render it once the room view ALSO
+    // shows it, and leave the 1:1 thread with stray content).
+    if (m.room) {
+      var rms = lanchat.roomMessages.slice()
+      var ridx = -1
+      for (var r = 0; r < rms.length; r++) {
+        if (rms[r].mid === m.mid) { ridx = r; break }
+      }
+      if (ridx >= 0) rms[ridx] = m
+      else rms.push(m)
+      lanchat.roomMessages = rms
+      return
+    }
     if (!m.mid) { lanchat.messages = lanchat.messages.concat([m]); return }
     var msgs = lanchat.messages.slice()
     var idx = -1

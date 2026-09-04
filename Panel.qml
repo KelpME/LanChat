@@ -852,10 +852,10 @@ Panel {
                     elide: Text.ElideRight
                   }
 
-                  // Room-add control: a "＋" on CONFIRMED FRIEND rows only,
-                  // visible only while a room roster is open, only for peers
-                  // not already in that room. One click proposes/adds them —
-                  // same roomAdd path as the roster drag/picker.
+                  // Room-add control: "Add to group" on CONFIRMED FRIEND rows
+                  // only, visible only while a room roster is open, only for
+                  // peers not already in that room. One click proposes/adds
+                  // them — same roomAdd path as the roster picker.
                   Button {
                     id: roomAddBadge
                     readonly property bool inSelectedRoom:
@@ -866,7 +866,7 @@ Panel {
                     visible: root.inRoom
                              && Lanchat.isConfirmedFriend(modelData.id)
                              && !inSelectedRoom
-                    text: "＋"
+                    text: "Add to group"
                     fontSize: Style.font.caption
                     foreground: Color.accent
                     tooltipText: "Add " + (modelData.name || "peer") + " to the room"
