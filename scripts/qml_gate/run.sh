@@ -26,6 +26,7 @@ cp "$REPO"/shared/ChatMessage.qml "$REPO"/shared/RoomMessage.qml "$BENCH"/shared
 cp "$REPO"/shared/ComposeBox.qml "$BENCH"/shared/ 2>/dev/null || true
 cp "$REPO"/shared/PeerList.qml "$BENCH"/shared/ 2>/dev/null || true
 cp "$REPO"/shared/RoomListSection.qml "$BENCH"/shared/ 2>/dev/null || true
+cp "$REPO"/shared/ChatThread.qml "$REPO"/shared/RoomView.qml "$BENCH"/shared/ 2>/dev/null || true
 cp "$REPO"/scripts/qml_gate/shared/Lanchat.qml "$BENCH"/shared/
 cp "$REPO"/shared/Lanchat.qml "$BENCH"/shared/Lanchat.real.qml 2>/dev/null || true
 

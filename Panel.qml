@@ -2326,105 +2326,36 @@ Panel {
               }
             }
 
-          ListView {
-            id: list
-            visible: !root.inRoom
-            width: root.inRoom ? 0 : parent.width
-            // Subtract the incoming-file bar ONLY while it's visible — an
-            // invisible bar takes no flow space, so subtracting its height
-            // unconditionally left the compose box floating above the bottom.
-            height: parent.height - composeBox.height - threadHeader.height
-                    - (chatAlertBar.visible ? chatAlertBar.height : 0)
-            clip: true
-            spacing: Style.spacing.sm
-            model: root.thread
-            header: Item { width: parent.width; height: Style.spacing.md }
-              footer: Item { width: parent.width; height: Style.spacing.lg }
-
-              onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
-
-              // Lazy-load: when scrolled to the top, fetch an older page.
-              onAtYBeginningChanged: {
-                if (list.atYBeginning && root.selectedPeerId)
-                  Lanchat.loadOlder(root.selectedPeerId)
-              }
-              onContentYChanged: {
-                if (contentY <= 2 && root.selectedPeerId)
-                  Lanchat.loadOlder(root.selectedPeerId)
-              }
-
-              delegate: Column {
-                required property var modelData
-                width: list.width
-                spacing: Style.spacing.xs
-
-                ChatMessage {
-                  id: chatMsg
-                  modelData: modelData
-                  maxWidth: list.width * 0.8
-                  editingMid: root.editingMid
-                  timeLabel: root.timeLabel
-                  onEditRequested: function(mid, text) { root.editMsg(mid, text) }
-                  onCopyRequested: function(text) { root.copyToClipboard(text) }
-                }
-              }
-
-              Text {
-                visible: root.selectedPeer && !root.hasThread
-                anchors.centerIn: parent
-                width: parent.width - Style.space(24)
-                text: root.selectedPeer
-                  ? "No messages with " + root.selectedPeer.name + " yet."
-                  : ""
-                color: Color.muted
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-                wrapMode: Text.Wrap
-                horizontalAlignment: Text.AlignHCenter
-              }
-            }
-
-            // ---- ROOM VIEW (when a room is selected) -------------------
-            // Replaces the 1:1 thread when a room is open. The member roster
-            // lives in the ROOMS LIST (left column) — this pane is full-width
-            // chat with per-message room styling.
-            Item {
-              id: roomView
-              visible: root.inRoom
-              width: parent.width
-              // Same accounting as the 1:1 list, conditional on the file bar
-              // actually being visible (an invisible bar takes no space).
+            // The 1:1 thread and the room view are shared/ChatThread.qml and
+            // shared/RoomView.qml (step 6/8). Their height formulas referenced the
+            // sibling ids composeBox/threadHeader/chatAlertBar — file-local to
+            // Panel.qml — so sizing stays here at the call site (height passed
+            // on the instance; each root uses width: parent.width internally).
+            ChatThread {
+              id: chatThreadView
               height: parent.height - composeBox.height - threadHeader.height
                       - (chatAlertBar.visible ? chatAlertBar.height : 0)
-
-              ListView {
-                  id: roomList
-                  width: parent.width
-                  height: parent.height
-                  clip: true
-                  spacing: Style.spacing.sm
-                  model: root.roomThread
-
-                  header: Item { width: parent.width; height: Style.spacing.md }
-                  footer: Item { width: parent.width; height: Style.spacing.lg }
-                  onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
-
-                  delegate: Column {
-                    required property var modelData
-                    width: roomList.width
-                    spacing: Style.spacing.xs
-
-                    RoomMessage {
-                      id: roomMsg
-                      modelData: modelData
-                      maxWidth: roomList.width * 0.8
-                      selectedRoom: root.selectedRoom
-                      timeLabel: root.timeLabel
-                    }
-                  }
-                }
+              inRoom: root.inRoom
+              thread: root.thread
+              selectedPeerId: root.selectedPeerId
+              selectedPeer: root.selectedPeer
+              hasThread: root.hasThread
+              editingMid: root.editingMid
+              timeLabel: root.timeLabel
+              onEditRequested: function(mid, text) { root.editMsg(mid, text) }
+              onCopyRequested: function(text) { root.copyToClipboard(text) }
             }
 
+            // ROOM VIEW (when a room is selected) — see shared/RoomView.qml header.
+            RoomView {
+              id: roomViewPane
+              height: parent.height - composeBox.height - threadHeader.height
+                      - (chatAlertBar.visible ? chatAlertBar.height : 0)
+              inRoom: root.inRoom
+              roomThread: root.roomThread
+              selectedRoom: root.selectedRoom
+              timeLabel: root.timeLabel
+            }
             // ---- incoming-file bar -------------------------------------
             // ACTIONABLE file receipt bar between the thread and compose.
             // Its height IS accounted for by the thread's height formula
