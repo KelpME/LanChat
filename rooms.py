@@ -294,8 +294,12 @@ def owner_admit(room: dict, peer_id: str, peer_name: str = "") -> bool:
             room["members"][peer_id] = {"name": pname, "canInvite": False,
                                         "color": {"token": "theme", "hex": ""}}
             _bump(room)
-            _persist_owner()
+        _persist_owner()
+    # Broadcast members + emit the snapshot to the OWNER's own UI too —
+    # without the local emit the roster never re-renders and the drag-add
+    # looks like a no-op even though the member joined (verified live).
     _send_room_state(room)
+    server._emit({"event": "room-state", "room": room})
     _emit_room_list()
     server._diag("room-member-added", roomId=room["roomId"][:12], peer=peer_id[:12], name=pname)
     return True
@@ -315,6 +319,7 @@ def owner_remove(room: dict, peer_id: str) -> bool:
     server._write(peer_id, {"t": "room", "kind": "roomRemove", "roomId": room["roomId"],
                             "from": server.host_id(), "fromName": server.display_name()})
     _send_room_state(room)
+    server._emit({"event": "room-state", "room": room})
     _emit_room_list()
     server._diag("room-member-removed", roomId=room["roomId"][:12], peer=peer_id[:12])
     return True
@@ -330,6 +335,7 @@ def owner_set_can_invite(room: dict, peer_id: str, allowed: bool) -> bool:
         _bump(room)
         _persist_owner()
     _send_room_state(room)
+    server._emit({"event": "room-state", "room": room})
     _emit_room_list()
     server._diag("room-perm-changed", roomId=room["roomId"][:12], peer=peer_id[:12], canInvite=bool(allowed))
     return True
@@ -356,6 +362,7 @@ def member_set_color(room: dict, peer_id: str, token: str, hexv: str) -> bool:
             STATE.rooms_cache[room["roomId"]] = room
             _persist_cache()
     _send_room_state(room)
+    server._emit({"event": "room-state", "room": room})
     _emit_room_list()
     server._diag("room-color-set", roomId=room["roomId"][:12], peer=peer_id[:12], token=token)
     return True
@@ -364,11 +371,13 @@ def member_set_color(room: dict, peer_id: str, token: str, hexv: str) -> bool:
 def owner_toggle_colors(room: dict, enabled: bool) -> bool:
     """OWNER kill-switch: when off, room rendering falls back to the standard
     theme palette (approved decision #3)."""
+    import server  # deferred, late-bound
     with rooms_lock():
         room["colorsEnabled"] = bool(enabled)
         _bump(room)
         _persist_owner()
     _send_room_state(room)
+    server._emit({"event": "room-state", "room": room})
     _emit_room_list()
     return True
 
