@@ -192,6 +192,17 @@ def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
     return {"peer": peer_id, "total": total, "messages": page}
 
 
+def history_for_room(room_id: str, offset: int = 0, limit: int = 100) -> dict:
+    """Room thread: messages carrying the room field (group chat), newest-last,
+    paged by offset/limit — same shape as history_for_peer."""
+    with STATE.hist_lock:
+        room_msgs = [m for m in STATE.history if m.get("room") == room_id]
+    total = len(room_msgs)
+    start = max(0, total - offset - limit)
+    page = room_msgs[start:max(start + limit, total - offset)] if total else []
+    return {"room": room_id, "total": total, "messages": page}
+
+
 def clear_history_for_peer(peer_id: str) -> int:
     with STATE.hist_lock:
         before = len(STATE.history)
