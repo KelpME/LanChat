@@ -3123,74 +3123,11 @@ Panel {
                       }
                     }
 
-                    // Add-member: pick a FRIEND from a menu — no fingerprint
-                    // typing. Lists every confirmed friend not already in the
-                    // room; picking one proposes/adds them (same roomAdd path
-                    // as drag-drop; owner executes).
-                    Column {
-                      visible: root.amRoomOwner
-                      width: parent.width - parent.parent.leftPadding - parent.parent.rightPadding
-                      spacing: Style.space(4)
-
-                      Text {
-                        text: "Add member"
-                        color: Color.muted
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        font.weight: Font.Bold
-                      }
-
-                      // Candidates: display peers (online + offline friends)
-                      // who are confirmed friends and not yet in the room.
-                      readonly property var candidates: {
-                        var out = []
-                        var members = root.selectedRoom ? (root.selectedRoom.members || {}) : {}
-                        var list = Lanchat.displayPeers
-                        for (var i = 0; i < list.length; i++) {
-                          var p = list[i]
-                          if (p.id && p.id !== Lanchat.myId && !(p.id in members)
-                              && Lanchat.isConfirmedFriend(p.id))
-                            out.push(p)
-                        }
-                        return out
-                      }
-
-                      ComboBox {
-                        id: addMemberSelect
-                        width: parent.width
-                        model: parent.candidates.map(function(p) { return p.name || p.id.slice(0, 8) })
-                        visible: parent.candidates.length > 0
-                        font.pixelSize: Style.font.caption
-                      }
-
-                      Text {
-                        visible: parent.candidates.length === 0
-                        width: parent.width
-                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                        text: "No friends left to add — befriend people first, or use the ＋ on their peer row"
-                        color: Color.muted
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                      }
-
-                      Button {
-                        visible: parent.candidates.length > 0
-                        text: "Add to room"
-                        fontSize: Style.font.caption
-                        onClicked: {
-                          var c = parent.parent.candidates
-                          var idx = addMemberSelect.currentIndex
-                          if (c && idx >= 0 && idx < c.length)
-                            root.addPeerToRoom(c[idx].id)
-                        }
-                      }
-                    }
-
                     Text {
                       visible: !root.amRoomOwner
                       width: parent.width
                       wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                      text: "Use the ＋ on a friend's peer row to propose adding them"
+                      text: "Use the \"Add to group\" button on a friend's peer row to propose adding them"
                       color: Color.muted
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
