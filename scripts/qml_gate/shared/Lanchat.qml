@@ -37,6 +37,9 @@ QtObject {
   function cancelFriend(id) { console.log("stub cancelFriend", id) }
   function unfriend(id) { console.log("stub unfriend", id) }
   function isConfirmedFriend(id) { return false }
+  // bench-only model stubs (used by shell4 / PeerList bench)
+  property var displayPeers: []
+  property var friendRequests: []
   function roomAdd(roomId, peerId) { console.log("stub roomAdd") }
   function roomRemove(roomId, peerId) { console.log("stub roomRemove") }
   function roomLeave(roomId) { console.log("stub roomLeave") }
