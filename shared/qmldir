@@ -1,1 +1,3 @@
 singleton Lanchat 1.0 Lanchat.qml
+
+ChatMessage 1.0 ChatMessage.qml
