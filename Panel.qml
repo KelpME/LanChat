@@ -48,6 +48,17 @@ Panel {
   readonly property bool amRoomOwner: !!root.selectedRoom
     && Lanchat.myId !== "" && root.selectedRoom.owner === Lanchat.myId
 
+  // Am I the owner of the room with this id? (Owner controls render on that
+  // room's member lines in the rooms list regardless of what's open.)
+  function amRoomOwnerOf(roomId) {
+    var r = Lanchat.roomStates[roomId]
+    if (!r && Lanchat.rooms) {
+      for (var i = 0; i < Lanchat.rooms.length; i++)
+        if (Lanchat.rooms[i].roomId === roomId) { r = Lanchat.rooms[i]; break }
+    }
+    return !!r && Lanchat.myId !== "" && r.owner === Lanchat.myId
+  }
+
   // Live-filtered thread for the selected ROOM (messages carry room=roomId).
   readonly property var roomThread: {
     var out = []
@@ -1164,10 +1175,12 @@ Panel {
               }
 
               // ---- rooms: collapsible section UNDER the peers list ------
-              // Sits directly above settings (element ordering, anchor chain:
-              // rooms.top ← peersOnlineBar stack bottom; peerList.bottom ←
-              // rooms.top). Collapsed by default; expands into peer-list
-              // space, which shrinks by its own anchors — no height math.
+              // Each room row expands to show its member list beneath it —
+              // ONE text line tall per member, cramming everyone in. Member
+              // rows carry the same controls the roster had (remove ✕ +
+              // per-member can-add toggle for the owner). The whole section
+              // stays collapsible; adding people is unchanged (the "Add to
+              // group" button on friend peer rows).
               Column {
                 id: roomsSection
                 property bool expanded: false
@@ -1240,7 +1253,7 @@ Panel {
                     delegate: Rectangle {
                       required property var modelData
                       width: roomsListCol.width
-                      height: Style.space(34)
+                      height: Style.space(26)
                       color: Style.selectedAccentFill
 
                       Row {
@@ -1250,7 +1263,7 @@ Panel {
                         spacing: Style.spacing.sm
 
                         Text {
-                          width: parent.width - Style.space(120)
+                          width: parent.width - Style.space(80)
                           anchors.verticalCenter: parent.verticalCenter
                           text: (modelData.fromName || "Someone") + " invited you to " + (modelData.name || "a room")
                           color: Color.popups.text
@@ -1273,53 +1286,172 @@ Panel {
 
                   Repeater {
                     model: Lanchat.rooms
-                    delegate: Rectangle {
+                    delegate: Column {
+                      id: roomGroup
                       required property var modelData
+                      readonly property string roomId: modelData.roomId
+                      readonly property var room: Lanchat.roomStates[modelData.roomId] || modelData
                       width: roomsListCol.width
-                      height: root.peerRowH
-                      radius: Style.cornerRadius
-                      color: modelData.roomId === Lanchat.selectedRoomId
-                        ? Style.selectedFill : "transparent"
+                      spacing: 0
 
-                      MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.selectRoom(modelData.roomId)
+                      // Group header row: # name, member count, leave ✕.
+                      Rectangle {
+                        width: roomGroup.width
+                        height: root.peerRowH
+                        radius: Style.cornerRadius
+                        color: modelData.roomId === Lanchat.selectedRoomId
+                          ? Style.selectedFill : "transparent"
+
+                        MouseArea {
+                          anchors.fill: parent
+                          onClicked: root.selectRoom(modelData.roomId)
+                        }
+
+                        Rectangle {
+                          visible: modelData.roomId === Lanchat.selectedRoomId
+                          width: 3
+                          height: parent.height * 0.5
+                          radius: 1.5
+                          anchors.verticalCenter: parent.verticalCenter
+                          anchors.left: parent.left
+                          color: Color.accent
+                        }
+
+                        Text {
+                          anchors.left: parent.left
+                          anchors.leftMargin: Style.spacing.sm
+                          anchors.right: roomMembersLabel.left
+                          anchors.rightMargin: Style.spacing.sm
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: "# " + modelData.name
+                          color: Color.popups.text
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.bodySmall
+                          elide: Text.ElideRight
+                        }
+
+                        Text {
+                          id: roomMembersLabel
+                          anchors.right: roomLeaveBtn.left
+                          anchors.rightMargin: Style.spacing.sm
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: Object.keys(roomGroup.room.members || {}).length
+                          color: Color.muted
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.caption
+                        }
+
+                        Button {
+                          id: roomLeaveBtn
+                          anchors.right: parent.right
+                          anchors.rightMargin: Style.spacing.sm
+                          anchors.verticalCenter: parent.verticalCenter
+                          visible: modelData.roomId === Lanchat.selectedRoomId
+                          text: "✕"
+                          fontSize: Style.font.caption
+                          foreground: Color.muted
+                          tooltipText: "Leave this room"
+                          onClicked: root.leaveSelectedRoom()
+                        }
+                      }
+
+                      // Member lines: ONE text line tall each, directly below
+                      // their group. Same controls the roster rows had: color
+                      // dot, ★ owner marker, (you), and for the room owner the
+                      // remove ✕ + per-member can-add toggle.
+                      Repeater {
+                        model: Object.keys(roomGroup.room.members || {})
+                        delegate: Rectangle {
+                          id: memberLine
+                          required property var modelData
+                          width: roomGroup.width
+                          height: Style.space(20)
+                          color: "transparent"
+
+                          readonly property var member: roomGroup.room
+                            ? (roomGroup.room.members[modelData] || {}) : {}
+                          readonly property bool lineIsOwner: roomGroup.room
+                            && roomGroup.room.owner === modelData
+                          readonly property bool lineIsMe: Lanchat.myId === modelData
+
+                          Row {
+                            anchors.left: parent.left
+                            anchors.leftMargin: Style.space(24)
+                            anchors.right: parent.right
+                            anchors.rightMargin: Style.spacing.sm
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: Style.space(6)
+
+                            // Member color dot (palette token resolved
+                            // per-viewer; hex carries the shared value).
+                            Rectangle {
+                              width: Style.space(8)
+                              height: Style.space(8)
+                              radius: width / 2
+                              anchors.verticalCenter: parent.verticalCenter
+                              color: Lanchat.roomMemberColor(memberLine.member) || Color.muted
+                              border.width: 1
+                              border.color: Color.popups.border
+                            }
+
+                            Text {
+                              width: memberLine.width - Style.space(24)
+                                - Style.space(20)
+                                - (memberLine.lineIsOwner || !root.amRoomOwnerOf(roomGroup.roomId)
+                                   ? 0 : Style.space(150))
+                              anchors.verticalCenter: parent.verticalCenter
+                              text: (memberLine.lineIsOwner ? "★ " : "")
+                                    + (memberLine.member.name || "Unknown")
+                                    + (memberLine.lineIsMe ? " (you)" : "")
+                                    + (memberLine.member.canInvite && !memberLine.lineIsOwner ? " · can add" : "")
+                              color: memberLine.lineIsMe ? Color.accent : Color.popups.text
+                              font.family: Style.font.family
+                              font.pixelSize: Style.font.caption
+                              elide: Text.ElideRight
+                            }
+
+                            // Owner controls on the room owner's screen only:
+                            // remove + per-member can-add toggle. Their own
+                            // row and the owner's row get no buttons.
+                            Button {
+                              visible: root.amRoomOwnerOf(roomGroup.roomId)
+                                       && !memberLine.lineIsOwner && !memberLine.lineIsMe
+                              text: "✕"
+                              fontSize: Style.font.caption
+                              foreground: Color.urgent
+                              tooltipText: "Remove from room"
+                              onClicked: Lanchat.roomRemove(roomGroup.roomId, memberLine.modelData)
+                            }
+                            Button {
+                              visible: root.amRoomOwnerOf(roomGroup.roomId)
+                                       && !memberLine.lineIsOwner && !memberLine.lineIsMe
+                              text: (memberLine.member.canInvite ? "can add ✓" : "can add ✗")
+                              fontSize: Style.font.caption
+                              foreground: memberLine.member.canInvite ? Color.accent : Color.muted
+                              tooltipText: "Toggle whether this member may add people"
+                              onClicked: Lanchat.roomSetCanInvite(roomGroup.roomId,
+                                memberLine.modelData, !memberLine.member.canInvite)
+                            }
+                          }
+                        }
                       }
 
                       Rectangle {
-                        visible: modelData.roomId === Lanchat.selectedRoomId
-                        width: 3
-                        height: parent.height * 0.5
-                        radius: 1.5
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        color: Color.accent
-                      }
+                        visible: roomGroup.room && roomGroup.roomId === Lanchat.selectedRoomId
+                                 && !Lanchat.roomHostOnline
+                        width: roomGroup.width
+                        height: Style.space(18)
+                        color: "transparent"
 
-                      Text {
-                        anchors.left: parent.left
-                        anchors.leftMargin: Style.spacing.sm
-                        anchors.right: roomLeaveBtn.left
-                        anchors.rightMargin: Style.spacing.sm
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "# " + modelData.name
-                        color: Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.bodySmall
-                        elide: Text.ElideRight
-                      }
-
-                      Button {
-                        id: roomLeaveBtn
-                        anchors.right: parent.right
-                        anchors.rightMargin: Style.spacing.sm
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: modelData.roomId === Lanchat.selectedRoomId
-                        text: "✕"
-                        fontSize: Style.font.caption
-                        foreground: Color.muted
-                        tooltipText: "Leave this room"
-                        onClicked: root.leaveSelectedRoom()
+                        Text {
+                          anchors.left: parent.left
+                          anchors.leftMargin: Style.space(24)
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: "host offline — changes frozen"
+                          color: Color.urgent
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.caption
+                        }
                       }
                     }
                   }
@@ -1785,6 +1917,71 @@ Panel {
                     PanelToolTip {
                       visible: parent.tipHover
                       text: "Applies to rooms YOU own. Off = members' names/bubbles render with the standard theme colors."
+                    }
+                  }
+
+                  // ---- Rooms: my color ------------------------------------
+                  // Every member picks THEIR room color here (moved from the
+                  // roster): theme-palette swatches (all offered, none
+                  // filtered) or "Match my theme accent" (token "theme",
+                  // re-resolves live on theme change). Applies to every room
+                  // they're a member of. Hidden while colors are disabled in
+                  // the room they'd apply to.
+                  Column {
+                    visible: Lanchat.rooms.length > 0
+                    width: parent.width
+                    leftPadding: Style.spacing.sm
+                    rightPadding: Style.spacing.sm
+                    spacing: Style.space(4)
+
+                    Text {
+                      text: "My room color"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Flow {
+                      width: parent.width - Style.space(24)
+                      spacing: Style.space(4)
+
+                      // Palette swatches: read from the current Omarchy theme
+                      // palette (canonical token set shared by colors.toml).
+                      Repeater {
+                        model: root.themePalette
+
+                        Rectangle {
+                          required property var modelData
+                          width: Style.space(16)
+                          height: Style.space(16)
+                          radius: Style.space(3)
+                          color: modelData.hex
+                          border.width: 1
+                          border.color: Color.popups.border
+
+                          MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                              // Apply to every room I'm in that still has
+                              // colors enabled (owner-level kill-switch off
+                              // disables rendering, but the choice persists).
+                              for (var i = 0; i < Lanchat.rooms.length; i++)
+                                Lanchat.setRoomColor(Lanchat.rooms[i].roomId,
+                                  parent.parent.modelData.token, parent.parent.modelData.hex)
+                            }
+                          }
+                        }
+                      }
+                    }
+
+                    Button {
+                      text: "Match my theme accent"
+                      fontSize: Style.font.caption
+                      onClicked: {
+                        for (var i = 0; i < Lanchat.rooms.length; i++)
+                          Lanchat.setRoomColor(Lanchat.rooms[i].roomId, "theme", String(Color.accent))
+                      }
                     }
                   }
 
@@ -2927,9 +3124,10 @@ Panel {
             }
 
             // ---- ROOM VIEW (when a room is selected) -------------------
-            // Replaces the 1:1 thread: roster column (between the divider
-            // and the chat) + room thread + per-message room styling.
-            Row {
+            // Replaces the 1:1 thread when a room is open. The member roster
+            // lives in the ROOMS LIST (left column) — this pane is full-width
+            // chat with per-message room styling.
+            Item {
               id: roomView
               visible: root.inRoom
               width: parent.width
@@ -2938,225 +3136,7 @@ Panel {
               height: parent.height - composeBox.height - threadHeader.height
                       - (chatAlertBar.visible ? chatAlertBar.height : 0)
 
-              // ---- roster column ---------------------------------------
-              Rectangle {
-                id: rosterCol
-                width: Style.space(170)
-                height: parent.height
-                color: Util.alpha(Color.foreground, 0.04)
-
-                Rectangle {
-                  anchors.right: parent.right
-                  anchors.top: parent.top
-                  anchors.bottom: parent.bottom
-                  width: 1
-                  color: Color.popups.border
-                }
-
-                Column {
-                  anchors.fill: parent
-                  spacing: Style.spacing.xs
-
-                  // Roster header: frozen-state banner. Gated on the
-                  // singleton's mirrored host-online property — never a
-                  // session-local bool alone.
-                  Rectangle {
-                    id: roomBanner
-                    width: parent.width
-                    height: roomBanner.visible ? roomBannerText.implicitHeight + Style.space(10) : 0
-                    visible: !Lanchat.roomHostOnline
-                    color: Style.selectedAccentFill
-
-                    Text {
-                      id: roomBannerText
-                      anchors.left: parent.left
-                      anchors.right: parent.right
-                      anchors.top: parent.top
-                      anchors.topMargin: Style.space(5)
-                      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                      text: "Host offline — changes frozen"
-                      color: Color.popups.text
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-                  }
-
-                  Text {
-                    id: rosterHeader
-                    width: parent.width
-                    leftPadding: Style.spacing.sm
-                    text: "Members (" + (root.selectedRoom ? Object.keys(root.selectedRoom.members || {}).length : 0) + ")"
-                    color: Color.muted
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    font.weight: Font.Bold
-                    topPadding: Style.space(4)
-                  }
-
-                  ListView {
-                    id: rosterList
-                    width: parent.width
-                    // Anchor-chain height: the list flexes between the header
-                    // stack and the bottom controls — no fragile arithmetic.
-                    height: parent.height - roomBanner.height - rosterHeader.height
-                            - rosterBottom.height
-                    clip: true
-                    interactive: rosterList.contentHeight > rosterList.height
-                    model: root.selectedRoom ? Object.keys(root.selectedRoom.members || {}) : []
-                    spacing: Style.spacing.xs
-
-                    delegate: Rectangle {
-                      id: rosterRow
-                      required property var modelData
-                      required property int index
-                      width: rosterList.width
-                      height: Style.space(38)
-                      color: "transparent"
-
-                      readonly property var member: root.selectedRoom
-                        ? (root.selectedRoom.members[modelData] || {}) : {}
-                      readonly property bool rowIsOwner: root.selectedRoom
-                        && root.selectedRoom.owner === modelData
-                      readonly property bool rowIsMe: Lanchat.myId === modelData
-
-                      Row {
-                        anchors.left: parent.left
-                        anchors.leftMargin: Style.spacing.sm
-                        anchors.right: parent.right
-                        anchors.rightMargin: Style.spacing.sm
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: Style.spacing.sm
-
-                        // Member color dot (palette-token resolved per-viewer).
-                        Rectangle {
-                          width: Style.space(10)
-                          height: Style.space(10)
-                          radius: width / 2
-                          anchors.verticalCenter: parent.verticalCenter
-                          color: Lanchat.roomMemberColor(rosterRow.member) || Color.muted
-                          border.width: 1
-                          border.color: Color.popups.border
-                        }
-
-                        Column {
-                          width: parent.width - Style.space(26)
-                          anchors.verticalCenter: parent.verticalCenter
-
-                          Text {
-                            width: parent.width
-                            text: (rosterRow.rowIsOwner ? "★ " : "")
-                                  + (rosterRow.member.name || "Unknown")
-                                  + (rosterRow.rowIsMe ? " (you)" : "")
-                            color: Color.popups.text
-                            font.family: Style.font.family
-                            font.pixelSize: Style.font.caption
-                            elide: Text.ElideRight
-                          }
-
-                          // Owner controls: remove + per-member canInvite.
-                          Row {
-                            visible: root.amRoomOwner && !rosterRow.rowIsOwner
-                            spacing: Style.space(6)
-
-                            Button {
-                              text: "✕"
-                              fontSize: Style.font.caption
-                              foreground: Color.urgent
-                              tooltipText: "Remove from room"
-                              onClicked: Lanchat.roomRemove(Lanchat.selectedRoomId, rosterRow.modelData)
-                            }
-                            Button {
-                              text: (rosterRow.member.canInvite ? "✓ can add" : "✗ can add")
-                              fontSize: Style.font.caption
-                              foreground: rosterRow.member.canInvite ? Color.accent : Color.muted
-                              tooltipText: "Toggle whether this member may add people"
-                              onClicked: Lanchat.roomSetCanInvite(Lanchat.selectedRoomId,
-                                rosterRow.modelData, !rosterRow.member.canInvite)
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-
-                  // ---- roster bottom: my color + add-member ----------------
-                  Column {
-                    id: rosterBottom
-                    width: parent.width
-                    leftPadding: Style.spacing.sm
-                    rightPadding: Style.spacing.sm
-                    topPadding: Style.space(4)
-                    spacing: Style.space(4)
-
-                    // My-color control: every member picks THEIR color from
-                    // the current theme's palette (all swatches offered —
-                    // none filtered; approved point 5) or "Match my theme
-                    // accent" (token "theme", re-resolves on theme change).
-                    Column {
-                      width: parent.width - parent.leftPadding - parent.rightPadding
-                      spacing: Style.space(4)
-
-                      Text {
-                        text: "My color"
-                        color: Color.muted
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        font.weight: Font.Bold
-                      }
-
-                      Flow {
-                        width: parent.width
-                        spacing: Style.space(4)
-
-                        // Palette swatches: read from the current Omarchy theme
-                        // palette (canonical token set shared by colors.toml).
-                        Repeater {
-                          model: root.themePalette
-
-                          Rectangle {
-                            required property var modelData
-                            width: Style.space(16)
-                            height: Style.space(16)
-                            radius: Style.space(3)
-                            color: modelData.hex
-                            border.width: 1
-                            border.color: Color.popups.border
-
-                            MouseArea {
-                              anchors.fill: parent
-                              onClicked: Lanchat.setRoomColor(Lanchat.selectedRoomId,
-                                parent.parent.modelData.token, parent.parent.modelData.hex)
-                            }
-                          }
-                        }
-                      }
-
-                      Button {
-                        text: "Match my theme accent"
-                        fontSize: Style.font.caption
-                        onClicked: Lanchat.setRoomColor(Lanchat.selectedRoomId, "theme", String(Color.accent))
-                      }
-                    }
-
-                    Text {
-                      visible: !root.amRoomOwner
-                      width: parent.width
-                      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                      text: "Use the \"Add to group\" button on a friend's peer row to propose adding them"
-                      color: Color.muted
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                    }
-                  }
-                }
-              }
-
-              // ---- room chat pane --------------------------------------
-              Column {
-                width: parent.width - rosterCol.width
-                height: parent.height
-
-                ListView {
+              ListView {
                   id: roomList
                   width: parent.width
                   height: parent.height
@@ -3387,7 +3367,6 @@ Panel {
                     }
                   }
                 }
-              }
             }
 
             // ---- incoming-file bar -------------------------------------
