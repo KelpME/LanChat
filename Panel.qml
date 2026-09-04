@@ -325,8 +325,10 @@ Panel {
     onTriggered: root.showClearAllCheck = false
   }
 
-  // True when there's a chat alert to show in the thread's alert bar for the
-  // currently selected peer (or a peer-agnostic one).
+  // True when there's a chat alert to show in the input box for the
+  // currently selected peer (or a peer-agnostic one). Alerts render as a
+  // temporary overlay inside the compose input (auto-clear after ~5s via
+  // chatAlertTimer) — never as a layout bar that can push UI off-screen.
   readonly property bool visibleChatAlert: {
     Lanchat.chatAlert !== "" &&
     (Lanchat.chatAlertPeerId === "" || Lanchat.chatAlertPeerId === selectedPeerId)
@@ -2768,7 +2770,11 @@ Panel {
             id: list
             visible: !root.inRoom
             width: root.inRoom ? 0 : parent.width
+            // Subtract the incoming-file bar too — it's a flow child of this
+            // column; not accounting for it pushed the compose box off-screen
+            // whenever a file receipt appeared.
             height: parent.height - composeBox.height - threadHeader.height
+                    - chatAlertBar.height
             clip: true
             spacing: Style.spacing.sm
             model: root.thread
@@ -2927,7 +2933,10 @@ Panel {
               id: roomView
               visible: root.inRoom
               width: parent.width
+              // Same accounting as the 1:1 list: the incoming-file bar is a
+              // flow child of this column too.
               height: parent.height - composeBox.height - threadHeader.height
+                      - chatAlertBar.height
 
               // ---- roster column ---------------------------------------
               Rectangle {
@@ -3381,14 +3390,17 @@ Panel {
               }
             }
 
-            // ---- chat alert bar --------------------------------------
-            // One bar between the thread and compose for all user-facing
-            // chat alerts, in priority order: a pending incoming file
-            // (actionable, persists), then a transient chat alert (save
-            // result, add-friend prompt, or server notice).
+            // ---- incoming-file bar -------------------------------------
+            // ACTIONABLE file receipt bar between the thread and compose.
+            // Its height IS accounted for by the thread's height formula
+            // (pendingAttachment is only non-null for the selected peer, and
+            // the compose box is where the Save happens, so this never
+            // overflows). Transient chat alerts (warnings, save results,
+            // notices) do NOT use this bar anymore — they render inside the
+            // compose input for a few seconds (see inputAlert overlay).
             Rectangle {
               id: chatAlertBar
-              visible: root.pendingAttachment !== null || root.visibleChatAlert
+              visible: root.pendingAttachment !== null
               width: parent.width
               height: Style.space(38)
               color: Style.selectedAccentFill
@@ -3410,9 +3422,7 @@ Panel {
 
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
-                  width: root.pendingAttachment !== null
-                    ? Math.max(10, parent.width - Style.space(84))
-                    : Math.max(10, parent.width - Style.space(12))
+                  width: Math.max(10, parent.width - Style.space(84))
                   text: {
                     var p = root.pendingAttachment
                     if (p) {
@@ -3425,12 +3435,9 @@ Panel {
                       }
                       return "Incoming file: " + p.attachment.name
                     }
-                    if (root.visibleChatAlert) return Lanchat.chatAlert
                     return ""
                   }
-                  color: (root.pendingAttachment === null && Lanchat.chatAlertIsError)
-                    ? Color.urgent
-                    : Color.popups.text
+                  color: Color.popups.text
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                   elide: Text.ElideRight
@@ -3738,6 +3745,46 @@ Panel {
                     onEditingFinished: {
                       if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
                       typingTimer.stop()
+                    }
+
+                    // ---- in-input chat alert (warnings, save results, notices)
+                    // A temporary overlay INSIDE the input box: shows the
+                    // alert text for a few seconds (chatAlertTimer on the
+                    // singleton auto-clears it), then the placeholder
+                    // returns. Layout never changes — nothing can be pushed
+                    // off-screen. Warnings tint the border urgent; non-error
+                    // alerts (save results, notices) keep the normal border.
+                    Rectangle {
+                      id: inputAlert
+                      anchors.fill: parent
+                      visible: root.visibleChatAlert
+                      radius: parent.radius
+                      color: Color.popups.background
+                      border.width: parent.border.width
+                      border.color: Lanchat.chatAlertIsError ? Color.urgent : parent.border.color
+
+                      Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: Style.space(10)
+                        anchors.rightMargin: Style.space(10)
+                        text: Lanchat.chatAlert
+                        color: Lanchat.chatAlertIsError ? Color.urgent : Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                      }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                          // Clicking dismisses immediately and focuses the
+                          // input so typing is never blocked.
+                          Lanchat.chatAlert = ""
+                          input.forceActiveFocus()
+                        }
+                      }
                     }
                   }
                 }
