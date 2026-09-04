@@ -2568,21 +2568,13 @@ Panel {
             }
           }
 
-          // Right: thread + compose. An Item (not Column) so the alert and
-          // undo bars can be true OVERLAYS anchored above the compose box —
-          // overlay appearance never shifts layout (the in-flow alert bar
-          // used to push the compose box off-screen, the "not friends"
-          // warning bug). Flow children live in the inner Column.
-          Item {
+          // Right: thread + compose
+          Column {
             width: parent.width - root.peerColW - 1
             height: parent.height
 
-            Column {
-              width: parent.width
-              height: parent.height
-
-              // Pinned thread header: stays fixed at the top while messages
-              // scroll beneath. Holds the typing indicator, per-chat actions
+            // Pinned thread header: stays fixed at the top while messages
+            // scroll beneath. Holds the typing indicator, per-chat actions
             // (Clear chat, Unfriend) AND the app-level Check-for-updates /
             // Discard controls, which must stay visible even with no peer
             // selected — so this bar is always shown; only the two per-peer
@@ -3388,26 +3380,17 @@ Panel {
                 }
               }
             }
-            }
 
-            // ---- chat alert bar (OVERLAY) ------------------------------
-            // One bar for all user-facing chat alerts, in priority order: a
-            // pending incoming file (actionable, persists), then a transient
-            // chat alert (save result, add-friend prompt, or server notice).
-            // It FLOATS above the thread, anchored to the compose box's top —
-            // it is NOT a flow child of the column. The earlier in-flow
-            // version wasn't subtracted from the thread's height formula, so
-            // appearing pushed the compose box off-screen (the "not friends"
-            // warning bug). As an overlay nothing ever moves. Anchored ABOVE
-            // the undo bar: when both show, the alert stacks on top of it.
+            // ---- chat alert bar --------------------------------------
+            // One bar between the thread and compose for all user-facing
+            // chat alerts, in priority order: a pending incoming file
+            // (actionable, persists), then a transient chat alert (save
+            // result, add-friend prompt, or server notice).
             Rectangle {
               id: chatAlertBar
               visible: root.pendingAttachment !== null || root.visibleChatAlert
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.bottom: undoBar.visible ? undoBar.top : composeBox.top
+              width: parent.width
               height: Style.space(38)
-              z: 6
               color: Style.selectedAccentFill
               Rectangle {
                 anchors.top: parent.top
