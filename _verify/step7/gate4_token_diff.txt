@@ -1,0 +1,28 @@
+similarity: 0.9594
+header tokens: 346
+
+=== non-header deltas (normalized SP.* form) ===
+replace: 'roomListSection.collapseSection' -> 'SP.collapseRoomsRequested'
+replace: 'SP.openHelp' -> 'SP.openHelpRequested'
+replace: 'SP.parent.height' -> 'SP.hostHeight'
+replace: 'SP.parent.height' -> 'SP.hostHeight'
+replace: 'peerListPanel.alertStackBottom' -> 'SP.alertStackBottom'
+replace: 'SP.commitName' -> 'SP.commitNameRequested'
+replace: 'SP.commitName' -> 'SP.commitNameRequested'
+replace: 'SP.commitName' -> 'SP.commitNameRequested'
+replace: 'SP.copyToClipboard' -> 'SP.copyToClipboardRequested'
+replace: 'SP.addFriendByFingerprint' -> 'SP.addFriendRequested'
+replace: 'SP.addFriendByFingerprint' -> 'SP.addFriendRequested'
+replace: 'SP.pickDownloadDir' -> 'SP.pickDownloadDirRequested'
+replace: 'SP.applyPanelSize' -> 'SP.applyPanelSizeRequested'
+replace: 'SP.applyPanelSize' -> 'SP.applyPanelSizeRequested'
+replace: 'SP.applyPanelSize' -> 'SP.applyPanelSizeRequested'
+replace: 'SP.applyPanelSize' -> 'SP.applyPanelSizeRequested'
+replace: 'SP.applyPanelSize' -> 'SP.applyPanelSizeRequested'
+replace: 'SP.applyManualSize' -> 'SP.applyManualSizeRequested'
+replace: 'SP.applyManualSize' -> 'SP.applyManualSizeRequested'
+replace: 'SP.applyManualSize' -> 'SP.applyManualSizeRequested'
+replace: 'SP.copyDiagnostics' -> 'SP.copyDiagnosticsRequested'
+insert: '' -> '}'
+
+VIOLATIONS: none

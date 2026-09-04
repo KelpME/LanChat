@@ -1,0 +1,10 @@
+root./settings. bare refs in SettingsPanel (expect none):
+
+.parent indirections (expect only verbatim parent.parent.modelData):
+605:                                parent.parent.modelData.token, parent.parent.modelData.hex)
+
+root.* in Panel.qml call site (wiring only):
+28:                if (root.dragPeerColW > 0) {
+29:                  Lanchat.setPeerColW(root.dragPeerColW)
+30:                  root.dragPeerColW = 0
+37:                  root.dragPeerColW = Math.max(Style.space(140), Math.min(px + Style.space(4), parent.parent.width - Style.space(200)))

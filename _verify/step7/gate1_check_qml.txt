@@ -1,0 +1,12 @@
+OK   Panel.qml: structural tokens balanced
+OK   BarWidget.qml: structural tokens balanced
+OK   shared/Lanchat.qml: structural tokens balanced
+OK   Service.qml: structural tokens balanced
+OK   shared/ChatMessage.qml: structural tokens balanced
+OK   shared/RoomMessage.qml: structural tokens balanced
+OK   shared/ComposeBox.qml: structural tokens balanced
+OK   shared/PeerList.qml: structural tokens balanced
+OK   shared/RoomListSection.qml: structural tokens balanced
+OK   shared/ChatThread.qml: structural tokens balanced
+OK   shared/RoomView.qml: structural tokens balanced
+OK   shared/SettingsPanel.qml: structural tokens balanced

@@ -3,3 +3,4 @@ singleton Lanchat 1.0 Lanchat.qml
 ChatMessage 1.0 ChatMessage.qml
 RoomMessage 1.0 RoomMessage.qml
 PeerList 1.0 PeerList.qml
+SettingsPanel 1.0 SettingsPanel.qml

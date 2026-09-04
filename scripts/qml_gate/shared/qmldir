@@ -7,3 +7,4 @@ PeerList 1.0 PeerList.qml
 RoomListSection 1.0 RoomListSection.qml
 ChatThread 1.0 ChatThread.qml
 RoomView 1.0 RoomView.qml
+SettingsPanel 1.0 SettingsPanel.qml
