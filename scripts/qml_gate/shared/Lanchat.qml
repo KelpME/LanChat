@@ -50,4 +50,7 @@ QtObject {
   function sendTyping(peerId) { console.log("stub typing", peerId) }
   function roomMemberColor(mem) { return "#888888" }
   function shellQuote(s) { return "'" + s + "'" }
+  function roomSetCanInvite(roomId, peerId, can) { console.log("stub roomSetCanInvite", roomId, peerId, can) }
+  property bool roomHostOnline: true
+  property var roomInvites: []
 }
