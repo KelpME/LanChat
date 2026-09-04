@@ -1291,6 +1291,10 @@ Panel {
                       required property var modelData
                       readonly property string roomId: modelData.roomId
                       readonly property var room: Lanchat.roomStates[modelData.roomId] || modelData
+                      // Per-group collapse: the chevron on the header row
+                      // toggles the member list under THIS group only.
+                      // Clicking the group name still opens the room chat.
+                      property bool expanded: true
                       width: roomsListCol.width
                       spacing: 0
 
@@ -1318,8 +1322,19 @@ Panel {
                         }
 
                         Text {
+                          id: chevronLabel
                           anchors.left: parent.left
                           anchors.leftMargin: Style.spacing.sm
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: roomGroup.expanded ? "▾" : "▸"
+                          color: Color.muted
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.caption
+                        }
+
+                        Text {
+                          anchors.left: chevronLabel.right
+                          anchors.leftMargin: Style.space(4)
                           anchors.right: roomMembersLabel.left
                           anchors.rightMargin: Style.spacing.sm
                           anchors.verticalCenter: parent.verticalCenter
@@ -1332,13 +1347,28 @@ Panel {
 
                         Text {
                           id: roomMembersLabel
-                          anchors.right: roomLeaveBtn.left
+                          anchors.right: roomCollapseBtn.left
                           anchors.rightMargin: Style.spacing.sm
                           anchors.verticalCenter: parent.verticalCenter
                           text: Object.keys(roomGroup.room.members || {}).length
                           color: Color.muted
                           font.family: Style.font.family
                           font.pixelSize: Style.font.caption
+                        }
+
+                        // Collapse toggle for THIS group's member list. Sits
+                        // as a later sibling of the row MouseArea so the
+                        // click lands here, not on room-select.
+                        Button {
+                          id: roomCollapseBtn
+                          anchors.right: roomLeaveBtn.left
+                          anchors.rightMargin: Style.spacing.xs
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: roomGroup.expanded ? "▾" : "▸"
+                          fontSize: Style.font.caption
+                          foreground: Color.muted
+                          tooltipText: roomGroup.expanded ? "Hide members" : "Show members"
+                          onClicked: roomGroup.expanded = !roomGroup.expanded
                         }
 
                         Button {
@@ -1358,9 +1388,11 @@ Panel {
                       // Member lines: ONE text line tall each, directly below
                       // their group. Same controls the roster rows had: color
                       // dot, ★ owner marker, (you), and for the room owner the
-                      // remove ✕ + per-member can-add toggle.
+                      // remove ✕ + per-member can-add toggle. Hidden while
+                      // this group is collapsed.
                       Repeater {
-                        model: Object.keys(roomGroup.room.members || {})
+                        visible: roomGroup.expanded
+                        model: roomGroup.expanded ? Object.keys(roomGroup.room.members || {}) : []
                         delegate: Rectangle {
                           id: memberLine
                           required property var modelData
@@ -1437,10 +1469,11 @@ Panel {
                       }
 
                       Rectangle {
-                        visible: roomGroup.room && roomGroup.roomId === Lanchat.selectedRoomId
+                        visible: roomGroup.expanded
+                                 && roomGroup.room && roomGroup.roomId === Lanchat.selectedRoomId
                                  && !Lanchat.roomHostOnline
                         width: roomGroup.width
-                        height: Style.space(18)
+                        height: visible ? Style.space(18) : 0
                         color: "transparent"
 
                         Text {
