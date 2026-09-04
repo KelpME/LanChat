@@ -111,6 +111,14 @@ QtObject {
     roomHostOnline = found
   }
 
+  // Ask the daemon to push full room snapshots for any room whose state we
+  // don't hold (after boot the ready payload has summaries only). Idempotent:
+  // the daemon emits room-state for owner rooms and re-requests member rooms
+  // from their owners.
+  function syncRoomStates() {
+    daemon.write(JSON.stringify({ cmd: "roomSync" }) + "\n")
+  }
+
   // Per-peer lazy-load state: total messages on the server and how many we've
   // loaded for each peer (so we can fetch older ones on scroll).
   property var historyMeta: ({})   // peerId -> {total, loaded}
@@ -765,6 +773,9 @@ QtObject {
       if (obj.online !== undefined) lanchat.online = obj.online
       if (obj.friends !== undefined) lanchat.friends = obj.friends
       if (obj.rooms !== undefined) lanchat.rooms = obj.rooms
+      // Ready only carries room SUMMARIES — pull full snapshots (member
+      // lists) so the rooms list renders members immediately on boot.
+      lanchat.syncRoomStates()
       if (obj.downloadDir !== undefined) lanchat.downloadDir = obj.downloadDir
       if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
       if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
@@ -1082,6 +1093,9 @@ QtObject {
       lanchat.roomStates = pruned
       // Re-evaluate host-online for the selected room against live peers.
       lanchat.updateRoomHostOnline()
+      // Fill any state gaps (boot, re-join): daemon emits room-state for
+      // rooms we don't mirror yet.
+      lanchat.syncRoomStates()
       break
     }
 
