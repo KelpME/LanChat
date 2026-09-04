@@ -2770,11 +2770,11 @@ Panel {
             id: list
             visible: !root.inRoom
             width: root.inRoom ? 0 : parent.width
-            // Subtract the incoming-file bar too — it's a flow child of this
-            // column; not accounting for it pushed the compose box off-screen
-            // whenever a file receipt appeared.
+            // Subtract the incoming-file bar ONLY while it's visible — an
+            // invisible bar takes no flow space, so subtracting its height
+            // unconditionally left the compose box floating above the bottom.
             height: parent.height - composeBox.height - threadHeader.height
-                    - chatAlertBar.height
+                    - (chatAlertBar.visible ? chatAlertBar.height : 0)
             clip: true
             spacing: Style.spacing.sm
             model: root.thread
@@ -2933,10 +2933,10 @@ Panel {
               id: roomView
               visible: root.inRoom
               width: parent.width
-              // Same accounting as the 1:1 list: the incoming-file bar is a
-              // flow child of this column too.
+              // Same accounting as the 1:1 list, conditional on the file bar
+              // actually being visible (an invisible bar takes no space).
               height: parent.height - composeBox.height - threadHeader.height
-                      - chatAlertBar.height
+                      - (chatAlertBar.visible ? chatAlertBar.height : 0)
 
               // ---- roster column ---------------------------------------
               Rectangle {
