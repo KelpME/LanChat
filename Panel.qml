@@ -3758,10 +3758,10 @@ Panel {
                       id: inputAlert
                       anchors.fill: parent
                       visible: root.visibleChatAlert
-                      radius: parent.radius
+                      radius: Style.cornerRadius
                       color: Color.popups.background
-                      border.width: parent.border.width
-                      border.color: Lanchat.chatAlertIsError ? Color.urgent : parent.border.color
+                      border.width: 1
+                      border.color: Lanchat.chatAlertIsError ? Color.urgent : Style.normalBorderColor
 
                       Text {
                         anchors.left: parent.left
