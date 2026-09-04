@@ -50,6 +50,7 @@ import http_api
 # here at module top level; each of them imports server only INSIDE function
 # bodies (deferred, late-bound), so there is no import-time cycle.
 import identity
+import rooms
 
 # attachments.py — attachment registry + socket file transfer
 from attachments import (  # noqa: F401
@@ -89,6 +90,7 @@ from history import (  # noqa: F401
     delete_message,
     edit_message,
     history_for_peer,
+    history_for_room,
     history_snapshot,
     load_history,
 )
@@ -263,6 +265,9 @@ class State:
         self.history = []
         self.hist_crypto = None
         self.attachments = {}
+        self.rooms = {}            # roomId -> room (authoritative on the owner's daemon)
+        self.rooms_cache = {}      # roomId -> last-known authoritative room (members)
+        self.rooms_lock = threading.Lock()
         self.priv_key = None
         # locks (moved off module globals — this is the race-hazard fix)
         self.socket_clients_lock = threading.Lock()
@@ -302,6 +307,7 @@ def __getattr__(name):
 identity.init(STATE)
 history.init(STATE)
 attachments.init(STATE)
+rooms.init(STATE)
 http_api.init(STATE)
 
 
@@ -1899,6 +1905,13 @@ def _handle_incoming(msg: dict, addr) -> None:
         _emit({"event": "read-receipt", "from": str(msg.get("from", "")), "mid": str(msg.get("mid", ""))})
         return
     # ---- attachment file transfer (over the authenticated socket) ----
+    # ---- room envelope (group chat rooms) ----
+    if msg.get("t") == "room":
+        rooms.handle_room_msg(msg, addr)
+        return
+    if msg.get("t") == "roomFile":
+        rooms.handle_room_file_msg(msg, addr)
+        return
     if msg.get("t") == "attachmentRequest":
         # Recipient wants a file we registered. Stream it back over the socket
         # (sender side). The connection is already authenticated, so the
@@ -1974,6 +1987,18 @@ def _handle_incoming(msg: dict, addr) -> None:
     }
     if msg.get("mid"):
         message["mid"] = msg["mid"]
+    # Carry the room id (group chat) through so a room message renders in the
+    # room's thread, not the 1:1 thread with the sender. Any new message field
+    # MUST be carried through this rebuild — dropped fields vanish silently.
+    room_id = str(msg.get("room") or "")
+    if room_id:
+        message["room"] = room_id
+        # A room message only renders if the sender is in one of OUR room
+        # copies (authoritative or cached). Enforce so a stranger can't inject
+        # room-scoped content into the UI by claiming a room id.
+        if rooms.get_room(room_id) is None:
+            _diag("inbound-dropped", from_id=pid[:12], reason="unknown-room", room=room_id[:12])
+            return
     # Carry the attachment metadata (name/size/mime/fileId/sha256) through so
     # the receiver can present the accept bar and download the file.
     if att:
@@ -2271,6 +2296,115 @@ def handle_command(cmd: dict) -> None:
                    "messages": history_for_peer(peer, int(cmd.get("offset", 0)), int(cmd.get("limit", 100)))["messages"]})
         else:
             _emit({"event": "history", "messages": history_snapshot()})
+    elif kind == "roomHistory":
+        room_id = str(cmd.get("roomId", ""))
+        if room_id:
+            page = history_for_room(room_id, int(cmd.get("offset", 0)), int(cmd.get("limit", 100)))
+            _emit({"event": "roomHistory", "roomId": room_id, "total": page["total"],
+                   "messages": page["messages"]})
+    elif kind == "createRoom":
+        room = rooms.create_room(str(cmd.get("name", "")))
+        _emit({"event": "room-created", "roomId": room["roomId"], "name": room["name"]})
+    elif kind == "roomSend":
+        rooms.send_room_text(str(cmd.get("roomId", "")), str(cmd.get("text", "")))
+    elif kind == "roomFile":
+        # Room file post (any member — posting is NOT owner-gated; approved).
+        # Shape mirrors the 1:1 send: a local path is registered here, or a
+        # pre-built att (already registered) is passed through.
+        room_id_f = str(cmd.get("roomId", ""))
+        att_f = cmd.get("att")
+        if not isinstance(att_f, dict) or not att_f.get("fileId"):
+            path_f = str((cmd.get("attachment") or {}).get("path", ""))
+            if not path_f:
+                _emit({"event": "error", "message": "roomFile needs a file path or metadata"})
+            else:
+                fid = secrets.token_hex(8)
+                fname = str((cmd.get("attachment") or {}).get("name") or os.path.basename(path_f))
+                try:
+                    fsize = os.path.getsize(path_f)
+                except OSError:
+                    fsize = 0
+                register_attachment(fid, path_f, fname)
+                att_f = {"name": fname, "size": fsize, "mime": "application/octet-stream",
+                         "fileId": fid, "sha256": _file_sha256(path_f)}
+                rooms.post_room_file(room_id_f, att_f)
+        else:
+            rooms.post_room_file(room_id_f, att_f)
+    elif kind == "roomInvite":
+        room = rooms.get_room(str(cmd.get("roomId", "")))
+        if room is None:
+            _emit({"event": "error", "message": "Room not found"})
+        elif room.get("owner") != host_id():
+            _emit({"event": "error", "message": "Only the room owner can invite"})
+        else:
+            rooms.owner_invite(room, str(cmd.get("peer", "")))
+    elif kind == "roomAdd":
+        room = rooms.get_room(str(cmd.get("roomId", "")))
+        if room is None:
+            _emit({"event": "error", "message": "Room not found"})
+        elif room.get("owner") == host_id():
+            # Owner-side add: requires a confirmed friend link (approved
+            # decision #1 — the authoritative channel needs it anyway).
+            peer_id = str(cmd.get("peer", ""))
+            if not is_trusted(peer_id):
+                _emit({"event": "error", "message": "Cannot add %s — befriend each other first" %
+                       ((find_peer(peer_id) or {}).get("name") or friendly_name(peer_id))})
+            else:
+                rooms.owner_admit(room, peer_id, str(cmd.get("peerName", "")))
+        else:
+            # A member proposing: forward to the owner (owner executes).
+            member = room.get("members", {}).get(host_id())
+            if not member or not member.get("canInvite"):
+                _emit({"event": "error", "message": "You do not have permission to add people to this room"})
+            else:
+                sent = _write(room["owner"], {"t": "room", "kind": "roomAdd", "roomId": room["roomId"],
+                                              "from": host_id(), "fromName": display_name(),
+                                              "peer": str(cmd.get("peer", ""))})
+                if not sent:
+                    _emit({"event": "error", "message": "host offline — changes frozen"})
+    elif kind == "roomJoin":
+        room = STATE.rooms_cache.get(str(cmd.get("roomId", "")))
+        if room is None:
+            _emit({"event": "error", "message": "Room not found"})
+        else:
+            sent = _write(room.get("owner", ""),
+                          {"t": "room", "kind": "roomJoin", "roomId": room["roomId"],
+                           "from": host_id(), "fromName": display_name()})
+            if not sent:
+                _emit({"event": "error", "message": "host offline — changes frozen"})
+    elif kind == "roomLeave":
+        room = rooms.get_room(str(cmd.get("roomId", "")))
+        if room is None:
+            _emit({"event": "error", "message": "Room not found"})
+        else:
+            rooms.member_leave(room, host_id())
+    elif kind == "roomRemove":
+        room = STATE.rooms.get(str(cmd.get("roomId", "")))
+        if room is None or room.get("owner") != host_id():
+            _emit({"event": "error", "message": "Only the room owner can remove members"})
+        else:
+            rooms.owner_remove(room, str(cmd.get("peer", "")))
+    elif kind == "roomSetCanInvite":
+        room = STATE.rooms.get(str(cmd.get("roomId", "")))
+        if room is None or room.get("owner") != host_id():
+            _emit({"event": "error", "message": "Only the room owner can change member permissions"})
+        else:
+            rooms.owner_set_can_invite(room, str(cmd.get("peer", "")), bool(cmd.get("allowed", False)))
+    elif kind == "setRoomColor":
+        room = rooms.get_room(str(cmd.get("roomId", "")))
+        if room is None:
+            _emit({"event": "error", "message": "Room not found"})
+        else:
+            rooms.member_set_color(room, host_id(), str(cmd.get("token", "theme")),
+                                   str(cmd.get("hex", "")))
+    elif kind == "toggleRoomColors":
+        room = STATE.rooms.get(str(cmd.get("roomId", "")))
+        if room is None or room.get("owner") != host_id():
+            _emit({"event": "error", "message": "Only the room owner can change room colors"})
+        else:
+            rooms.owner_toggle_colors(room, bool(cmd.get("enabled", True)))
+    elif kind == "roomList":
+        _emit({"event": "room-list", "rooms": rooms.rooms_list()})
     elif kind == "clearChat":
         removed = clear_history_for_peer(str(cmd.get("peer", "")))
         _emit({"event": "chat-cleared", "peer": str(cmd.get("peer", "")), "removed": removed})
@@ -2296,12 +2430,26 @@ def handle_command(cmd: dict) -> None:
         if not peer_id or find_peer(peer_id) is None:
             _emit({"event": "error", "message": "attachment sender not found"})
             return
+        # Room trust gate (plans/ROOMS.md decision: friend-gated file accept):
+        # room membership alone does NOT authorize byte transfer — the
+        # requester must be a confirmed friend of the SENDER. Fail fast with
+        # the same shape as "sender offline" so the Save bar returns to its
+        # pre-save state and the UI shows the befriend notice instead; when
+        # the friendship is established the SAME message offers Save again
+        # (UI re-evaluates on friend events — no manual re-request).
+        if cmd.get("room") and not is_trusted(peer_id):
+            _emit({"event": "attachment-saved", "ok": False,
+                   "mid": str(cmd.get("mid", "")), "fileId": str(cmd.get("fileId", "")),
+                   "error": "not friends with sender — befriend them to accept this file"})
+            _diag("room-file-trust-gate", peer=peer_id[:12],
+                  room=str(cmd.get("room"))[:12])
+            return
         file_id = str(cmd.get("fileId", ""))
         name = _safe_filename(str(cmd.get("name", "download")))
         mid = str(cmd.get("mid", ""))
         sha256 = str(cmd.get("sha256", ""))
         save_to = os.path.join(STATE.config.get("downloadDir", os.path.expanduser("~/Downloads")), name)
-        if not _dl_begin(file_id, peer_id, save_to, sha256, mid):
+        if not _dl_begin(file_id, peer_id, save_to, sha256, mid, str(cmd.get("room", ""))):
             _emit({"event": "attachment-saved", "ok": False, "path": save_to,
                    "mid": mid, "fileId": file_id, "error": "cannot open download file"})
             return
@@ -2624,6 +2772,7 @@ def _ready_event() -> dict:
         "acceptRequests": accept_requests(),
         "online": is_online(),
         "friends": friends_list(),
+        "rooms": rooms.rooms_list(),
         "downloadDir": STATE.config.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),
         "sendDelay": STATE.config.get("sendDelay", 0),
         "apiFullAccess": api_full_access(),
@@ -2704,6 +2853,7 @@ def main() -> None:
 
     load_config()
     load_history()
+    rooms.load_rooms()
     if args.socket:
         # systemd mode: the control channel is a unix socket, not stdin. Start
         # the socket server first so the ready event below reaches a connected

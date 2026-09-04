@@ -48,6 +48,9 @@ ATT_CHUNK_RAW = 128 * 1024
 
 # Recipient-side reassembly state, keyed by fileId.
 _dl = {}                 # fileId -> {save_to,tmp,fh,mid,sha256,total,written,peer,ts}
+# Last-known pull peer per fileId, remembered past _dl_finish pop so the
+# room-file delivery report can address the sender after completion.
+_last_dl_peer = {}
 
 _DL_TTL_S = 600.0
 
@@ -100,9 +103,10 @@ def get_attachment(file_id: str):
         return None
 
 
-def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str):
+def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, room: str = "") -> bool:
     """Register an in-progress download and open its .part file. Purges any
-    stale transfer first. Returns True on success."""
+    stale transfer first. room = the room id for a room-file pull (used to
+    report delivery status back to the sender). Returns True on success."""
     now = time.time()
     with STATE.dl_lock:
         for fid in list(_dl):
@@ -124,7 +128,8 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str):
             return False
         _dl[file_id] = {"save_to": save_to, "tmp": tmp, "fh": fh, "mid": mid,
                         "sha256": sha256, "total": 0, "written": 0,
-                        "peer": peer_id, "ts": now}
+                        "peer": peer_id, "ts": now, "room": room}
+        _last_dl_peer[file_id] = peer_id
     return True
 
 
@@ -150,9 +155,10 @@ def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
 
 
 def _dl_finish(file_id: str, peer_id: str, ok: bool):
-    """Complete (or abort) a transfer. Returns (status, save_to, mid, total):
+    """Complete (or abort) a transfer. Returns (status, save_to, mid, total, room):
     status in ('saved','mismatch','aborted'), or None if the transfer was not
-    registered for this peer (unknown/stale)."""
+    registered for this peer (unknown/stale). room = the room id of a room-file
+    pull ('' for a plain 1:1 attachment)."""
     with STATE.dl_lock:
         d = _dl.pop(file_id, None)
     if not d or d.get("peer") != peer_id:
@@ -164,35 +170,42 @@ def _dl_finish(file_id: str, peer_id: str, ok: bool):
     save_to, tmp = d["save_to"], d["tmp"]
     if not ok:
         _remove_file(tmp)
-        return ("aborted", save_to, d["mid"], d["total"])
+        return ("aborted", save_to, d["mid"], d["total"], d.get("room", ""))
     # Completeness: if the sender told us the total size, require every byte.
     # A dropped trailing chunk would otherwise go unnoticed even if it hashed
     # the same (extremely unlikely) — this is the size half of the check.
     if d["total"] > 0 and d["written"] != d["total"]:
         _remove_file(tmp)
-        return ("incomplete", save_to, d["mid"], d["total"])
+        return ("incomplete", save_to, d["mid"], d["total"], d.get("room", ""))
     digest = _file_sha256(tmp)
     if d["sha256"] and digest != d["sha256"]:
         _remove_file(tmp)
-        return ("mismatch", save_to, d["mid"], d["total"])
+        return ("mismatch", save_to, d["mid"], d["total"], d.get("room", ""))
     try:
         os.replace(tmp, save_to)
     except OSError:
         _remove_file(tmp)
-        return ("aborted", save_to, d["mid"], d["total"])
-    return ("saved", save_to, d["mid"], d["total"])
+        return ("aborted", save_to, d["mid"], d["total"], d.get("room", ""))
+    return ("saved", save_to, d["mid"], d["total"], d.get("room", ""))
 
 
 def _finalize_download(res, mid: str, file_id: str, error: str = "") -> None:
     """Map a _dl_finish result to the attachment-saved event the UI watches."""
     if res is None:
         return  # not our transfer (unknown/stale/other peer)
-    status, save_to, _mid, _total = res
+    status, save_to, _mid, _total, room_id = res
     if status == "saved":
         import server
         server._log("attachment-saved file=%s" % os.path.basename(save_to))
         server._emit({"event": "attachment-saved", "ok": True, "path": save_to,
                "mid": mid, "fileId": file_id})
+        # Room file: report the delivery back to the SENDER (mesh) so their UI
+        # shows ✓ saved for this member. Daemon-driven per-member status, never
+        # client-guessed. Only fires for a room-file pull (room id recorded on
+        # the download).
+        if room_id:
+            server.rooms.report_file_status(room_id, _dl_peer(file_id),
+                                            {"fileId": file_id, "mid": mid}, "saved")
     else:
         if status == "mismatch":
             msg = error or "checksum mismatch"
@@ -203,6 +216,13 @@ def _finalize_download(res, mid: str, file_id: str, error: str = "") -> None:
         import server
         server._emit({"event": "attachment-saved", "ok": False, "path": save_to,
                "mid": mid, "fileId": file_id, "error": msg})
+
+
+def _dl_peer(file_id: str) -> str:
+    """The peer a (just-finished) download was pulling from. _finalize_download
+    calls this after _dl_finish popped the entry, so keep a last-peer memo."""
+    with STATE.dl_lock:
+        return _last_dl_peer.get(file_id, "")
 
 
 def _serve_attachment(peer_id: str, file_id: str, mid: str) -> None:

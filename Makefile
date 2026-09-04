@@ -11,7 +11,7 @@
 
 PY      ?= python3
 RUFF    ?= ruff
-TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py test_systemd_control.py test_cert_reload.py test_udp_resilience.py test_units.py
+TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py test_systemd_control.py test_cert_reload.py test_udp_resilience.py test_units.py test_groups.py
 PYFILES := server.py naming.py $(TESTS) test_peer.py
 VERSION_SCRIPT := scripts/bump_version.py
 
