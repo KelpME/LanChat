@@ -217,6 +217,26 @@ def _emit_room_list() -> None:
     server._emit({"event": "room-list", "rooms": rooms_list()})
 
 
+def push_missing_room_states() -> None:
+    """Fill the UI's room-state mirrors after boot: the ready payload only
+    carries room SUMMARIES, so member lists render empty until a room-state
+    event arrives. Owner rooms snapshot straight from the authoritative copy;
+    member rooms re-request from the owner over their friend socket (the
+    owner's roomState handler accepts a request kind and replies)."""
+    import server  # deferred, late-bound
+    me = server.host_id()
+    for room_id, room in list(STATE.rooms.items()):
+        server._emit({"event": "room-state", "room": room})
+    for room_id, room in list(STATE.rooms_cache.items()):
+        if room_id in STATE.rooms:
+            continue
+        owner = room.get("owner")
+        if owner and owner != me:
+            server._write(owner, {"t": "room", "kind": "roomStateReq",
+                                  "roomId": room_id, "from": me,
+                                  "fromName": server.display_name()})
+
+
 def _send_room_state(room: dict, to_pid: str = "") -> None:
     """Send the authoritative snapshot to one member (or every member when
     to_pid is empty) over their friend socket. Best-effort: an offline member
@@ -458,6 +478,15 @@ def handle_room_msg(msg: dict, addr) -> None:
         _emit_room_list()
         server._emit({"event": "room-invite", "roomId": room_id, "name": str(msg.get("name", "")),
                       "from": from_pid, "fromName": str(msg.get("fromName") or server.friendly_name(from_pid))})
+        return
+    if kind == "roomStateReq":
+        # A member (re-)syncing after boot: only the owner answers, with the
+        # authoritative snapshot. Cheap to serve; refuses nothing (membership
+        # is already established — the requester is in the room).
+        room = STATE.rooms.get(room_id)
+        if room is not None and _is_owner(room, server.host_id()):
+            if from_pid in room.get("members", {}):
+                _send_room_state(room, to_pid=from_pid)
         return
     if kind == "roomFile":
         # Room-file metadata. The OWNER rebroadcasts to every member

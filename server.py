@@ -222,7 +222,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (fetch + fast-forward, daemon/shell reload) rather than only checking; docs
 #   updated to match.
 
-VERSION = "1.5.47"
+VERSION = "1.5.48"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2405,6 +2405,14 @@ def handle_command(cmd: dict) -> None:
             rooms.owner_toggle_colors(room, bool(cmd.get("enabled", True)))
     elif kind == "roomList":
         _emit({"event": "room-list", "rooms": rooms.rooms_list()})
+        # Push full snapshots for rooms whose state the UI hasn't mirrored
+        # yet (e.g. right after boot: the ready payload only carries
+        # summaries, so the member lists would render empty until some other
+        # event happened to deliver a room-state). Owner rooms snapshot from
+        # the authoritative copy; member rooms re-request from the owner.
+        rooms.push_missing_room_states()
+    elif kind == "roomSync":
+        rooms.push_missing_room_states()
     elif kind == "clearChat":
         removed = clear_history_for_peer(str(cmd.get("peer", "")))
         _emit({"event": "chat-cleared", "peer": str(cmd.get("peer", "")), "removed": removed})
