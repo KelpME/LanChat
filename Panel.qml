@@ -61,6 +61,23 @@ Panel {
   // in a room it sends roomFile messages instead (see send()).
   readonly property bool inRoom: Lanchat.selectedRoomId !== ""
 
+  // ---- peer → roster drag-and-drop ----------------------------------------
+  // Drag a peer row onto the roster column to add them to the open room.
+  // Pure coordinate tracking (no Drag/DropArea machinery): the delegate's
+  // MouseArea moves a root-level ghost and maps the cursor into the roster's
+  // space; on release inside the roster, the peer is proposed/added.
+  property string draggingPeerId: ""
+  property string draggingPeerName: ""
+  property bool dragOverRoster: false
+
+  function dropPeerIntoRoster(peerId) {
+    if (peerId !== "" && Lanchat.selectedRoomId !== "")
+      Lanchat.roomAdd(Lanchat.selectedRoomId, peerId)
+    draggingPeerId = ""
+    draggingPeerName = ""
+    dragOverRoster = false
+  }
+
   // The current Omarchy theme's palette for the room color picker: the
   // canonical token set the daemon-side color records reference. Swatches
   // resolve to the VIEWER's theme values (all offered, none filtered —
@@ -736,9 +753,35 @@ Panel {
 
       // ---- body: peer list + thread -----------------------------------
       Rectangle {
+        id: bodyRoot
         width: parent.width
         height: parent.height
         color: "transparent"
+
+        // Drag ghost: follows the cursor while a peer row is being dragged
+        // toward the roster (root-level so it paints above both columns).
+        Rectangle {
+          id: dragGhost
+          visible: root.draggingPeerId !== ""
+          width: Style.space(120)
+          height: Style.space(24)
+          radius: Style.cornerRadius
+          color: Style.selectedAccentFill
+          border.width: 1
+          border.color: Color.accent
+          opacity: 0.9
+          z: 50
+
+          Text {
+            anchors.centerIn: parent
+            width: parent.width - Style.space(8)
+            text: "+ " + root.draggingPeerName
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
 
         Row {
           anchors.fill: parent
@@ -799,6 +842,49 @@ Panel {
                   MouseArea {
                     anchors.fill: parent
                     onClicked: root.selectPeer(modelData.id)
+                  }
+
+                  // Drag source: press-and-hold-drag on the row's LEFT EDGE
+                  // strip (a 14px grab zone that doesn't fight the click or
+                  // the friend badge). Dragging past ~6px arms the ghost;
+                  // release inside the roster drops the peer into the room.
+                  MouseArea {
+                    id: peerDragArea
+                    width: Style.space(14)
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    cursorShape: Qt.DragMoveCursor
+                    property bool dragArmed: false
+                    onPressed: { dragArmed = false }
+                    onPositionChanged: function(mouse) {
+                      if (!pressed) return
+                      // Arm once movement exceeds a small threshold.
+                      if (!dragArmed && Math.abs(mouse.x - width / 2) > 4) {
+                        dragArmed = true
+                        root.draggingPeerId = modelData.id
+                        root.draggingPeerName = modelData.name || ""
+                      }
+                      if (dragArmed) {
+                        var g = mapToItem(bodyRoot, mouse.x, mouse.y)
+                        dragGhost.x = g.x - dragGhost.width / 2
+                        dragGhost.y = g.y - dragGhost.height / 2
+                        // Highlight the roster when the cursor is over it.
+                        var r = mapToItem(rosterCol, mouse.x, mouse.y)
+                        root.dragOverRoster = r.x >= 0 && r.x <= rosterCol.width
+                          && r.y >= 0 && r.y <= rosterCol.height
+                      }
+                    }
+                    onReleased: {
+                      if (dragArmed) root.dropPeerIntoRoster(root.draggingPeerId)
+                      dragArmed = false
+                    }
+                    onCanceled: {
+                      dragArmed = false
+                      root.draggingPeerId = ""
+                      root.draggingPeerName = ""
+                      root.dragOverRoster = false
+                    }
                   }
 
                   Rectangle {
@@ -2909,7 +2995,7 @@ Panel {
                   Rectangle {
                     id: roomBanner
                     width: parent.width
-                    height: roomBannerText.implicitHeight + Style.space(10)
+                    height: roomBanner.visible ? roomBannerText.implicitHeight + Style.space(10) : 0
                     visible: !Lanchat.roomHostOnline
                     color: Style.selectedAccentFill
 
@@ -2928,6 +3014,7 @@ Panel {
                   }
 
                   Text {
+                    id: rosterHeader
                     width: parent.width
                     leftPadding: Style.spacing.sm
                     text: "Members (" + (root.selectedRoom ? Object.keys(root.selectedRoom.members || {}).length : 0) + ")"
@@ -2938,10 +3025,30 @@ Panel {
                     topPadding: Style.space(4)
                   }
 
+                  // Drop hint: lights up while a peer row is dragged over the
+                  // roster (the drop target highlight).
+                  Text {
+                    id: rosterDropHint
+                    width: parent.width
+                    leftPadding: Style.spacing.sm
+                    visible: root.dragOverRoster
+                    text: "Release to add"
+                    color: Color.accent
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.weight: Font.DemiBold
+                  }
+
                   ListView {
                     id: rosterList
                     width: parent.width
-                    height: parent.height - roomBanner.height - Style.space(70)
+                    // Anchor-chain height: the list flexes between the header
+                    // stack and the bottom controls — no fragile arithmetic
+                    // (the old `parent.height - banner - 70` overflowed past
+                    // the panel edge because the banner kept its height while
+                    // hidden, pushing the Add row off-screen).
+                    height: parent.height - roomBanner.height - rosterHeader.height
+                            - rosterDropHint.height - rosterBottom.height
                     clip: true
                     interactive: rosterList.contentHeight > rosterList.height
                     model: root.selectedRoom ? Object.keys(root.selectedRoom.members || {}) : []
@@ -3021,85 +3128,136 @@ Panel {
                     }
                   }
 
-                  // My-color control: every member picks THEIR color from the
-                  // current theme's palette (all swatches offered — none
-                  // filtered; approved point 5) or "Match my theme accent"
-                  // (token "theme", dynamically re-resolved on theme change).
+                  // ---- roster bottom: my color + add-member ----------------
                   Column {
-                    visible: root.selectedRoom !== null
+                    id: rosterBottom
                     width: parent.width
                     leftPadding: Style.spacing.sm
                     rightPadding: Style.spacing.sm
                     topPadding: Style.space(4)
                     spacing: Style.space(4)
 
-                    Text {
-                      text: "My color"
-                      color: Color.muted
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.weight: Font.Bold
-                    }
-
-                    Flow {
-                      width: parent.width
+                    // My-color control: every member picks THEIR color from
+                    // the current theme's palette (all swatches offered —
+                    // none filtered; approved point 5) or "Match my theme
+                    // accent" (token "theme", re-resolves on theme change).
+                    Column {
+                      width: parent.width - parent.leftPadding - parent.rightPadding
                       spacing: Style.space(4)
 
-                      // Palette swatches: read from the current Omarchy theme
-                      // palette (canonical token set shared by colors.toml).
-                      Repeater {
-                        model: root.themePalette
+                      Text {
+                        text: "My color"
+                        color: Color.muted
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        font.weight: Font.Bold
+                      }
 
-                        Rectangle {
-                          required property var modelData
-                          width: Style.space(16)
-                          height: Style.space(16)
-                          radius: Style.space(3)
-                          color: modelData.hex
-                          border.width: 1
-                          border.color: Color.popups.border
+                      Flow {
+                        width: parent.width
+                        spacing: Style.space(4)
 
-                          MouseArea {
-                            anchors.fill: parent
-                            onClicked: Lanchat.setRoomColor(Lanchat.selectedRoomId,
-                              parent.modelData.token, parent.modelData.hex)
+                        // Palette swatches: read from the current Omarchy theme
+                        // palette (canonical token set shared by colors.toml).
+                        Repeater {
+                          model: root.themePalette
+
+                          Rectangle {
+                            required property var modelData
+                            width: Style.space(16)
+                            height: Style.space(16)
+                            radius: Style.space(3)
+                            color: modelData.hex
+                            border.width: 1
+                            border.color: Color.popups.border
+
+                            MouseArea {
+                              anchors.fill: parent
+                              onClicked: Lanchat.setRoomColor(Lanchat.selectedRoomId,
+                                parent.parent.modelData.token, parent.parent.modelData.hex)
+                            }
                           }
                         }
                       }
+
+                      Button {
+                        text: "Match my theme accent"
+                        fontSize: Style.font.caption
+                        onClicked: Lanchat.setRoomColor(Lanchat.selectedRoomId, "theme", String(Color.accent))
+                      }
                     }
 
-                    Button {
-                      text: "Match my theme accent"
-                      fontSize: Style.font.caption
-                      onClicked: Lanchat.setRoomColor(Lanchat.selectedRoomId, "theme", String(Color.accent))
-                    }
-                  }
+                    // Add-member: pick a FRIEND from a menu — no fingerprint
+                    // typing. Lists every confirmed friend not already in the
+                    // room; picking one proposes/adds them (same roomAdd path
+                    // as drag-drop; owner executes).
+                    Column {
+                      visible: root.amRoomOwner
+                      width: parent.width - parent.parent.leftPadding - parent.parent.rightPadding
+                      spacing: Style.space(4)
 
-                  // Owner's add-member row (in the roster body, NOT under a
-                  // full-width MouseArea).
-                  Row {
-                    visible: root.amRoomOwner
-                    width: parent.width
-                    leftPadding: Style.spacing.sm
-                    spacing: Style.space(4)
+                      Text {
+                        text: "Add member"
+                        color: Color.muted
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                        font.weight: Font.Bold
+                      }
 
-                    TextField {
-                      id: addMemberInput
-                      width: rosterCol.width - Style.space(96)
-                      placeholderText: "peer fingerprint…"
-                      font.pixelSize: Style.font.caption
-                      horizontalPadding: Style.space(6)
-                      verticalPadding: Style.space(3)
-                    }
-                    Button {
-                      text: "Add"
-                      fontSize: Style.font.caption
-                      onClicked: {
-                        if (addMemberInput.text.trim() !== "") {
-                          Lanchat.roomAdd(Lanchat.selectedRoomId, addMemberInput.text.trim())
-                          addMemberInput.text = ""
+                      // Candidates: display peers (online + offline friends)
+                      // who are confirmed friends and not yet in the room.
+                      readonly property var candidates: {
+                        var out = []
+                        var members = root.selectedRoom ? (root.selectedRoom.members || {}) : {}
+                        var list = Lanchat.displayPeers
+                        for (var i = 0; i < list.length; i++) {
+                          var p = list[i]
+                          if (p.id && p.id !== Lanchat.myId && !(p.id in members)
+                              && Lanchat.isConfirmedFriend(p.id))
+                            out.push(p)
+                        }
+                        return out
+                      }
+
+                      ComboBox {
+                        id: addMemberSelect
+                        width: parent.width
+                        model: parent.candidates.map(function(p) { return p.name || p.id.slice(0, 8) })
+                        visible: parent.candidates.length > 0
+                        font.pixelSize: Style.font.caption
+                      }
+
+                      Text {
+                        visible: parent.candidates.length === 0
+                        width: parent.width
+                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                        text: "No friends left to add — befriend people first (or drag a peer row here)"
+                        color: Color.muted
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+
+                      Button {
+                        visible: parent.candidates.length > 0
+                        text: "Add to room"
+                        fontSize: Style.font.caption
+                        onClicked: {
+                          var c = parent.parent.candidates
+                          var idx = addMemberSelect.currentIndex
+                          if (c && idx >= 0 && idx < c.length)
+                            root.dropPeerIntoRoster(c[idx].id)
                         }
                       }
+                    }
+
+                    Text {
+                      visible: !root.amRoomOwner
+                      width: parent.width
+                      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                      text: "Drag a peer row here to propose adding them"
+                      color: Color.muted
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
                     }
                   }
                 }
