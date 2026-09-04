@@ -23,6 +23,7 @@ ln -sfn /usr/share/omarchy/shell/Ui "$BENCH/Ui"
 cp "$REPO"/scripts/qml_gate/shell*.qml "$BENCH"/
 cp "$REPO"/scripts/qml_gate/shared/qmldir "$BENCH"/shared/
 cp "$REPO"/shared/ChatMessage.qml "$REPO"/shared/RoomMessage.qml "$BENCH"/shared/ 2>/dev/null || true
+cp "$REPO"/shared/ComposeBox.qml "$BENCH"/shared/ 2>/dev/null || true
 cp "$REPO"/scripts/qml_gate/shared/Lanchat.qml "$BENCH"/shared/
 cp "$REPO"/shared/Lanchat.qml "$BENCH"/shared/Lanchat.real.qml 2>/dev/null || true
 
