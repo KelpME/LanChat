@@ -245,3 +245,25 @@ To **fully uninstall** (remove the daemon, systemd unit, and all lanchat data):
 `omarchy plugin remove KelpME.lanchat --yes`.
 
 History stays per-machine and is never synced to a server.
+
+## For contributors: Panel.qml layout
+
+`Panel.qml` is decomposed into components under `shared/` (see
+`shared/qmldir`). The panel root stays the state owner; children receive what
+they need via explicit properties and call back via signals.
+
+- `shared/Lanchat.qml` — shared-state singleton (peers, rooms, history, settings).
+- `shared/PeerList.qml` — left column: peers, onboarding banner, friend requests, online section.
+- `shared/ChatThread.qml` — 1:1 conversation view (uses `ChatMessage`).
+- `shared/ChatMessage.qml` — 1:1 message bubble delegate (incl. attachment row).
+- `shared/RoomView.qml` — room conversation view (uses `RoomMessage`).
+- `shared/RoomMessage.qml` — room text/file bubbles + member chips + delivery statuses.
+- `shared/RoomListSection.qml` — rooms list, create-dialog, invite flow, colors.
+- `shared/ComposeBox.qml` — compose box, staged-attachment preview, in-input alert.
+- `shared/SettingsPanel.qml` — the full settings block (identity, presence, colors, chat, appearance, agents, reachability, developer).
+
+Before changing any of these, run the gate: `scripts/qml_gate/run.sh`, and
+verify with `python3 scripts/check_qml.py` + `qmllint` (zero errors). Compare
+against the pre-modularization baseline (`Panel.qml` at commit `d6ff65d^`)
+when validating behavior — the A/B baseline rule from
+`plans/PANEL-MODULARIZATION.md`.

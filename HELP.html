@@ -286,5 +286,25 @@ systemctl --user restart lanchat    # restart it
 <code>cd ~/.config/omarchy/plugins/KelpME.lanchat &amp;&amp; make systemd-uninstall</code>, then
 <code>omarchy plugin remove KelpME.lanchat --yes</code>.</p>
 <p>History stays per-machine and is never synced to a server.</p>
+<h2>For contributors: Panel.qml layout</h2>
+<p><code>Panel.qml</code> is decomposed into components under <code>shared/</code> (see
+<code>shared/qmldir</code>). The panel root stays the state owner; children receive what
+they need via explicit properties and call back via signals.</p>
+<ul>
+<li><code>shared/Lanchat.qml</code> — shared-state singleton (peers, rooms, history, settings).</li>
+<li><code>shared/PeerList.qml</code> — left column: peers, onboarding banner, friend requests, online section.</li>
+<li><code>shared/ChatThread.qml</code> — 1:1 conversation view (uses <code>ChatMessage</code>).</li>
+<li><code>shared/ChatMessage.qml</code> — 1:1 message bubble delegate (incl. attachment row).</li>
+<li><code>shared/RoomView.qml</code> — room conversation view (uses <code>RoomMessage</code>).</li>
+<li><code>shared/RoomMessage.qml</code> — room text/file bubbles + member chips + delivery statuses.</li>
+<li><code>shared/RoomListSection.qml</code> — rooms list, create-dialog, invite flow, colors.</li>
+<li><code>shared/ComposeBox.qml</code> — compose box, staged-attachment preview, in-input alert.</li>
+<li><code>shared/SettingsPanel.qml</code> — the full settings block (identity, presence, colors, chat, appearance, agents, reachability, developer).</li>
+</ul>
+<p>Before changing any of these, run the gate: <code>scripts/qml_gate/run.sh</code>, and
+verify with <code>python3 scripts/check_qml.py</code> + <code>qmllint</code> (zero errors). Compare
+against the pre-modularization baseline (<code>Panel.qml</code> at commit <code>d6ff65d^</code>)
+when validating behavior — the A/B baseline rule from
+<code>plans/PANEL-MODULARIZATION.md</code>.</p>
 </body>
 </html>
