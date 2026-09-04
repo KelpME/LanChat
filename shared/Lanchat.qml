@@ -85,6 +85,32 @@ QtObject {
   property int onlineCount: 0
   property var diagnostics: []    // [{ts, message, ...}] diagnostic log lines
 
+  // ---- group chat rooms ---------------------------------------------------
+  // Rooms the daemon knows: authoritative copy (rooms we own) merged with the
+  // last-known cache (rooms owned elsewhere) — the roster NEVER blanks while
+  // the host is offline; the daemon emits full snapshots (room-state), the UI
+  // only renders what it carries (daemon is the single source of truth).
+  property var rooms: []          // [{roomId,name,owner,seq,colorsEnabled,memberCount}] summaries
+  property var roomStates: ({})   // roomId -> full authoritative room snapshot
+  property string selectedRoomId: ""
+  property var roomMessages: []   // [{...,room:roomId}] messages belonging to rooms
+  property var roomInvites: []    // [{roomId,name,from,fromName}] unaccepted invites
+  property var roomFileStatuses: ({}) // roomId|mid -> {peerId: {status,name}}
+  property bool roomHostOnline: true // mirrored room/owner connectivity (frozen-state banner)
+
+  // Re-evaluate host-online for the selected room: owner == us → online;
+  // otherwise the owner must appear in the live peer set (the daemon drops
+  // disappeared peers, so presence in `peers` = we have a live socket).
+  function updateRoomHostOnline() {
+    var snap = roomStates[selectedRoomId]
+    if (!snap || !snap.owner) { roomHostOnline = true; return }
+    if (snap.owner === myId) { roomHostOnline = true; return }
+    var found = false
+    for (var i = 0; i < peers.length; i++)
+      if (peers[i].id === snap.owner) { found = true; break }
+    roomHostOnline = found
+  }
+
   // Per-peer lazy-load state: total messages on the server and how many we've
   // loaded for each peer (so we can fetch older ones on scroll).
   property var historyMeta: ({})   // peerId -> {total, loaded}
@@ -357,6 +383,88 @@ QtObject {
 
   function refreshHistory(peer, offset, limit) {
     daemon.write(JSON.stringify({ cmd: "history", peer: peer || "", offset: offset || 0, limit: limit || 100 }) + "\n")
+  }
+
+  // ---- group chat rooms ---------------------------------------------------
+
+  function refreshRooms() {
+    daemon.write(JSON.stringify({ cmd: "roomList" }) + "\n")
+  }
+
+  function createRoom(name) {
+    daemon.write(JSON.stringify({ cmd: "createRoom", name: name }) + "\n")
+  }
+
+  function selectRoom(roomId) {
+    selectedRoomId = roomId || ""
+    if (roomId) {
+      daemon.write(JSON.stringify({ cmd: "roomHistory", roomId: roomId, offset: 0, limit: 100 }) + "\n")
+      daemon.write(JSON.stringify({ cmd: "roomList" }) + "\n")
+    }
+  }
+
+  function sendRoom(roomId, text) {
+    if (!roomId || !text || !text.trim()) return
+    daemon.write(JSON.stringify({ cmd: "roomSend", roomId: roomId, text: text }) + "\n")
+  }
+
+  function sendRoomFile(roomId, path, name) {
+    if (!roomId || !path) return
+    daemon.write(JSON.stringify({ cmd: "roomFile", roomId: roomId,
+      attachment: { path: path, name: name || "" } }) + "\n")
+  }
+
+  function roomInvite(roomId, peerId) {
+    daemon.write(JSON.stringify({ cmd: "roomInvite", roomId: roomId, peer: peerId }) + "\n")
+  }
+
+  function roomAdd(roomId, peerId) {
+    daemon.write(JSON.stringify({ cmd: "roomAdd", roomId: roomId, peer: peerId }) + "\n")
+  }
+
+  function roomJoin(roomId) {
+    daemon.write(JSON.stringify({ cmd: "roomJoin", roomId: roomId }) + "\n")
+  }
+
+  function roomLeave(roomId) {
+    daemon.write(JSON.stringify({ cmd: "roomLeave", roomId: roomId }) + "\n")
+  }
+
+  function roomRemove(roomId, peerId) {
+    daemon.write(JSON.stringify({ cmd: "roomRemove", roomId: roomId, peer: peerId }) + "\n")
+  }
+
+  function roomSetCanInvite(roomId, peerId, allowed) {
+    daemon.write(JSON.stringify({ cmd: "roomSetCanInvite", roomId: roomId, peer: peerId, allowed: allowed }) + "\n")
+  }
+
+  function setRoomColor(roomId, token, hex) {
+    daemon.write(JSON.stringify({ cmd: "setRoomColor", roomId: roomId, token: token, hex: hex }) + "\n")
+  }
+
+  function toggleRoomColors(roomId, enabled) {
+    daemon.write(JSON.stringify({ cmd: "toggleRoomColors", roomId: roomId, enabled: enabled }) + "\n")
+  }
+
+  // Room file save: same pull transport as 1:1, plus the room id so the
+  // daemon enforces the friend trust gate and reports roomFileStatus.
+  function acceptRoomAttachment(from, fileId, name, mid, sha256, roomId) {
+    dlFileId = fileId
+    dlName = name || ""
+    dlBytes = 0
+    dlTotal = 0
+    daemon.write(JSON.stringify({ cmd: "acceptAttachment", from: from, fileId: fileId, name: name,
+      mid: mid || "", sha256: sha256 || "", room: roomId || "" }) + "\n")
+  }
+
+  // Resolve a member color to a renderable color. token "theme" → the
+  // viewer's own theme accent (live-updates on theme change); otherwise the
+  // hex carried in the room event (identical on every machine).
+  function roomMemberColor(member) {
+    if (!member || !member.color) return ""
+    var c = member.color
+    if (c.token === "theme") return String(Color.accent)
+    return c.hex || ""
   }
 
   // Load an older page of a peer's history (lazy-load on scroll to top).
@@ -641,6 +749,7 @@ QtObject {
       if (obj.httpPort !== undefined) lanchat.httpPort = obj.httpPort
       if (obj.online !== undefined) lanchat.online = obj.online
       if (obj.friends !== undefined) lanchat.friends = obj.friends
+      if (obj.rooms !== undefined) lanchat.rooms = obj.rooms
       if (obj.downloadDir !== undefined) lanchat.downloadDir = obj.downloadDir
       if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
       if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
@@ -895,6 +1004,7 @@ QtObject {
       else next.push(peer)
       lanchat.peers = next
       lanchat.rebuildDisplayPeers()
+      lanchat.updateRoomHostOnline()
       break
     }
 
@@ -904,6 +1014,7 @@ QtObject {
       var list = lanchat.peers.filter(function(p) { return p.id !== obj.id })
       lanchat.peers = list
       lanchat.rebuildDisplayPeers()
+      lanchat.updateRoomHostOnline()
       break
     }
 
@@ -918,6 +1029,67 @@ QtObject {
       if (lanchat.panelOpen && !msgOut && obj.message.from) {
         lanchat.sendReadReceipt(obj.message.from, obj.message.mid)
       }
+      break
+    }
+
+    case "roomHistory": {
+      // Full snapshot (per-room): replace this room's messages.
+      var rm = lanchat.roomMessages.slice()
+      var keep = rm.filter(function(m) { return m.room !== obj.roomId })
+      var page = obj.messages || []
+      lanchat.roomMessages = keep.concat(page)
+      break
+    }
+
+    case "room-state": {
+      // Authoritative snapshot from the daemon. Mirror into roomStates so the
+      // roster renders exactly what the daemon says (single source of truth).
+      var snap = obj.room
+      if (!snap || !snap.roomId) break
+      var states = {}
+      for (var sk in lanchat.roomStates) states[sk] = lanchat.roomStates[sk]
+      states[snap.roomId] = snap
+      lanchat.roomStates = states
+      // Mirror host connectivity: the owner is "online" if we hold a live
+      // socket to them (the daemon drops peers when they vanish) or we ARE
+      // the owner. The frozen banner reads this, never a session-local bool.
+      if (lanchat.myId && snap.owner === lanchat.myId) lanchat.roomHostOnline = true
+      break
+    }
+
+    case "room-list": {
+      lanchat.rooms = obj.rooms || []
+      // Drop room-state mirrors for rooms that vanished (left/disbanded).
+      var known = {}
+      for (var ri = 0; ri < lanchat.rooms.length; ri++) known[lanchat.rooms[ri].roomId] = true
+      var pruned = {}
+      for (var pk in lanchat.roomStates) if (known[pk]) pruned[pk] = lanchat.roomStates[pk]
+      lanchat.roomStates = pruned
+      // Re-evaluate host-online for the selected room against live peers.
+      lanchat.updateRoomHostOnline()
+      break
+    }
+
+    case "room-invite": {
+      var exists = false
+      for (var ii = 0; ii < lanchat.roomInvites.length; ii++)
+        if (lanchat.roomInvites[ii].roomId === obj.roomId) { exists = true; break }
+      if (!exists)
+        lanchat.roomInvites = lanchat.roomInvites.concat([{ roomId: obj.roomId, name: obj.name,
+          from: obj.from, fromName: obj.fromName }])
+      break
+    }
+
+    case "room-file-status": {
+      // Per-member delivery report for a room file (sender side): keyed by
+      // roomId+mid so the file bubble can show ✓ saved / error per member.
+      var key = obj.roomId + "|" + (obj.mid || "")
+      var cur = lanchat.roomFileStatuses[key] || {}
+      var nextStatuses = {}
+      for (var fk in lanchat.roomFileStatuses) nextStatuses[fk] = lanchat.roomFileStatuses[fk]
+      cur[obj.peer] = { status: obj.status, error: obj.error || "", name: obj.peerName || "" }
+      nextStatuses[key] = cur
+      lanchat.roomFileStatuses = nextStatuses
       break
     }
 

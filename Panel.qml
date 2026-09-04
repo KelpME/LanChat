@@ -34,6 +34,72 @@ Panel {
   // The conversation currently on screen ("" = none selected).
   property string selectedPeerId: ""
 
+  // ---- group chat rooms ---------------------------------------------------
+  // selectedRoomId and selectedPeerId are mutually exclusive: selecting a
+  // room clears the peer chat and vice versa. Room rendering keys off
+  // selectedRoomId !== "".
+  // readonly property string selectedRoomId: Lanchat.selectedRoomId (mirrored
+  // on the singleton so BarWidget/unread logic can see it too)
+
+  // The room snapshot currently on screen (null when no room selected).
+  readonly property var selectedRoom: Lanchat.roomStates[Lanchat.selectedRoomId] || null
+
+  // Am I the owner of the open room? (Owner-only controls in the roster.)
+  readonly property bool amRoomOwner: !!root.selectedRoom
+    && Lanchat.myId !== "" && root.selectedRoom.owner === Lanchat.myId
+
+  // Live-filtered thread for the selected ROOM (messages carry room=roomId).
+  readonly property var roomThread: {
+    var out = []
+    var all = Lanchat.roomMessages
+    for (var i = 0; i < all.length; i++)
+      if (all[i].room === Lanchat.selectedRoomId) out.push(all[i])
+    return out
+  }
+
+  // The stage-then-confirm pending attachments list is shared with 1:1 sends;
+  // in a room it sends roomFile messages instead (see send()).
+  readonly property bool inRoom: Lanchat.selectedRoomId !== ""
+
+  // The current Omarchy theme's palette for the room color picker: the
+  // canonical token set the daemon-side color records reference. Swatches
+  // resolve to the VIEWER's theme values (all offered, none filtered —
+  // approved point 5). Values mirror the same keys colors.toml defines.
+  readonly property var themePalette: [
+    { token: "accent", hex: String(Color.accent) },
+    { token: "foreground", hex: String(Color.foreground) },
+    { token: "muted", hex: String(Color.muted) },
+    { token: "background", hex: String(Color.background) },
+    { token: "urgent", hex: String(Color.urgent) },
+    { token: "red", hex: "#D35F5F" },
+    { token: "orange", hex: "#c63d3d" },
+    { token: "yellow", hex: "#FFC107" },
+    { token: "green", hex: "#FFC107" },
+    { token: "cyan", hex: "#eaeaea" },
+    { token: "blue", hex: "#f59e0b" },
+    { token: "magenta", hex: "#B91C1C" },
+    { token: "brown", hex: "#631e1e" }
+  ]
+
+  // Does this user own at least one room? (Gates the Settings kill-switch.)
+  readonly property bool ownsAnyRoom: {
+    var mine = Lanchat.myId
+    for (var i = 0; i < Lanchat.rooms.length; i++)
+      if (Lanchat.rooms[i].owner === mine) return true
+    return false
+  }
+
+  // The room-state snapshot of a room I own — the kill-switch applies to the
+  // currently OPEN owned room, else the first owned room.
+  readonly property var selectedOwnedRoom: {
+    var mine = Lanchat.myId
+    var snap = Lanchat.roomStates[Lanchat.selectedRoomId]
+    if (snap && snap.owner === mine) return snap
+    for (var k in Lanchat.roomStates)
+      if (Lanchat.roomStates[k].owner === mine) return Lanchat.roomStates[k]
+    return null
+  }
+
   // The most recent un-accepted incoming attachment for the selected peer.
   // Returns the whole message (carries `mid` + the attachment metadata) so the
   // accept bar can echo the message id back for accepted-marking.
@@ -107,6 +173,23 @@ Panel {
     var text = input.text.trim()
     // Allow sending attachments with no text when any are staged.
     if (!text && root.pendingCount === 0) return
+    // Room send: text goes to the room; staged files each become a roomFile
+    // (same stage-then-confirm UX, no auto-send — approved point 11).
+    if (root.inRoom) {
+      if (root.pendingCount > 0) {
+        for (var r = 0; r < root.pendingAttachments.length; r++) {
+          var ra = root.pendingAttachments[r]
+          Lanchat.sendRoomFile(Lanchat.selectedRoomId, ra.path, ra.name)
+          if (r === 0 && text) Lanchat.sendRoom(Lanchat.selectedRoomId, text)
+        }
+      } else {
+        Lanchat.sendRoom(Lanchat.selectedRoomId, text)
+      }
+      input.text = ""
+      root.pendingAttachments = []
+      list.positionViewAtEnd()
+      return
+    }
     if (!selectedPeerId) return
     if (editingMid !== "") {
       Lanchat.editMessage(editingMid, text)
@@ -132,7 +215,7 @@ Panel {
   // the panel. Close the panel first so zenity runs without an overlay above
   // it, then reopen (and send) when the picker returns.
   function attachAndSend() {
-    if (!selectedPeerId) return
+    if (!selectedPeerId && !root.inRoom) return
     attachProc.command = ["zenity", "--file-selection", "--multiple", "--separator", "|", "--title", "Choose files to send"]
     root.close()
     attachProc.running = true
@@ -162,6 +245,21 @@ Panel {
     if (selectedPeerId) Lanchat.sendTypingStopped(selectedPeerId)
     editingMid = ""
     selectedPeerId = ""
+    Lanchat.selectedRoomId = ""
+  }
+
+  // Select a room (mutually exclusive with the peer chat) and pull its history.
+  function selectRoom(roomId) {
+    root.confirmUnfriend = false
+    if (selectedPeerId) Lanchat.sendTypingStopped(selectedPeerId)
+    editingMid = ""
+    selectedPeerId = ""
+    Lanchat.selectRoom(roomId)
+  }
+
+  function leaveSelectedRoom() {
+    if (Lanchat.selectedRoomId) Lanchat.roomLeave(Lanchat.selectedRoomId)
+    Lanchat.selectedRoomId = ""
   }
 
   // Commit the display-name field if it holds a non-empty value. Guarded so a
@@ -502,6 +600,19 @@ Panel {
     root.stagePaths(path)
   }
 
+  // Create-room inline mini-dialog state (rendered inside the KeyboardPanel
+  // content, so no external modal is needed).
+  property bool showRoomNameDialog: false
+  property string newRoomName: ""
+  function commitCreateRoom() {
+    var n = roomNameField ? roomNameField.text.trim() : ""
+    if (n !== "") {
+      Lanchat.createRoom(n)
+      roomsSection.expanded = true
+    }
+    showRoomNameDialog = false
+  }
+
   // Panel dimensions by size setting, as INDEPENDENT fractions of each screen
   // axis. Width is a fraction of screen width, height a fraction of screen
   // height; X and Y grow incrementally from small to XL. "full" fills the
@@ -569,6 +680,60 @@ Panel {
       height: parent.height
       color: Color.popups.background
 
+      // ---- create-room inline mini-dialog (rooms header ＋ button) ------
+      // Rendered INSIDE the panel (no external modal — the KeyboardPanel
+      // overlay would swallow clicks on an external window).
+      Rectangle {
+        id: roomNameDialog
+        visible: root.showRoomNameDialog
+        anchors.centerIn: parent
+        width: Style.space(280)
+        height: Style.space(120)
+        radius: Math.max(Style.cornerRadius, Style.space(6))
+        color: Color.popups.background
+        border.width: 1
+        border.color: Color.popups.border
+        z: 10
+
+        Column {
+          anchors.fill: parent
+          anchors.margins: Style.space(12)
+          spacing: Style.space(8)
+
+          Text {
+            text: "Create a room"
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            font.weight: Font.DemiBold
+          }
+
+          TextField {
+            id: roomNameField
+            width: parent.width
+            placeholderText: "room name"
+            focus: root.showRoomNameDialog
+            onAccepted: root.commitCreateRoom()
+          }
+
+          Row {
+            spacing: Style.space(6)
+            Button {
+              text: "Create"
+              fontSize: Style.font.caption
+              onClicked: root.commitCreateRoom()
+            }
+            Button {
+              text: "Cancel"
+              fontSize: Style.font.caption
+              onClicked: { root.newRoomName = ""; root.showRoomNameDialog = false }
+            }
+          }
+        }
+        // Bind the field to the root state while the dialog is open.
+        onVisibleChanged: if (visible) roomNameField.text = ""
+      }
+
       // ---- body: peer list + thread -----------------------------------
       Rectangle {
         width: parent.width
@@ -601,7 +766,7 @@ Panel {
                 id: peerListBlankArea
                 anchors.top: notifBanner.bottom
                 anchors.topMargin: Style.spacing.sm
-                anchors.bottom: settings.top
+                anchors.bottom: roomsSection.top
                 anchors.bottomMargin: Style.spacing.xs
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -616,7 +781,7 @@ Panel {
                 anchors.topMargin: Style.spacing.sm
                 anchors.leftMargin: Style.spacing.sm
                 anchors.rightMargin: Style.spacing.sm
-                anchors.bottom: settings.top
+                anchors.bottom: roomsSection.top
                 anchors.bottomMargin: Style.spacing.xs
                 clip: true
                 interactive: peerList.contentHeight > peerList.height
@@ -965,6 +1130,174 @@ Panel {
                   color: Color.urgent
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
+                }
+              }
+
+              // ---- rooms: collapsible section UNDER the peers list ------
+              // Sits directly above settings (element ordering, anchor chain:
+              // rooms.top ← peersOnlineBar stack bottom; peerList.bottom ←
+              // rooms.top). Collapsed by default; expands into peer-list
+              // space, which shrinks by its own anchors — no height math.
+              Column {
+                id: roomsSection
+                property bool expanded: false
+                width: parent.width
+                anchors.left: parent.left
+                anchors.right: parent.right
+                // Anchor to the BOTTOM stack like settings does, so it hugs
+                // the settings header and grows upward into list space.
+                anchors.bottom: settings.top
+                height: roomsHeader.height + (roomsSection.expanded ? roomsListCol.height : 0)
+
+                // header row: toggle + create
+                Item {
+                  id: roomsHeader
+                  width: parent.width
+                  height: Style.space(26)
+
+                  Rectangle {
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 1
+                    color: Color.popups.border
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    onClicked: roomsSection.expanded = !roomsSection.expanded
+                  }
+
+                  Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.spacing.sm
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: (roomsSection.expanded ? "Rooms ▾ " : "Rooms ▸ ")
+                          + "(" + Lanchat.rooms.length + ")"
+                    color: Color.popups.text
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.weight: Font.Bold
+                  }
+
+                  Button {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.spacing.sm
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "＋"
+                    fontSize: Style.font.caption
+                    foreground: Color.popups.text
+                    tooltipText: "Create a room"
+                    onClicked: { root.showRoomNameDialog = true; root.newRoomName = "" }
+                  }
+                }
+
+                // body: room rows (only when expanded; a room click opens it)
+                Column {
+                  id: roomsListCol
+                  visible: roomsSection.expanded
+                  width: parent.width
+                  spacing: Style.spacing.xs
+
+                  // Unaccepted invites first (Accept opens + joins the room).
+                  Repeater {
+                    model: Lanchat.roomInvites
+                    delegate: Rectangle {
+                      required property var modelData
+                      width: roomsListCol.width
+                      height: Style.space(34)
+                      color: Style.selectedAccentFill
+
+                      Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: Style.spacing.sm
+                        anchors.rightMargin: Style.spacing.sm
+                        spacing: Style.spacing.sm
+
+                        Text {
+                          width: parent.width - Style.space(120)
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: (modelData.fromName || "Someone") + " invited you to " + (modelData.name || "a room")
+                          color: Color.popups.text
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.caption
+                          elide: Text.ElideRight
+                        }
+                        Button {
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: "Join"
+                          fontSize: Style.font.caption
+                          onClicked: {
+                            Lanchat.roomJoin(modelData.roomId)
+                            root.selectRoom(modelData.roomId)
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  Repeater {
+                    model: Lanchat.rooms
+                    delegate: Rectangle {
+                      required property var modelData
+                      width: roomsListCol.width
+                      height: root.peerRowH
+                      radius: Style.cornerRadius
+                      color: modelData.roomId === Lanchat.selectedRoomId
+                        ? Style.selectedFill : "transparent"
+
+                      MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.selectRoom(modelData.roomId)
+                      }
+
+                      Rectangle {
+                        visible: modelData.roomId === Lanchat.selectedRoomId
+                        width: 3
+                        height: parent.height * 0.5
+                        radius: 1.5
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        color: Color.accent
+                      }
+
+                      Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: Style.spacing.sm
+                        anchors.right: roomLeaveBtn.left
+                        anchors.rightMargin: Style.spacing.sm
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "# " + modelData.name
+                        color: Color.popups.text
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.bodySmall
+                        elide: Text.ElideRight
+                      }
+
+                      Button {
+                        id: roomLeaveBtn
+                        anchors.right: parent.right
+                        anchors.rightMargin: Style.spacing.sm
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: modelData.roomId === Lanchat.selectedRoomId
+                        text: "✕"
+                        fontSize: Style.font.caption
+                        foreground: Color.muted
+                        tooltipText: "Leave this room"
+                        onClicked: root.leaveSelectedRoom()
+                      }
+                    }
+                  }
+
+                  Text {
+                    visible: Lanchat.rooms.length === 0 && Lanchat.roomInvites.length === 0
+                    width: parent.width
+                    leftPadding: Style.spacing.sm
+                    text: "No rooms yet — use ＋ to create one"
+                    color: Color.muted
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
                 }
               }
 
@@ -1355,6 +1688,56 @@ Panel {
                     PanelToolTip {
                       visible: reqTipHover.containsMouse
                       text: "On = receive friend requests (shown with the requester's verified fingerprint). Off = reject all incoming requests."
+                    }
+                  }
+
+                  // ---- Rooms: member-colors kill-switch ------------------
+                  // OWNER-level room state (default ON): when off, room
+                  // rendering falls back to the standard theme palette
+                  // (approved decision #3). Enabled only when the user owns
+                  // at least one room — the toggle applies per owned room via
+                  // the selected room; the tooltip says so. Room state is
+                  // mirrored from the daemon (roomState events), not a
+                  // session-local bool.
+                  Item {
+                    width: parent.width
+                    height: Style.space(30)
+                    visible: root.ownsAnyRoom
+
+                    property bool tipHover: tipHoverArea.containsMouse
+
+                    MouseArea {
+                      id: tipHoverArea
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+
+                    Text {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: "Rooms: members pick their colors"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    ToggleSwitch {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.spacing.sm
+                      anchors.verticalCenter: parent.verticalCenter
+                      enabled: root.selectedOwnedRoom !== null
+                      checked: root.selectedOwnedRoom
+                        ? root.selectedOwnedRoom.colorsEnabled !== false : true
+                      onToggled: {
+                        if (root.selectedOwnedRoom)
+                          Lanchat.toggleRoomColors(Lanchat.selectedRoomId, !root.selectedOwnedRoom.colorsEnabled)
+                      }
+                    }
+
+                    PanelToolTip {
+                      visible: parent.tipHover
+                      text: "Applies to rooms YOU own. Off = members' names/bubbles render with the standard theme colors."
                     }
                   }
 
@@ -2211,7 +2594,7 @@ Panel {
               // controls in the header.
               Button {
                 id: closeChatBtn
-                visible: root.selectedPeerId !== ""
+                visible: root.selectedPeerId !== "" || root.inRoom
                 anchors.right: parent.right
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
@@ -2338,7 +2721,8 @@ Panel {
 
           ListView {
             id: list
-            width: parent.width
+            visible: !root.inRoom
+            width: root.inRoom ? 0 : parent.width
             height: parent.height - composeBox.height - threadHeader.height
             clip: true
             spacing: Style.spacing.sm
@@ -2488,6 +2872,475 @@ Panel {
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter
+              }
+            }
+
+            // ---- ROOM VIEW (when a room is selected) -------------------
+            // Replaces the 1:1 thread: roster column (between the divider
+            // and the chat) + room thread + per-message room styling.
+            Row {
+              id: roomView
+              visible: root.inRoom
+              width: parent.width
+              height: parent.height - composeBox.height - threadHeader.height
+
+              // ---- roster column ---------------------------------------
+              Rectangle {
+                id: rosterCol
+                width: Style.space(170)
+                height: parent.height
+                color: Util.alpha(Color.foreground, 0.04)
+
+                Rectangle {
+                  anchors.right: parent.right
+                  anchors.top: parent.top
+                  anchors.bottom: parent.bottom
+                  width: 1
+                  color: Color.popups.border
+                }
+
+                Column {
+                  anchors.fill: parent
+                  spacing: Style.spacing.xs
+
+                  // Roster header: frozen-state banner. Gated on the
+                  // singleton's mirrored host-online property — never a
+                  // session-local bool alone.
+                  Rectangle {
+                    id: roomBanner
+                    width: parent.width
+                    height: roomBannerText.implicitHeight + Style.space(10)
+                    visible: !Lanchat.roomHostOnline
+                    color: Style.selectedAccentFill
+
+                    Text {
+                      id: roomBannerText
+                      anchors.left: parent.left
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      anchors.topMargin: Style.space(5)
+                      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                      text: "Host offline — changes frozen"
+                      color: Color.popups.text
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+
+                  Text {
+                    width: parent.width
+                    leftPadding: Style.spacing.sm
+                    text: "Members (" + (root.selectedRoom ? Object.keys(root.selectedRoom.members || {}).length : 0) + ")"
+                    color: Color.muted
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.weight: Font.Bold
+                    topPadding: Style.space(4)
+                  }
+
+                  ListView {
+                    id: rosterList
+                    width: parent.width
+                    height: parent.height - roomBanner.height - Style.space(70)
+                    clip: true
+                    interactive: rosterList.contentHeight > rosterList.height
+                    model: root.selectedRoom ? Object.keys(root.selectedRoom.members || {}) : []
+                    spacing: Style.spacing.xs
+
+                    delegate: Rectangle {
+                      id: rosterRow
+                      required property var modelData
+                      required property int index
+                      width: rosterList.width
+                      height: Style.space(38)
+                      color: "transparent"
+
+                      readonly property var member: root.selectedRoom
+                        ? (root.selectedRoom.members[modelData] || {}) : {}
+                      readonly property bool rowIsOwner: root.selectedRoom
+                        && root.selectedRoom.owner === modelData
+                      readonly property bool rowIsMe: Lanchat.myId === modelData
+
+                      Row {
+                        anchors.left: parent.left
+                        anchors.leftMargin: Style.spacing.sm
+                        anchors.right: parent.right
+                        anchors.rightMargin: Style.spacing.sm
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.spacing.sm
+
+                        // Member color dot (palette-token resolved per-viewer).
+                        Rectangle {
+                          width: Style.space(10)
+                          height: Style.space(10)
+                          radius: width / 2
+                          anchors.verticalCenter: parent.verticalCenter
+                          color: Lanchat.roomMemberColor(rosterRow.member) || Color.muted
+                          border.width: 1
+                          border.color: Color.popups.border
+                        }
+
+                        Column {
+                          width: parent.width - Style.space(26)
+                          anchors.verticalCenter: parent.verticalCenter
+
+                          Text {
+                            width: parent.width
+                            text: (rosterRow.rowIsOwner ? "★ " : "")
+                                  + (rosterRow.member.name || "Unknown")
+                                  + (rosterRow.rowIsMe ? " (you)" : "")
+                            color: Color.popups.text
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.caption
+                            elide: Text.ElideRight
+                          }
+
+                          // Owner controls: remove + per-member canInvite.
+                          Row {
+                            visible: root.amRoomOwner && !rosterRow.rowIsOwner
+                            spacing: Style.space(6)
+
+                            Button {
+                              text: "✕"
+                              fontSize: Style.font.caption
+                              foreground: Color.urgent
+                              tooltipText: "Remove from room"
+                              onClicked: Lanchat.roomRemove(Lanchat.selectedRoomId, rosterRow.modelData)
+                            }
+                            Button {
+                              text: (rosterRow.member.canInvite ? "✓ can add" : "✗ can add")
+                              fontSize: Style.font.caption
+                              foreground: rosterRow.member.canInvite ? Color.accent : Color.muted
+                              tooltipText: "Toggle whether this member may add people"
+                              onClicked: Lanchat.roomSetCanInvite(Lanchat.selectedRoomId,
+                                rosterRow.modelData, !rosterRow.member.canInvite)
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  // My-color control: every member picks THEIR color from the
+                  // current theme's palette (all swatches offered — none
+                  // filtered; approved point 5) or "Match my theme accent"
+                  // (token "theme", dynamically re-resolved on theme change).
+                  Column {
+                    visible: root.selectedRoom !== null
+                    width: parent.width
+                    leftPadding: Style.spacing.sm
+                    rightPadding: Style.spacing.sm
+                    topPadding: Style.space(4)
+                    spacing: Style.space(4)
+
+                    Text {
+                      text: "My color"
+                      color: Color.muted
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.weight: Font.Bold
+                    }
+
+                    Flow {
+                      width: parent.width
+                      spacing: Style.space(4)
+
+                      // Palette swatches: read from the current Omarchy theme
+                      // palette (canonical token set shared by colors.toml).
+                      Repeater {
+                        model: root.themePalette
+
+                        Rectangle {
+                          required property var modelData
+                          width: Style.space(16)
+                          height: Style.space(16)
+                          radius: Style.space(3)
+                          color: modelData.hex
+                          border.width: 1
+                          border.color: Color.popups.border
+
+                          MouseArea {
+                            anchors.fill: parent
+                            onClicked: Lanchat.setRoomColor(Lanchat.selectedRoomId,
+                              parent.modelData.token, parent.modelData.hex)
+                          }
+                        }
+                      }
+                    }
+
+                    Button {
+                      text: "Match my theme accent"
+                      fontSize: Style.font.caption
+                      onClicked: Lanchat.setRoomColor(Lanchat.selectedRoomId, "theme", String(Color.accent))
+                    }
+                  }
+
+                  // Owner's add-member row (in the roster body, NOT under a
+                  // full-width MouseArea).
+                  Row {
+                    visible: root.amRoomOwner
+                    width: parent.width
+                    leftPadding: Style.spacing.sm
+                    spacing: Style.space(4)
+
+                    TextField {
+                      id: addMemberInput
+                      width: rosterCol.width - Style.space(96)
+                      placeholderText: "peer fingerprint…"
+                      font.pixelSize: Style.font.caption
+                      horizontalPadding: Style.space(6)
+                      verticalPadding: Style.space(3)
+                    }
+                    Button {
+                      text: "Add"
+                      fontSize: Style.font.caption
+                      onClicked: {
+                        if (addMemberInput.text.trim() !== "") {
+                          Lanchat.roomAdd(Lanchat.selectedRoomId, addMemberInput.text.trim())
+                          addMemberInput.text = ""
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              // ---- room chat pane --------------------------------------
+              Column {
+                width: parent.width - rosterCol.width
+                height: parent.height
+
+                ListView {
+                  id: roomList
+                  width: parent.width
+                  height: parent.height
+                  clip: true
+                  spacing: Style.spacing.sm
+                  model: root.roomThread
+
+                  header: Item { width: parent.width; height: Style.spacing.md }
+                  footer: Item { width: parent.width; height: Style.spacing.lg }
+                  onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
+
+                  delegate: Column {
+                    required property var modelData
+                    width: roomList.width
+                    spacing: Style.spacing.xs
+
+                    // Meta row: sender + time, tinted with the sender's
+                    // member color when the room's colors are enabled.
+                    Text {
+                      anchors.left: modelData.outgoing ? undefined : parent.left
+                      anchors.right: modelData.outgoing ? parent.right : undefined
+                      text: (modelData.outgoing ? "You · " : modelData.fromName + " · ")
+                            + root.timeLabel(modelData.ts)
+                      color: {
+                        if (!root.selectedRoom || !root.selectedRoom.colorsEnabled) return Color.muted
+                        var mem = (root.selectedRoom.members || {})[modelData.from]
+                        var col = Lanchat.roomMemberColor(mem)
+                        return col !== "" ? col : Color.muted
+                      }
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    // Text bubble: member color tints the bubble; the INK is
+                    // derived from the bubble background's luminance so text
+                    // always passes contrast (the approved mechanism — a
+                    // low-contrast color choice yields adapted text, never an
+                    // excluded swatch). Same function local and remote.
+                    Rectangle {
+                      readonly property color memberTint: {
+                        if (!root.selectedRoom || !root.selectedRoom.colorsEnabled) return "transparent"
+                        var mem = (root.selectedRoom.members || {})[modelData.from]
+                        var col = Lanchat.roomMemberColor(mem)
+                        return col !== "" ? col : "transparent"
+                      }
+                      readonly property color bubbleBase: modelData.outgoing
+                        ? Style.selectedAccentFill : Style.normalFill
+                      // Composite the member tint over the base bubble fill
+                      // at 25% (low-alpha tint, so the derived ink always
+                      // clears the contrast ratio).
+                      readonly property color bubbleColor: {
+                        var t = memberTint
+                        if (t === "transparent") return bubbleBase
+                        return Qt.rgba(t.r * 0.25 + bubbleBase.r * 0.75,
+                                       t.g * 0.25 + bubbleBase.g * 0.75,
+                                       t.b * 0.25 + bubbleBase.b * 0.75,
+                                       Math.max(bubbleBase.a, 0.85))
+                      }
+                      // Relative luminance (sRGB-linearized) of the bubble
+                      // fill; ink flips dark/light at L 0.35.
+                      function rlin(c) {
+                        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+                      }
+                      readonly property real lum: 0.2126 * rlin(bubbleColor.r)
+                        + 0.7152 * rlin(bubbleColor.g) + 0.0722 * rlin(bubbleColor.b)
+                      readonly property color ink: lum > 0.35 ? Color.background : Color.popups.text
+
+                      visible: (modelData.text !== "")
+                      width: Math.min(roomList.width * 0.8,
+                                      roomMsgText.implicitWidth + Style.space(28) + Style.space(20))
+                      height: roomMsgText.implicitHeight + Style.space(18)
+                      radius: Math.max(Style.cornerRadius, Style.space(6))
+                      anchors.left: modelData.outgoing ? undefined : parent.left
+                      anchors.right: modelData.outgoing ? parent.right : undefined
+                      border.width: modelData.outgoing ? 0 : 1
+                      border.color: Style.normalBorderColor
+                      color: bubbleColor
+
+                      Text {
+                        id: roomMsgText
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: Style.space(14)
+                        anchors.rightMargin: Style.space(14)
+                        text: modelData.text
+                        color: parent.ink
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                        wrapMode: Text.Wrap
+                      }
+                    }
+
+                    // Room-file bubble: metadata + Save when the sender↔me
+                    // friend link exists; the befriend notice when it doesn't
+                    // (the alert re-evaluates on friend events — Save
+                    // reappears without a manual re-request).
+                    Rectangle {
+                      visible: modelData.attachment && modelData.attachment.name
+                      readonly property var att: modelData.attachment || {}
+                      readonly property bool senderIsFriend:
+                        Lanchat.isConfirmedFriend(modelData.from)
+                      readonly property bool fileDownloading:
+                        Lanchat.dlActive && Lanchat.dlFileId === att.fileId
+                      readonly property var statusMap:
+                        Lanchat.roomFileStatuses[Lanchat.selectedRoomId + "|" + (modelData.mid || "")] || {}
+                      function rlin2(c) {
+                        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+                      }
+                      readonly property color fileInk: {
+                        var c = Style.normalFill
+                        if (!modelData.outgoing && root.selectedRoom && root.selectedRoom.colorsEnabled) {
+                          var mem = (root.selectedRoom.members || {})[modelData.from]
+                          var col = Lanchat.roomMemberColor(mem)
+                          if (col !== "") {
+                            c = Qt.rgba(col.r * 0.25 + c.r * 0.75,
+                                        col.g * 0.25 + c.g * 0.75,
+                                        col.b * 0.25 + c.b * 0.75, 1)
+                          }
+                        }
+                        var lum = 0.2126 * rlin2(c.r) + 0.7152 * rlin2(c.g) + 0.0722 * rlin2(c.b)
+                        return lum > 0.35 ? Color.background : Color.popups.text
+                      }
+
+                      width: Math.min(roomList.width * 0.8, Style.space(340))
+                      height: fileCol.implicitHeight + Style.space(20)
+                      radius: Math.max(Style.cornerRadius, Style.space(6))
+                      anchors.left: modelData.outgoing ? undefined : parent.left
+                      anchors.right: modelData.outgoing ? parent.right : undefined
+                      border.width: modelData.outgoing ? 0 : 1
+                      border.color: Style.normalBorderColor
+                      color: Style.normalFill
+
+                      Column {
+                        id: fileCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.topMargin: Style.space(10)
+                        anchors.leftMargin: Style.space(14)
+                        anchors.rightMargin: Style.space(14)
+                        spacing: Style.space(4)
+
+                        Text {
+                          width: parent.width
+                          text: "\uD83D\uDCCE " + (parent.parent.att.name || "file")
+                          color: parent.parent.fileInk
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.body
+                          elide: Text.ElideMiddle
+                        }
+                        Text {
+                          width: parent.width
+                          text: (parent.parent.att.size >= 1024
+                            ? Math.round(parent.parent.att.size / 1024) + " KB"
+                            : (parent.parent.att.size || 0) + " B")
+                          color: parent.parent.fileInk
+                          opacity: 0.8
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.caption
+                        }
+
+                        // Sender-side per-member delivery chips (daemon-driven
+                        // roomFileStatus reports; "…" for members with no
+                        // report yet — surfaced honestly, never client-guessed).
+                        Flow {
+                          visible: modelData.outgoing && root.selectedRoom
+                          width: parent.width
+                          spacing: Style.space(4)
+
+                          Repeater {
+                            model: root.selectedRoom ? Object.keys(root.selectedRoom.members || {}) : []
+                            delegate: Rectangle {
+                              id: statusChip
+                              required property var modelData
+                              readonly property var st:
+                                (fileBubbleRef.statusMap || {})[modelData] || null
+                              width: roomStatusText.implicitWidth + Style.space(10)
+                              height: Style.space(16)
+                              radius: height / 2
+                              color: st && st.status === "saved" ? Color.accent : Style.pressedFill
+                              visible: modelData !== Lanchat.myId
+                              Text {
+                                id: roomStatusText
+                                anchors.centerIn: parent
+                                text: statusChip.st
+                                  ? (statusChip.st.status === "saved" ? "✓ " : "! ")
+                                    + (statusChip.st.name || statusChip.modelData.slice(0, 8))
+                                  : "… " + statusChip.modelData.slice(0, 8)
+                                color: statusChip.st && statusChip.st.status === "saved"
+                                  ? Color.background : Color.popups.text
+                                font.family: Style.font.family
+                                font.pixelSize: Style.font.caption
+                              }
+                            }
+                          }
+                        }
+
+                        // Save / notice row (non-outgoing only).
+                        Row {
+                          visible: !modelData.outgoing
+                          spacing: Style.space(6)
+
+                          Button {
+                            visible: fileBubbleRef.senderIsFriend
+                            text: fileBubbleRef.fileDownloading ? "Saving…" : "Save"
+                            enabled: !fileBubbleRef.fileDownloading
+                            fontSize: Style.font.caption
+                            onClicked: Lanchat.acceptRoomAttachment(modelData.from,
+                              fileBubbleRef.att.fileId, fileBubbleRef.att.name,
+                              modelData.mid, fileBubbleRef.att.sha256 || "",
+                              Lanchat.selectedRoomId)
+                          }
+                          Text {
+                            visible: !fileBubbleRef.senderIsFriend
+                            text: "⚠ Befriend " + (modelData.fromName || "the sender")
+                                  + " to accept this file"
+                            color: Color.urgent
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.caption
+                            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                          }
+                        }
+                      }
+                      // Reference back to the bubble's readonly properties from
+                      // the delegates (fileBubbleRef = the Rectangle above).
+                      readonly property var fileBubbleRef: fileCol.parent
+                    }
+                  }
+                }
               }
             }
 
@@ -2720,7 +3573,7 @@ Panel {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "\u2713 Send"
                         onClicked: root.send()
-                        enabled: root.selectedPeer !== null
+                        enabled: root.selectedPeer !== null || root.inRoom
                       }
                       Button {
                         anchors.verticalCenter: parent.verticalCenter
@@ -2818,7 +3671,7 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "\uF0C6"  // nf-fa-paperclip
                     onClicked: root.attachAndSend()
-                    enabled: root.selectedPeer !== null
+                    enabled: root.selectedPeer !== null || root.inRoom
                   }
 
                   TextField {
@@ -2829,10 +3682,12 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.topMargin: Style.spacing.md
                     anchors.bottomMargin: Style.spacing.md
-                    placeholderText: root.selectedPeer
-                      ? "Message " + root.selectedPeer.name + "\u2026"
-                      : "Select a peer to chat"
-                    enabled: root.selectedPeer !== null
+                    placeholderText: root.inRoom
+                      ? "Message #" + (root.selectedRoom ? root.selectedRoom.name : "room") + "…"
+                      : (root.selectedPeer
+                        ? "Message " + root.selectedPeer.name + "…"
+                        : "Select a peer to chat")
+                    enabled: root.selectedPeer !== null || root.inRoom
                     onAccepted: root.send()
                     onTextChanged: {
                       if (root.selectedPeerId && text.length > 0) {
