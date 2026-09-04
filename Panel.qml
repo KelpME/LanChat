@@ -920,7 +920,7 @@ Panel {
                     // Clear the status dot: dot starts at spacing.sm and is
                     // space(9) wide, so the name begins past it.
                     anchors.leftMargin: Style.spacing.sm + Style.space(9) + Style.spacing.xs
-                    anchors.right: friendBadge.left
+                    anchors.right: roomAddBadge.visible ? roomAddBadge.left : friendBadge.left
                     anchors.rightMargin: Style.spacing.md
                     text: modelData.name
                     color: modelData.id === root.selectedPeerId
@@ -929,6 +929,27 @@ Panel {
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
                     elide: Text.ElideRight
+                  }
+
+                  // Room-add control: a "＋" on CONFIRMED FRIEND rows only,
+                  // visible only while a room roster is open, only for peers
+                  // not already in that room. One click proposes/adds them —
+                  // same roomAdd path as the roster drag/picker.
+                  Button {
+                    id: roomAddBadge
+                    readonly property bool inSelectedRoom:
+                      root.selectedRoom && (modelData.id in root.selectedRoom.members)
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: friendBadge.left
+                    anchors.rightMargin: Style.spacing.xs
+                    visible: root.inRoom
+                             && Lanchat.isConfirmedFriend(modelData.id)
+                             && !inSelectedRoom
+                    text: "＋"
+                    fontSize: Style.font.caption
+                    foreground: Color.accent
+                    tooltipText: "Add " + (modelData.name || "peer") + " to the room"
+                    onClicked: root.dropPeerIntoRoster(modelData.id)
                   }
 
                   // Friend control on the peer card: an "add friend" button for
