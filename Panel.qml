@@ -1346,8 +1346,12 @@ Panel {
                 // pinned alert stack (notifBanner) — settings can never grow
                 // into/over the always-visible alerts, so expanding it only
                 // crushes the peer list and never pushes anything off-screen.
+                // Expanded height = 80% of the column's full height (user
+                // preference), still bounded by the alert stack.
                 height: settingsHeader.height + (settings.expanded
-                  ? Math.min(settingsBody.contentHeight, Math.max(0, settings.parent.height - (notifBanner.y + notifBanner.height) - settingsHeader.height - Style.space(12)))
+                  ? Math.min(settingsBody.contentHeight,
+                             Math.min(settings.parent.height * 0.8,
+                                      Math.max(0, settings.parent.height - (notifBanner.y + notifBanner.height) - settingsHeader.height - Style.space(12))))
                   : 0)
 
                 // header
@@ -1408,7 +1412,9 @@ Panel {
                 Flickable {
                   id: settingsBody
                   width: parent.width
-                  height: Math.min(bodyCol.implicitHeight, Math.max(0, settings.parent.height - (notifBanner.y + notifBanner.height) - settingsHeader.height - Style.space(12)))
+                  height: Math.min(bodyCol.implicitHeight,
+                                   Math.min(settings.parent.height * 0.8,
+                                            Math.max(0, settings.parent.height - (notifBanner.y + notifBanner.height) - settingsHeader.height - Style.space(12))))
                   visible: settings.expanded
                   contentWidth: width
                   contentHeight: bodyCol.implicitHeight
