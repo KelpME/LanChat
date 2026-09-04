@@ -9,7 +9,7 @@ Used by CI.
 """
 import sys
 
-FILES = ["Panel.qml", "BarWidget.qml", "shared/Lanchat.qml", "Service.qml", "shared/ChatMessage.qml", "shared/RoomMessage.qml", "shared/ComposeBox.qml"]
+FILES = ["Panel.qml", "BarWidget.qml", "shared/Lanchat.qml", "Service.qml", "shared/ChatMessage.qml", "shared/RoomMessage.qml", "shared/ComposeBox.qml", "shared/PeerList.qml"]
 
 PAIRS = {"{": "}", "(": ")", "[": "]"}
 NAMES = {"braces": "{ }", "parens": "( )", "brackets": "[ ]"}
