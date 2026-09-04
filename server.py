@@ -222,7 +222,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (fetch + fast-forward, daemon/shell reload) rather than only checking; docs
 #   updated to match.
 
-VERSION = "1.5.46"
+VERSION = "1.5.47"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2327,9 +2327,9 @@ def handle_command(cmd: dict) -> None:
                 register_attachment(fid, path_f, fname)
                 att_f = {"name": fname, "size": fsize, "mime": "application/octet-stream",
                          "fileId": fid, "sha256": _file_sha256(path_f)}
-                rooms.post_room_file(room_id_f, att_f)
+                rooms.post_room_file(room_id_f, att_f, str(cmd.get("text", "")))
         else:
-            rooms.post_room_file(room_id_f, att_f)
+            rooms.post_room_file(room_id_f, att_f, str(cmd.get("text", "")))
     elif kind == "roomInvite":
         room = rooms.get_room(str(cmd.get("roomId", "")))
         if room is None:

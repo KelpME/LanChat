@@ -191,14 +191,14 @@ Panel {
     var text = input.text.trim()
     // Allow sending attachments with no text when any are staged.
     if (!text && root.pendingCount === 0) return
-    // Room send: text goes to the room; staged files each become a roomFile
-    // (same stage-then-confirm UX, no auto-send — approved point 11).
+    // Room send: ONE message per staged file, with the typed text riding the
+    // FIRST file as its caption (exactly like a 1:1 attachment + text). Plain
+    // text sends stay text-only — no phantom attachments.
     if (root.inRoom) {
       if (root.pendingCount > 0) {
         for (var r = 0; r < root.pendingAttachments.length; r++) {
           var ra = root.pendingAttachments[r]
-          Lanchat.sendRoomFile(Lanchat.selectedRoomId, ra.path, ra.name)
-          if (r === 0 && text) Lanchat.sendRoom(Lanchat.selectedRoomId, text)
+          Lanchat.sendRoomFile(Lanchat.selectedRoomId, ra.path, ra.name, r === 0 ? text : "")
         }
       } else {
         Lanchat.sendRoom(Lanchat.selectedRoomId, text)
@@ -3237,7 +3237,7 @@ Panel {
                         + 0.7152 * rlin(bubbleColor.g) + 0.0722 * rlin(bubbleColor.b)
                       readonly property color ink: lum > 0.35 ? Color.background : Color.popups.text
 
-                      visible: (modelData.text !== "")
+                      visible: (modelData.text !== "") && !(modelData.attachment && modelData.attachment.name)
                       width: Math.min(roomList.width * 0.8,
                                       roomMsgText.implicitWidth + Style.space(28) + Style.space(20))
                       height: roomMsgText.implicitHeight + Style.space(18)
@@ -3320,6 +3320,17 @@ Panel {
                           font.family: Style.font.family
                           font.pixelSize: Style.font.body
                           elide: Text.ElideMiddle
+                        }
+                        // Caption: the sender's typed text rides the file
+                        // message (one bubble), shown only when present.
+                        Text {
+                          visible: (parent.parent.parent.modelData.text || "") !== ""
+                          width: parent.width
+                          text: parent.parent.parent.modelData.text
+                          color: parent.parent.fileInk
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.body
+                          wrapMode: Text.Wrap
                         }
                         Text {
                           width: parent.width

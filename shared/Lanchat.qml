@@ -408,10 +408,10 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "roomSend", roomId: roomId, text: text }) + "\n")
   }
 
-  function sendRoomFile(roomId, path, name) {
+  function sendRoomFile(roomId, path, name, caption) {
     if (!roomId || !path) return
     daemon.write(JSON.stringify({ cmd: "roomFile", roomId: roomId,
-      attachment: { path: path, name: name || "" } }) + "\n")
+      attachment: { path: path, name: name || "" }, text: caption || "" }) + "\n")
   }
 
   function roomInvite(roomId, peerId) {

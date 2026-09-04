@@ -526,10 +526,11 @@ def handle_room_msg(msg: dict, addr) -> None:
 # the owner's authoritative channel — approved decision #2)
 # --------------------------------------------------------------------------
 
-def post_room_file(room_id: str, att: dict) -> bool:
+def post_room_file(room_id: str, att: dict, caption: str = "") -> bool:
     """Sender side: register the attachment (done by caller via
-    attachments.register_attachment) and hand the metadata to the owner for
-    authoritative fan-out. When WE are the owner, fan out directly."""
+    attachments.register_attachment) and hand the metadata + optional caption
+    text to the owner for authoritative fan-out. When WE are the owner, fan
+    out directly."""
     import server  # deferred, late-bound
     room = STATE.rooms.get(room_id) or STATE.rooms_cache.get(room_id)
     if room is None:
@@ -537,7 +538,7 @@ def post_room_file(room_id: str, att: dict) -> bool:
         return False
     envelope = {"t": "room", "kind": "roomFile", "roomId": room_id,
                 "from": server.host_id(), "fromName": server.display_name(),
-                "att": att}
+                "att": att, "text": str(caption or "")}
     owner = room.get("owner")
     if owner == server.host_id():
         fan_out_room_file(room, envelope)
@@ -565,12 +566,14 @@ def fan_out_room_file(room: dict, envelope: dict) -> None:
 
 def emit_room_file_local(room: dict, envelope: dict) -> None:
     """Show the room-file metadata as a room message bubble locally (the same
-    shape a recipient gets from the inbound path)."""
+    shape a recipient gets from the inbound path). The optional caption rides
+    the same message — ONE bubble: 📎 file + caption text."""
     import server  # deferred, late-bound
     att = envelope.get("att") or {}
     message = {
         "from": envelope.get("from", ""), "fromName": envelope.get("fromName", ""),
-        "text": "", "ts": int(time.time() * 1000), "outgoing": envelope.get("from") == server.host_id(),
+        "text": str(envelope.get("text", "")), "ts": int(time.time() * 1000),
+        "outgoing": envelope.get("from") == server.host_id(),
         "mid": str(att.get("mid") or secrets.token_hex(8)), "room": room.get("roomId", ""),
         "attachment": att,
     }
@@ -580,8 +583,9 @@ def emit_room_file_local(room: dict, envelope: dict) -> None:
 
 def handle_room_file_msg(msg: dict, addr) -> None:
     """Inbound roomFile metadata (from the owner's authoritative broadcast).
-    Carried as a room message bubble; bytes are NOT here — they are pulled
-    from the original sender via the existing attachmentRequest flow."""
+    Carried as a room message bubble with its caption; bytes are NOT here —
+    they are pulled from the original sender via the existing
+    attachmentRequest flow."""
     import server  # deferred, late-bound
     att = msg.get("att")
     if not isinstance(att, dict):
@@ -590,7 +594,7 @@ def handle_room_file_msg(msg: dict, addr) -> None:
     message = {
         "from": str(msg.get("from", "")),
         "fromName": str(msg.get("fromName") or server.friendly_name(msg.get("from", ""))),
-        "text": "", "ts": int(time.time() * 1000), "outgoing": False,
+        "text": str(msg.get("text", "")), "ts": int(time.time() * 1000), "outgoing": False,
         "mid": str(att.get("mid") or secrets.token_hex(8)), "room": room_id,
         "attachment": att,
     }
