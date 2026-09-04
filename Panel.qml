@@ -188,7 +188,7 @@ Panel {
   }
 
   function send() {
-    var text = input.text.trim()
+    var text = inputText.trim()
     // Allow sending attachments with no text when any are staged.
     if (!text && root.pendingCount === 0) return
     // Room send: ONE message per staged file, with the typed text riding the
@@ -203,7 +203,7 @@ Panel {
       } else {
         Lanchat.sendRoom(Lanchat.selectedRoomId, text)
       }
-      input.text = ""
+      setInputText("")
       root.pendingAttachments = []
       list.positionViewAtEnd()
       return
@@ -222,7 +222,7 @@ Panel {
     } else {
       Lanchat.send(selectedPeerId, text)
     }
-    input.text = ""
+    setInputText("")
     root.pendingAttachments = []
     list.positionViewAtEnd()
   }
@@ -294,6 +294,17 @@ Panel {
 
   // Begin editing a message: load its text into the compose box and flag the
   // next send as an edit of that mid.
+  // Compose-input access: the TextField (id: input) moved into
+  // shared/ComposeBox.qml (step 3) — the panel reaches it through these
+  // accessors instead of the file-local id (same read/clear/focus effects
+  // the inline code had).
+  readonly property string inputText: composeBox ? composeBox.inputText : ""
+  function setInputText(t) {
+    composeBox.inputText = t
+  }
+  function focusInput() {
+    composeBox.focusInput()
+  }
   property string editingMid: ""
   property bool diagExpanded: false
   // Whether the friend-request notifications banner is expanded (dropdown).
@@ -405,8 +416,8 @@ Panel {
 
   function editMsg(mid, text) {
     editingMid = mid
-    input.text = text
-    input.forceActiveFocus()
+    setInputText(text)
+    focusInput()
   }
 
   function pickDownloadDir() {
@@ -570,12 +581,22 @@ Panel {
     }
   }
 
+  // Typing lifecycle moved into the compose input (step 3): the child emits
+  // these; the panel keeps the timer and the stopped-call semantics.
+  signal typingStarted()
+  signal typingStopped()
+
   // Stops the typing indicator on the peer side after idle.
   property Timer typingTimer: Timer {
     interval: 2000
     onTriggered: {
       if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
     }
+  }
+  onTypingStarted: typingTimer.restart()
+  onTypingStopped: {
+    if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
+    typingTimer.stop()
   }
 
   Component.onCompleted: Lanchat.panelOpen = false
@@ -3259,241 +3280,31 @@ Panel {
             }
 
             // ---- compose box -----------------------------------------
-            Rectangle {
+            // The staged preview + input row moved to shared/ComposeBox.qml
+            // (step 3). The instance keeps the composeBox id so the undo bar
+            // and the thread height formulas still resolve it, and the panel
+            // keeps send() — the child emits sendRequested() (zero behavior
+            // change; inputs mirror what `root.` provided inline before).
+            ComposeBox {
               id: composeBox
-              width: parent.width
-              // Grows to fit the staged-attachment preview (header + list)
-              // above the input when files are staged.
-              height: Style.space(58) + (root.pendingCount > 0 ? root.pendingHeaderH + root.pendingListH : 0)
-              color: "transparent"
-              Rectangle {
-                anchors.top: parent.top
-                anchors.left: parent.left
-                anchors.right: parent.right
-                height: 1
-                color: Color.popups.border
-              }
-
-              Column {
-                anchors.fill: parent
-
-                // ---- staged-attachments preview (not yet sent) ----------
-                Rectangle {
-                  visible: root.pendingCount > 0
-                  width: parent.width
-                  height: root.pendingHeaderH + root.pendingListH
-                  color: Style.normalFill
-                  Rectangle {
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    height: 1
-                    color: Color.popups.border
-                  }
-
-                  Column {
-                    anchors.fill: parent
-
-                    // Header: count + actions.
-                    Row {
-                      width: parent.width
-                      height: root.pendingHeaderH
-                      anchors.leftMargin: Style.spacing.sm
-                      anchors.rightMargin: Style.spacing.sm
-                      spacing: Style.spacing.sm
-
-                      Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: root.pendingCount + (root.pendingCount === 1 ? " file ready" : " files ready")
-                        color: Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        font.weight: Font.DemiBold
-                      }
-
-                      Item { width: 1; height: 1 }
-
-                      Button {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "\u2795 Add more"
-                        onClicked: root.attachAndSend()
-                      }
-                      Button {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "\u2713 Send"
-                        onClicked: root.send()
-                        enabled: root.selectedPeer !== null || root.inRoom
-                      }
-                      Button {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "\u2715 Clear"
-                        onClicked: root.cancelAttachments()
-                      }
-                    }
-
-                    // Removable file list (scrolls if more than a few staged).
-                    ListView {
-                      width: parent.width
-                      height: root.pendingListH
-                      clip: true
-                      model: root.pendingAttachments
-                      interactive: root.pendingCount > root.pendingMaxVisible
-
-                      delegate: Item {
-                        required property var modelData
-                        required property int index
-                        width: parent.width
-                        height: root.pendingRowH
-
-                        Row {
-                          anchors.left: parent.left
-                          anchors.right: parent.right
-                          anchors.verticalCenter: parent.verticalCenter
-                          anchors.leftMargin: Style.spacing.sm
-                          anchors.rightMargin: Style.spacing.sm
-                          spacing: Style.spacing.sm
-
-                          // Image thumbnail (only for image files).
-                          Rectangle {
-                            width: root.isImagePath(modelData.path) ? Style.space(36) : Style.space(36)
-                            height: Style.space(32)
-                            radius: Style.space(4)
-                            color: root.isImagePath(modelData.path) ? "transparent" : Style.pressedFill
-                            border.width: root.isImagePath(modelData.path) ? 1 : 0
-                            border.color: Color.popups.border
-                            clip: true
-
-                            Image {
-                              visible: root.isImagePath(modelData.path)
-                              anchors.fill: parent
-                              source: "file://" + modelData.path
-                              fillMode: Image.PreserveAspectFit
-                              layer.enabled: true
-                              layer.smooth: true
-                            }
-                            Text {
-                              visible: !root.isImagePath(modelData.path)
-                              anchors.centerIn: parent
-                              text: "\uF0C6"  // nf-fa-paperclip
-                              color: Color.muted
-                              font.family: Style.font.family
-                              font.pixelSize: Style.font.caption
-                            }
-                          }
-
-                          Text {
-                            width: parent.width - Style.space(36) - Style.space(56)
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.name
-                            color: Color.popups.text
-                            font.family: Style.font.family
-                            font.pixelSize: Style.font.caption
-                            elide: Text.ElideMiddle
-                          }
-
-                          Item { width: 1; height: 1 }
-
-                          // Remove this file from the staging list.
-                          Button {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "\u2715"
-                            onClicked: root.removeAttachment(index)
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-
-                // Input row (attach button + text field).
-                Item {
-                  width: parent.width
-                  height: Style.space(58)
-                  anchors.leftMargin: Style.spacing.sm
-                  anchors.rightMargin: Style.spacing.sm
-
-                  // Attachment button.
-                  Button {
-                    id: attachBtn
-                    width: Style.space(34)
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "\uF0C6"  // nf-fa-paperclip
-                    onClicked: root.attachAndSend()
-                    enabled: root.selectedPeer !== null || root.inRoom
-                  }
-
-                  TextField {
-                    id: input
-                    anchors.left: attachBtn.right
-                    anchors.leftMargin: Style.spacing.sm
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.topMargin: Style.spacing.md
-                    anchors.bottomMargin: Style.spacing.md
-                    placeholderText: root.inRoom
-                      ? "Message #" + (root.selectedRoom ? root.selectedRoom.name : "room") + "…"
-                      : (root.selectedPeer
-                        ? "Message " + root.selectedPeer.name + "…"
-                        : "Select a peer to chat")
-                    enabled: root.selectedPeer !== null || root.inRoom
-                    onAccepted: root.send()
-                    onTextChanged: {
-                      if (root.selectedPeerId && text.length > 0) {
-                        Lanchat.sendTyping(root.selectedPeerId)
-                        typingTimer.restart()
-                      } else {
-                        if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
-                        typingTimer.stop()
-                      }
-                    }
-                    onEditingFinished: {
-                      if (root.selectedPeerId) Lanchat.sendTypingStopped(root.selectedPeerId)
-                      typingTimer.stop()
-                    }
-
-                    // ---- in-input chat alert (warnings, save results, notices)
-                    // A temporary overlay INSIDE the input box: shows the
-                    // alert text for a few seconds (chatAlertTimer on the
-                    // singleton auto-clears it), then the placeholder
-                    // returns. Layout never changes — nothing can be pushed
-                    // off-screen. Warnings tint the border urgent; non-error
-                    // alerts (save results, notices) keep the normal border.
-                    Rectangle {
-                      id: inputAlert
-                      anchors.fill: parent
-                      visible: root.visibleChatAlert
-                      radius: Style.cornerRadius
-                      color: Color.popups.background
-                      border.width: 1
-                      border.color: Lanchat.chatAlertIsError ? Color.urgent : Style.normalBorderColor
-
-                      Text {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.leftMargin: Style.space(10)
-                        anchors.rightMargin: Style.space(10)
-                        text: Lanchat.chatAlert
-                        color: Lanchat.chatAlertIsError ? Color.urgent : Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        elide: Text.ElideRight
-                      }
-
-                      MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                          // Clicking dismisses immediately and focuses the
-                          // input so typing is never blocked.
-                          Lanchat.chatAlert = ""
-                          input.forceActiveFocus()
-                        }
-                      }
-                    }
-                  }
-                }
-              }
+              pendingCount: root.pendingCount
+              pendingHeaderH: root.pendingHeaderH
+              pendingRowH: root.pendingRowH
+              pendingMaxVisible: root.pendingMaxVisible
+              pendingListH: root.pendingListH
+              pendingAttachments: root.pendingAttachments
+              selectedPeer: root.selectedPeer
+              inRoom: root.inRoom
+              selectedRoom: root.selectedRoom
+              visibleChatAlert: root.visibleChatAlert
+              selectedPeerId: root.selectedPeerId
+              isImagePath: root.isImagePath
+              onSendRequested: root.send()
+              onAttachRequested: root.attachAndSend()
+              onCancelRequested: root.cancelAttachments()
+              onRemoveRequested: function(index) { root.removeAttachment(index) }
+              onTypingStarted: root.typingStarted()
+              onTypingStopped: root.typingStopped()
             }
           }
         }
