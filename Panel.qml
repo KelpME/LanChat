@@ -28,8 +28,8 @@ Panel {
     ? dragPeerColW
     : (Lanchat.peerColW > 0 ? Lanchat.peerColW : Style.space(280))
 
-  // Peer-list row height — single source of truth for the delegate rendering.
-  property real peerRowH: Style.space(40)
+  // Peer-list row height — single text line (same as room member lines).
+  property real peerRowH: Style.space(24)
 
   // The conversation currently on screen ("" = none selected).
   property string selectedPeerId: ""
@@ -893,10 +893,10 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.right: parent.right
                     anchors.rightMargin: Style.spacing.sm
-                    width: root.friendState(modelData.id) === "" ? Style.space(30)
-                         : root.friendState(modelData.id) === "friend" ? Style.space(44)
-                         : Style.space(16)
-                    height: Style.space(20)
+                    width: root.friendState(modelData.id) === "" ? Style.space(24)
+                         : root.friendState(modelData.id) === "friend" ? Style.space(30)
+                         : Style.space(14)
+                    height: Style.space(18)
 
                     // Stranger -> "+" button to send a friend request.
                     Button {
