@@ -53,4 +53,40 @@ QtObject {
   function roomSetCanInvite(roomId, peerId, can) { console.log("stub roomSetCanInvite", roomId, peerId, can) }
   property bool roomHostOnline: true
   property var roomInvites: []
+  // ---- settings-panel surface (step 7 bench; mirrors real singleton) ----
+  property bool firewall: false
+  property bool httpEnabled: false
+  property string visibility: "everyone"
+  property bool typingEnabled: true
+  property bool soundEnabled: true
+  property bool showTyping: true
+  property bool showReadReceipts: true
+  property bool readReceiptsEnabled: true
+  property bool online: true
+  property int customW: 0
+  property int customH: 0
+  property bool apiFullAccess: false
+  property bool acceptRequests: true
+  property string version: "0.0.0-bench"
+  property int sendDelay: 0
+  property int httpPort: 4814
+  property string downloadDir: "/tmp"
+  function setStatus(s) { console.log("stub setStatus", s) }
+  function toggleRoomColors(roomId, on) { console.log("stub toggleRoomColors", roomId, on) }
+  function setVisibility(v) { console.log("stub setVisibility", v) }
+  function setTypingEnabled(b) { console.log("stub setTypingEnabled", b) }
+  function setSoundEnabled(b) { console.log("stub setSoundEnabled", b) }
+  function setShowTyping(b) { console.log("stub setShowTyping", b) }
+  function setShowReadReceipts(b) { console.log("stub setShowReadReceipts", b) }
+  function setSendDelay(n) { console.log("stub setSendDelay", n) }
+  function setReadReceiptsEnabled(b) { console.log("stub setReadReceiptsEnabled", b) }
+  function setOnline(b) { console.log("stub setOnline", b) }
+  function setHttpEnabled(b) { console.log("stub setHttpEnabled", b) }
+  function setApiFullAccess(b) { console.log("stub setApiFullAccess", b) }
+  function setAcceptRequests(b) { console.log("stub setAcceptRequests", b) }
+  function regenerateName() { console.log("stub regenerateName") }
+  function firewallOpen() { console.log("stub firewallOpen") }
+  function firewallClose() { console.log("stub firewallClose") }
+  function clearAllChats() { console.log("stub clearAllChats") }
+  function setRoomColor(roomId, token, hex) { console.log("stub setRoomColor", roomId, token, hex) }
 }
