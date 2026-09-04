@@ -61,21 +61,11 @@ Panel {
   // in a room it sends roomFile messages instead (see send()).
   readonly property bool inRoom: Lanchat.selectedRoomId !== ""
 
-  // ---- peer → roster drag-and-drop ----------------------------------------
-  // Drag a peer row onto the roster column to add them to the open room.
-  // Pure coordinate tracking (no Drag/DropArea machinery): the delegate's
-  // MouseArea moves a root-level ghost and maps the cursor into the roster's
-  // space; on release inside the roster, the peer is proposed/added.
-  property string draggingPeerId: ""
-  property string draggingPeerName: ""
-  property bool dragOverRoster: false
-
-  function dropPeerIntoRoster(peerId) {
+  // Add a peer to the open room (the ＋ badge and the roster picker both use
+  // this; the daemon enforces friend/owner rules on its end).
+  function addPeerToRoom(peerId) {
     if (peerId !== "" && Lanchat.selectedRoomId !== "")
       Lanchat.roomAdd(Lanchat.selectedRoomId, peerId)
-    draggingPeerId = ""
-    draggingPeerName = ""
-    dragOverRoster = false
   }
 
   // The current Omarchy theme's palette for the room color picker: the
@@ -753,35 +743,9 @@ Panel {
 
       // ---- body: peer list + thread -----------------------------------
       Rectangle {
-        id: bodyRoot
         width: parent.width
         height: parent.height
         color: "transparent"
-
-        // Drag ghost: follows the cursor while a peer row is being dragged
-        // toward the roster (root-level so it paints above both columns).
-        Rectangle {
-          id: dragGhost
-          visible: root.draggingPeerId !== ""
-          width: Style.space(120)
-          height: Style.space(24)
-          radius: Style.cornerRadius
-          color: Style.selectedAccentFill
-          border.width: 1
-          border.color: Color.accent
-          opacity: 0.9
-          z: 50
-
-          Text {
-            anchors.centerIn: parent
-            width: parent.width - Style.space(8)
-            text: "+ " + root.draggingPeerName
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-          }
-        }
 
         Row {
           anchors.fill: parent
@@ -842,49 +806,6 @@ Panel {
                   MouseArea {
                     anchors.fill: parent
                     onClicked: root.selectPeer(modelData.id)
-                  }
-
-                  // Drag source: press-and-hold-drag on the row's LEFT EDGE
-                  // strip (a 14px grab zone that doesn't fight the click or
-                  // the friend badge). Dragging past ~6px arms the ghost;
-                  // release inside the roster drops the peer into the room.
-                  MouseArea {
-                    id: peerDragArea
-                    width: Style.space(14)
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    cursorShape: Qt.DragMoveCursor
-                    property bool dragArmed: false
-                    onPressed: { dragArmed = false }
-                    onPositionChanged: function(mouse) {
-                      if (!pressed) return
-                      // Arm once movement exceeds a small threshold.
-                      if (!dragArmed && Math.abs(mouse.x - width / 2) > 4) {
-                        dragArmed = true
-                        root.draggingPeerId = modelData.id
-                        root.draggingPeerName = modelData.name || ""
-                      }
-                      if (dragArmed) {
-                        var g = mapToItem(bodyRoot, mouse.x, mouse.y)
-                        dragGhost.x = g.x - dragGhost.width / 2
-                        dragGhost.y = g.y - dragGhost.height / 2
-                        // Highlight the roster when the cursor is over it.
-                        var r = mapToItem(rosterCol, mouse.x, mouse.y)
-                        root.dragOverRoster = r.x >= 0 && r.x <= rosterCol.width
-                          && r.y >= 0 && r.y <= rosterCol.height
-                      }
-                    }
-                    onReleased: {
-                      if (dragArmed) root.dropPeerIntoRoster(root.draggingPeerId)
-                      dragArmed = false
-                    }
-                    onCanceled: {
-                      dragArmed = false
-                      root.draggingPeerId = ""
-                      root.draggingPeerName = ""
-                      root.dragOverRoster = false
-                    }
                   }
 
                   Rectangle {
@@ -949,7 +870,7 @@ Panel {
                     fontSize: Style.font.caption
                     foreground: Color.accent
                     tooltipText: "Add " + (modelData.name || "peer") + " to the room"
-                    onClicked: root.dropPeerIntoRoster(modelData.id)
+                    onClicked: root.addPeerToRoom(modelData.id)
                   }
 
                   // Friend control on the peer card: an "add friend" button for
@@ -3046,30 +2967,13 @@ Panel {
                     topPadding: Style.space(4)
                   }
 
-                  // Drop hint: lights up while a peer row is dragged over the
-                  // roster (the drop target highlight).
-                  Text {
-                    id: rosterDropHint
-                    width: parent.width
-                    leftPadding: Style.spacing.sm
-                    visible: root.dragOverRoster
-                    text: "Release to add"
-                    color: Color.accent
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                    font.weight: Font.DemiBold
-                  }
-
                   ListView {
                     id: rosterList
                     width: parent.width
                     // Anchor-chain height: the list flexes between the header
-                    // stack and the bottom controls — no fragile arithmetic
-                    // (the old `parent.height - banner - 70` overflowed past
-                    // the panel edge because the banner kept its height while
-                    // hidden, pushing the Add row off-screen).
+                    // stack and the bottom controls — no fragile arithmetic.
                     height: parent.height - roomBanner.height - rosterHeader.height
-                            - rosterDropHint.height - rosterBottom.height
+                            - rosterBottom.height
                     clip: true
                     interactive: rosterList.contentHeight > rosterList.height
                     model: root.selectedRoom ? Object.keys(root.selectedRoom.members || {}) : []
@@ -3252,7 +3156,7 @@ Panel {
                         visible: parent.candidates.length === 0
                         width: parent.width
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                        text: "No friends left to add — befriend people first (or drag a peer row here)"
+                        text: "No friends left to add — befriend people first, or use the ＋ on their peer row"
                         color: Color.muted
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
@@ -3266,7 +3170,7 @@ Panel {
                           var c = parent.parent.candidates
                           var idx = addMemberSelect.currentIndex
                           if (c && idx >= 0 && idx < c.length)
-                            root.dropPeerIntoRoster(c[idx].id)
+                            root.addPeerToRoom(c[idx].id)
                         }
                       }
                     }
@@ -3275,7 +3179,7 @@ Panel {
                       visible: !root.amRoomOwner
                       width: parent.width
                       wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                      text: "Drag a peer row here to propose adding them"
+                      text: "Use the ＋ on a friend's peer row to propose adding them"
                       color: Color.muted
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
