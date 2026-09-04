@@ -513,8 +513,9 @@ def handle_room_msg(msg: dict, addr) -> None:
         owner_admit(room, from_pid, str(msg.get("fromName") or ""))
         return
     if kind == "roomAdd":
-        # A canInvite member proposes an add; the OWNER executes it
-        # (approved decision #1). Non-owner rooms ignore this.
+        # A canInvite member proposes an add; the OWNER sends the invite
+        # (the invited peer must still accept via roomJoin — consent is the
+        # recipient's, never the inviter's). Non-owner rooms ignore this.
         room = STATE.rooms.get(room_id)
         if room is None or not _is_owner(room, server.host_id()):
             return

@@ -161,14 +161,23 @@ def main():
         check("A in members", ida in amem)
         check("member canInvite defaults false", not amem.get(ida, {}).get("canInvite", True))
 
-        # owner-side direct add of B
+        # owner-side add of B = INVITE: B must accept (roomJoin) before
+        # membership; nothing is admitted without the recipient's consent.
         o.cmd(cmd="roomAdd", roomId=rid, peer=idb)
-        check("roomState reaches B after owner add",
+        inv_b = b.wait_event("room-invite", timeout=8)
+        check("owner add sends an invite (not direct admission)",
+              inv_b is not None and inv_b.get("roomId") == rid)
+        b.cmd(cmd="roomJoin", roomId=rid)
+        check("roomState reaches B after B accepts",
               wait_for(lambda: [s for s in b.events_of("room-state")
                                 if s.get("room", {}).get("roomId") == rid], 8) is not None)
-        # owner add of C
+        # owner add of C — same invite flow
         o.cmd(cmd="roomAdd", roomId=rid, peer=idc)
-        check("roomState reaches C after owner add",
+        inv_c = c.wait_event("room-invite", timeout=8)
+        check("C receives an invite (consent required)",
+              inv_c is not None and inv_c.get("roomId") == rid)
+        c.cmd(cmd="roomJoin", roomId=rid)
+        check("roomState reaches C after C accepts",
               wait_for(lambda: [s for s in c.events_of("room-state")
                                 if s.get("room", {}).get("roomId") == rid], 8) is not None)
 

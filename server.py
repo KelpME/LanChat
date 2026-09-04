@@ -222,7 +222,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (fetch + fast-forward, daemon/shell reload) rather than only checking; docs
 #   updated to match.
 
-VERSION = "1.5.48"
+VERSION = "1.5.49"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2343,14 +2343,16 @@ def handle_command(cmd: dict) -> None:
         if room is None:
             _emit({"event": "error", "message": "Room not found"})
         elif room.get("owner") == host_id():
-            # Owner-side add: requires a confirmed friend link (approved
-            # decision #1 — the authoritative channel needs it anyway).
+            # Owner-side add = INVITE, never direct admission: the recipient
+            # must accept the invitation (roomJoin) before they become a
+            # member. Requires a confirmed friend link (the authoritative
+            # channel needs it anyway).
             peer_id = str(cmd.get("peer", ""))
             if not is_trusted(peer_id):
                 _emit({"event": "error", "message": "Cannot add %s — befriend each other first" %
                        ((find_peer(peer_id) or {}).get("name") or friendly_name(peer_id))})
             else:
-                rooms.owner_admit(room, peer_id, str(cmd.get("peerName", "")))
+                rooms.owner_invite(room, peer_id)
         else:
             # A member proposing: forward to the owner (owner executes).
             member = room.get("members", {}).get(host_id())
