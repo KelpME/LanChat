@@ -1193,7 +1193,12 @@ Panel {
 
                   MouseArea {
                     anchors.fill: parent
-                    onClicked: roomsSection.expanded = !roomsSection.expanded
+                    onClicked: {
+                      roomsSection.expanded = !roomsSection.expanded
+                      // Mutually exclusive with Settings (same rule in
+                      // reverse) so only one section eats the list space.
+                      if (roomsSection.expanded) settings.expanded = false
+                    }
                   }
 
                   Text {
@@ -1361,7 +1366,13 @@ Panel {
 
                   MouseArea {
                     anchors.fill: parent
-                    onClicked: settings.expanded = !settings.expanded
+                    onClicked: {
+                      settings.expanded = !settings.expanded
+                      // Mutually exclusive with Rooms: expanding Settings
+                      // collapses the rooms list so the two never split the
+                      // peer-list space between them.
+                      if (settings.expanded) roomsSection.expanded = false
+                    }
                   }
 
                   Text {
