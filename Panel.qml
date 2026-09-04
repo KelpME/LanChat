@@ -3237,7 +3237,7 @@ Panel {
                         + 0.7152 * rlin(bubbleColor.g) + 0.0722 * rlin(bubbleColor.b)
                       readonly property color ink: lum > 0.35 ? Color.background : Color.popups.text
 
-                      visible: (modelData.text !== "") && !(modelData.attachment && modelData.attachment.name)
+                      visible: !!(modelData.text !== "") && !(modelData.attachment && modelData.attachment.name)
                       width: Math.min(roomList.width * 0.8,
                                       roomMsgText.implicitWidth + Style.space(28) + Style.space(20))
                       height: roomMsgText.implicitHeight + Style.space(18)
@@ -3268,7 +3268,13 @@ Panel {
                     // (the alert re-evaluates on friend events — Save
                     // reappears without a manual re-request).
                     Rectangle {
-                      visible: modelData.attachment && modelData.attachment.name
+                      id: fileBubbleRect
+                      // !! coerces to a real bool: `undefined && x` would fail
+                      // the bool assignment (journal: "Unable to assign
+                      // [undefined] to bool") and leave visible at its
+                      // default TRUE — rendering a phantom file bubble on
+                      // every plain room text message.
+                      visible: !!(modelData.attachment && modelData.attachment.name)
                       readonly property var att: modelData.attachment || {}
                       readonly property bool senderIsFriend:
                         Lanchat.isConfirmedFriend(modelData.from)
@@ -3405,9 +3411,11 @@ Panel {
                           }
                         }
                       }
-                      // Reference back to the bubble's readonly properties from
-                      // the delegates (fileBubbleRef = the Rectangle above).
-                      readonly property var fileBubbleRef: fileCol.parent
+                      // Reference back to the bubble's properties from the
+                      // delegates (fileBubbleRef = the Rectangle above). Direct
+                      // id reference — the old `fileCol.parent` indirection
+                      // threw "fileBubbleRef is not defined" at runtime.
+                      readonly property var fileBubbleRef: fileBubbleRect
                     }
                   }
                 }
