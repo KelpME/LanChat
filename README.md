@@ -35,6 +35,18 @@ no IP addresses, no accounts, no cloud, no shared keys to copy.
 - **Read receipts** — see when a friend has read your message (toggleable).
 - **Per-machine history** — each machine keeps its own copy of its threads in
   `~/.local/state/lanchat/history.json`, so messages survive reboots.
+- **Group chat rooms** — create rooms, invite friends, and chat with several
+  people at once. The room **owner** manages membership and per-member
+  permissions; members pick a color from their own theme's palette (or match
+  their theme accent live). Text always stays readable — the ink color is
+  derived from the bubble background, so every color choice renders readable.
+  **Group file sharing** rides the same encrypted transport as 1:1 files: a
+  room file's metadata is announced to every member, and each member who wants
+  it pulls the bytes directly from the sender (no relay server). Pulling
+  requires being friends with the sender — room membership alone can't move
+  bytes; if you're not friends yet the file shows a befriend notice and the
+  Save button appears the moment you befriend them. The owner's roster shows
+  who saved what; members offline at post time simply pull when they return.
 - **A native bar UI** — one chat icon in the bar whose color reflects your
   status, an unread-count badge (top-right), a pending-friend-request badge
   (bottom-right), and a click opens the chat panel (peer list + thread +
@@ -243,6 +255,20 @@ How you connect depends on your mode:
 8. **Unfriend** — click **Unfriend** in the thread header to remove a friend.
 9. **Help** — the **?** button in the Settings header opens the built-in help
    page (`HELP.html`). Hover any setting for a short explanation.
+10. **Group rooms** — open **Rooms** (under the peer list) and press **＋** to
+    create one; you become its **owner**. Invite members: type a friend's
+    fingerprint in the roster's **Add** field (or let a member you've granted
+    "can add" propose people — the invite still comes from you, the owner).
+    They see the invite and click **Join**. Selecting a room shows the
+    **roster** (between the divider and the chat) where you manage members and
+    everyone picks **My color** from the theme palette. Chat flows directly
+    between members; the owner is only needed to change membership.
+    **Owner offline** → the room keeps chatting but membership/permissions are
+    frozen ("Host offline — changes frozen"). **Share a file** — same
+    paperclip compose as 1:1; every member sees the file, and pulling it
+    requires being a friend of the sender (a notice offers to befriend
+    otherwise; Save appears once you are). Files exist only while the sender
+    is online — a member who missed it pulls when the sender returns.
 
 ## HTTP API (optional)
 
@@ -256,6 +282,13 @@ require this machine's token (from `lanchat.json`).
 | `GET`  | `/peers?token=…`    | token       | List online peers                             |
 | `GET`  | `/messages?token=…` | token       | This machine's message history                |
 | `POST` | `/send`             | token (body)| Send a message to a peer                      |
+
+**Rooms are NOT exposed over the HTTP API.** Room management (create, invite,
+membership, permissions, colors) and room files run only through the daemon's
+authenticated socket protocol — the trusted-peer channel — so a leaked API
+token can't alter room membership or pull room files. Room state changes
+surface as events on the same JSON stream the UI consumes (`room-list`,
+`room-state`, `room-invite`, `room-file-status`).
 
 **API access mode** — the **Agent full access** toggle in Settings controls
 whether the API can *read* chat data:
@@ -384,6 +417,8 @@ python3 test_discovery_visibility.py  # broadcast side of the private/open visib
 python3 test_systemd_control.py      # systemd unix-socket control channel + bridge
 python3 test_cert_reload.py          # served cert tracks a regenerated cert (no stale fingerprint)
 python3 test_udp_resilience.py       # UDP listener survives bad packets (no silent thread death)
+python3 test_units.py                # unit-level: naming, filenames, safe sanitize
+python3 test_groups.py               # rooms: host-authoritative state, mesh chat, room files, trust gate
 ```
 
 > The plugin reloads QML but not always compiled types — after editing QML,

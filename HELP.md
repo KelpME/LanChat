@@ -89,8 +89,11 @@ online/offline, or pick a status.
 ## The chat panel
 
 - **Left column** — your peers (each with a status dot; friends stay visible
-  even when offline, shown grayed out), the peer count, and Settings.
+  even when offline, shown grayed out), the peer count, the **Rooms** list,
+  and Settings.
 - **Right column** — the selected peer's conversation and the compose box.
+  With a **room** open, a **roster** column sits between the divider and the
+  chat showing every member.
 - **Update indicator** — when a chat is open, a refresh-glyph button sits in the
   thread header's left corner. It turns the accent color when a newer version is
   available on the remote (checked read-only against the installed git checkout).
@@ -114,6 +117,38 @@ online/offline, or pick a status.
 - **Lazy-load** — long conversations load older messages as you scroll, so the
   panel stays fluid.
 
+## Rooms (group chat)
+
+- **Create** — expand **Rooms** under the peer list and press **＋**. You become
+  the room's **owner**: your machine holds the member list, permissions, and
+  colors.
+- **Invite** — with your room open, type a friend's fingerprint in the roster's
+  **Add** field. They see the invite under Rooms and click **Join**. Members
+  you've granted **can add** may propose people; the invite still comes from
+  you (the owner), and both sides must already be friends of you — the room
+  rides the same trusted links as chat.
+- **Roster** — selecting a room shows every member between the divider and the
+  chat. As owner you can **✕ remove** a member and flip their **can add**
+  permission per person. Everyone sees the owner marked with a ★.
+- **Member colors** — pick **My color** from the theme palette swatches (every
+  color is offered — nothing is filtered), or **Match my theme accent** to
+  follow your machine's theme live. The choice is stored as a palette token
+  plus its color, so everyone sees the same color; text ink adapts to the
+  bubble automatically so every choice stays readable.
+- **Owner colors kill-switch** — in Settings ("Rooms: members pick their
+  colors", visible when you own a room): turning it off renders the room with
+  the standard theme colors instead of member colors.
+- **Chat & files are direct** — messages and file bytes flow straight between
+  members over their own encrypted links; the owner is never a relay. If the
+  owner is offline the room keeps chatting, but membership changes freeze
+  ("Host offline — changes frozen") until they return.
+- **Room files** — attach via the paperclip exactly like 1:1 chat. Every member
+  sees the file's card. Pulling the bytes requires being **friends with the
+  sender**: if you aren't yet, the card shows a befriend notice, and the Save
+  button appears as soon as you befriend them (no re-request needed). The
+  sender sees who saved the file; someone offline at send time pulls it when
+  they're back (the file exists only while the sender is online).
+
 ## Settings
 
 - **Name** — your display name, with a re-roll button for a fresh friendly
@@ -132,6 +167,9 @@ online/offline, or pick a status.
 - **Undo delay** — hold messages for N seconds so you can undo them before they
   send.
 - **Save to** — the folder accepted files go to (default `~/Downloads`).
+- **Rooms: members pick their colors** — owner-level room setting (shown when
+  you own at least one room). Off = rooms you own render with the standard
+  theme colors instead of member-picked colors.
 - **Panel size** — choose **S**, **M**, **L**, **XL**, or **F** (full-screen)
   for the panel window size. S/M/L/XL scale as independent fractions of each
   screen axis — width vs height grow separately. Width goes 1/2 → 2/3 → 4/5 →
