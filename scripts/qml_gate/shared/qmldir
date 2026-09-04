@@ -5,3 +5,5 @@ OldChatMessage 1.0 OldChatMessage.qml
 ComposeBox 1.0 ComposeBox.qml
 PeerList 1.0 PeerList.qml
 RoomListSection 1.0 RoomListSection.qml
+ChatThread 1.0 ChatThread.qml
+RoomView 1.0 RoomView.qml
