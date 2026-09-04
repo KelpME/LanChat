@@ -44,10 +44,6 @@ Panel {
   // The room snapshot currently on screen (null when no room selected).
   readonly property var selectedRoom: Lanchat.roomStates[Lanchat.selectedRoomId] || null
 
-  // Am I the owner of the open room? (Owner-only controls in the roster.)
-  readonly property bool amRoomOwner: !!root.selectedRoom
-    && Lanchat.myId !== "" && root.selectedRoom.owner === Lanchat.myId
-
   // Am I the owner of the room with this id? (Owner controls render on that
   // room's member lines in the rooms list regardless of what's open.)
   function amRoomOwnerOf(roomId) {
@@ -288,10 +284,6 @@ Panel {
     if (t !== "") Lanchat.setMyName(t)
   }
 
-  function deleteMsg(mid) {
-    Lanchat.deleteMessage(mid)
-  }
-
   // Begin editing a message: load its text into the compose box and flag the
   // next send as an edit of that mid.
   // Compose-input access: the TextField (id: input) moved into
@@ -513,11 +505,6 @@ Panel {
     Quickshell.execDetached(["xdg-open", root.helpPath()])
   }
 
-  // Open the daemon diagnostic log (surfaces why peers vanish / messages drop).
-  function openLog() {
-    Quickshell.execDetached(["xdg-open", Lanchat.logPath()])
-  }
-
   // Shorten a filesystem path for display: always keep at least the folder
   // and its immediate parent visible (e.g. /home/tmo/Downloads stays, a deeper
   // /data/a/b/c/downloads becomes …/b/c/downloads). The leading part is
@@ -597,11 +584,6 @@ Panel {
     onExited: function(exitCode) {
       root.open()
     }
-  }
-
-  // Register an attachment and send it to the selected peer.
-  function sendFile(path) {
-    root.stagePaths(path)
   }
 
   // Create-room inline mini-dialog state (rendered inside the KeyboardPanel
