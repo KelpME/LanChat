@@ -48,6 +48,10 @@ Rectangle {
   // Input accessors — the panel reads/clears the text and focuses the field
   // without reaching into the child's internal ids.
   readonly property alias inputText: input.text
+  // Write access goes through this function: the panel cannot assign the
+  // readonly alias from outside (TypeError), and setInputText() lives here
+  // so the clear-on-send path works (whole-panel bench caught this).
+  function setInputText(t) { input.text = t }
   function focusInput() { input.forceActiveFocus() }
 
   width: parent.width

@@ -292,7 +292,7 @@ Panel {
   // the inline code had).
   readonly property string inputText: composeBox ? composeBox.inputText : ""
   function setInputText(t) {
-    composeBox.inputText = t
+    composeBox.setInputText(t)
   }
   function focusInput() {
     composeBox.focusInput()
