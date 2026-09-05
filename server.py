@@ -221,6 +221,9 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #  1.5.20 — docs: the thread-header update button now applies the update on click
 #   (fetch + fast-forward, daemon/shell reload) rather than only checking; docs
 #   updated to match.
+#  1.5.51 — update button: explicitly restart the lanchat.service daemon after a
+#   successful apply (the lanchat.path watcher misses updates that don't touch
+#   server.py), so the reported version is never stale.
 
 VERSION = "1.5.50"
 def _git_version() -> str:
