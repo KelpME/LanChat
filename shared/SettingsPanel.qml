@@ -63,7 +63,7 @@ Item {
 
   // --- action signals (root keeps the implementations) ---------------------
   signal openHelpRequested()
-  signal commitNameRequested()
+  signal commitNameRequested(string text)
   signal copyToClipboardRequested(string text)
   signal addFriendRequested()
   signal applyPanelSizeRequested(string size)
@@ -246,12 +246,12 @@ Item {
                     // only fires on genuine focus loss, which clicking
                     // non-focusable panel areas doesn't always trigger.
                     onTextChanged: nameSaveTimer.restart()
-                    onAccepted: settingsPanel.commitNameRequested()
-                    onEditingFinished: settingsPanel.commitNameRequested()
+                    onAccepted: settingsPanel.commitNameRequested(text)
+                    onEditingFinished: settingsPanel.commitNameRequested(text)
                     Timer {
                       id: nameSaveTimer
                       interval: 600
-                      onTriggered: settingsPanel.commitNameRequested()
+                      onTriggered: settingsPanel.commitNameRequested(nameInput.text)
                     }
                   }
 

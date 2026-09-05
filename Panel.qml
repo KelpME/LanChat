@@ -279,9 +279,9 @@ Panel {
   // Commit the display-name field if it holds a non-empty value. Guarded so a
   // transient empty state (field cleared mid-edit) doesn't wipe the name; only
   // a real value is saved.
-  function commitName() {
-    var t = nameInput.text.trim()
-    if (t !== "") Lanchat.setMyName(t)
+  function commitName(t) {
+    var name = String(t || "").trim()
+    if (name !== "") Lanchat.setMyName(name)
   }
 
   // Begin editing a message: load its text into the compose box and flag the
@@ -802,7 +802,7 @@ Panel {
 
                 onCollapseRoomsRequested: roomListSection.collapseSection()
                 onOpenHelpRequested: root.openHelp()
-                onCommitNameRequested: root.commitName()
+                onCommitNameRequested: function(text) { root.commitName(text) }
                 onCopyToClipboardRequested: function(text) { root.copyToClipboard(text) }
                 onAddFriendRequested: root.addFriendByFingerprint()
                 onApplyPanelSizeRequested: function(size) { root.applyPanelSize(size) }

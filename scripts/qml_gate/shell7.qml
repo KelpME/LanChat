@@ -95,7 +95,7 @@ Item {
       // (c) every signal fires with correct args
       var s = settings
       s.openHelpRequested()
-      s.commitNameRequested()
+      s.commitNameRequested("TestUser")
       s.copyToClipboardRequested("hello")
       s.addFriendRequested()
       s.applyPanelSizeRequested("small")
