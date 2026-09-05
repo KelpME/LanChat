@@ -205,9 +205,12 @@ QtObject {
   // edits and resets to the remote commit (a clean install of the latest).
   // Uses `git fetch origin main` (the real branch ref) + `git reset --hard
   // origin/main` — the reliable path; `omarchy plugin update`'s HEAD-fetch is
-  // known to leave origin/main stale. Runs in a background Process. The daemon
-  // auto-restarts via the lanchat.path watcher (server.py change); QML reloads
-  // on the shell restart that restartShell() schedules after APPLIED.
+  // known to leave origin/main stale. Runs in a background Process. After a
+  // successful apply the command explicitly restarts the lanchat.service
+  // daemon (`systemctl --user restart`, failure-tolerant) so it never keeps
+  // running stale code — the lanchat.path watcher remains as a fallback, but
+  // it only fires on server.py/scripts changes. QML reloads on the shell
+  // restart that restartShell() schedules after APPLIED.
   function applyUpdate(force) {
     var dir = lanchat.pluginDir()
     if (!dir) { lanchat.updateError = "unknown plugin directory"; return }
@@ -219,7 +222,13 @@ QtObject {
     var safe = force ? "" :
       "test -z \"$(git status --porcelain)\" || { echo DIRTY; exit 0; }; "
     var cmd = "cd " + dir + " && git fetch origin main 2>/dev/null && { " + safe +
-      "git reset --hard origin/main 2>/dev/null && echo APPLIED || echo ERROR; } || echo ERROR"
+      "git reset --hard origin/main 2>/dev/null || { echo ERROR; exit 0; }; " +
+      // Explicit daemon restart (the lanchat.path watcher only watches
+      // server.py, non-recursively — an update touching only QML/py modules
+      // would otherwise leave the daemon stale). `|| true` so a restart
+      // failure cannot suppress the APPLIED echo.
+      "systemctl --user restart lanchat.service || true; " +
+      "echo APPLIED; } || echo ERROR"
     applyProc.command = ["bash", "-c", cmd]
     applyProc.running = true
   }
@@ -1292,7 +1301,9 @@ QtObject {
   }
 
   // Background process for applying an update (see applyUpdate). Parses the
-  // single-token stdout: APPLIED (success -> restart shell), DIRTY (local
+  // single-token stdout: APPLIED (success -> the command has already
+  // explicitly restarted the lanchat.service daemon; here we restart the
+  // shell), DIRTY (local
   // edits blocked the safe update -> offer a clean install), ERROR.
   property Process applyProc: Process {
     id: applyProc
