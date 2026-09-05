@@ -1,0 +1,67 @@
+=== /tmp/qsgate/benchshell/shell3.qml ===
+      1  DEBUG qml: BENCH-OK-TYPING start=1 stop=1
+      1  DEBUG qml: BENCH-OK-STAGED-HEIGHT 211
+      1  DEBUG qml: BENCH-OK-SIGNALS attach=2 send=1 cancel=1 remove=1
+      1  DEBUG qml: BENCH-OK-INPUT-ACCESS
+      1  DEBUG qml: BENCH-OK-EMPTY-HEIGHT 77
+=== /tmp/qsgate/benchshell/shell4.qml ===
+      2   WARN scene: @shared/PeerList.qml[140:-1]: TypeError: Type error
+      1   WARN scene: @shared/PeerList.qml[386:15]: Unable to assign [undefined] to QColor
+      1  DEBUG qml: BENCH-OK-ROWS 2
+      1  DEBUG qml: BENCH-OK-PEER-SELECTED peer-1
+      1  DEBUG qml: BENCH-OK-NOTIF-EXPANDED 120
+      1  DEBUG qml: BENCH-OK-NOTIF-COLLAPSED 32
+      1  DEBUG qml: BENCH-OK-FW-INPUT
+      1  DEBUG qml: BENCH-OK-FRIEND-SIGNALS accept=1 reject=1 cancel=1
+      1  DEBUG qml: BENCH-OK-CHAT-CLOSED
+=== /tmp/qsgate/benchshell/shell5.qml ===
+      1  DEBUG qml: BENCH-OK-ROOM-SELECTED room-1
+      1  DEBUG qml: BENCH-OK-ROOM-ROWS leave+canadd present
+      1  DEBUG qml: BENCH-OK-LEAVE-SIGNAL
+      1  DEBUG qml: BENCH-OK-CREATE-SIGNAL
+      1  DEBUG qml: BENCH-OK-CREATE-BTN (rooms header visible: section height 35)
+      1  DEBUG qml: BENCH-OK-COLLAPSE 35
+=== /tmp/qsgate/benchshell/shell6.qml ===
+      1   WARN scene: @shared/RoomMessage.qml[92:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      1   WARN scene: @shared/RoomMessage.qml[91:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      1   WARN scene: @shared/RoomMessage.qml[90:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      1   WARN scene: @shared/RoomMessage.qml[85:-1]: TypeError: Cannot read property 'text' of undefined
+      1   WARN scene: @shared/RoomMessage.qml[63:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      1   WARN scene: @shared/RoomMessage.qml[39:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      1   WARN scene: @shared/RoomMessage.qml[38:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      1   WARN scene: @shared/RoomMessage.qml[37:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      1   WARN scene: @shared/RoomMessage.qml[250:-1]: TypeError: Cannot read property 'fromName' of undefined
+      1   WARN scene: @shared/RoomMessage.qml[249:-1]: ReferenceError: fileBubbleRef is not defined
+      1   WARN scene: @shared/RoomMessage.qml[241:-1]: ReferenceError: fileBubbleRef is not defined
+      1   WARN scene: @shared/RoomMessage.qml[240:-1]: ReferenceError: fileBubbleRef is not defined
+=== /tmp/qsgate/benchshell/shell7.qml ===
+      1  DEBUG qml: BENCH-PASS
+      1  DEBUG qml: BENCH-OK expanded height grows: 675
+      1  DEBUG qml: BENCH-OK confirm timers auto-disarm
+      1  DEBUG qml: BENCH-OK confirm flags armed
+      1  DEBUG qml: BENCH-OK collapse restores collapsed height
+      1  DEBUG qml: BENCH-OK collapsed height == settingsHeader height (35)
+      1  DEBUG qml: BENCH-OK all 9 signals fired with correct args
+=== /tmp/qsgate/benchshell/shell.qml ===
+      4   WARN scene: @shared/ChatMessage.qml[96:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[85:-1]: TypeError: Cannot read property 'attachment' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[65:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[63:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[62:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[61:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[51:-1]: TypeError: Cannot read property 'friendRequest' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[35:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[34:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[33:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      1  DEBUG qml: BENCH-OK delegates=4 edits=1 copies=1
+=== /tmp/qsgate/benchshell/panelbench.qml ===
+      1  DEBUG qml: BENCH-PANEL-SKIP swatch MouseArea not found (settings body may be collapsed)
+      1  DEBUG qml: BENCH-PANEL-PASS
+      1  DEBUG qml: BENCH-PANEL-OK settings expand/collapse cycle completed (collapsed height restored: 35)
+      1  DEBUG qml: BENCH-PANEL-OK send() text path completed (stub send side-effect logged above)
+      1  DEBUG qml: BENCH-PANEL-OK send() empty-input guard no-op completed
+      1  DEBUG qml: BENCH-PANEL-OK selectPeer(test-peer-1) selectedPeerId=test-peer-1
+      1  DEBUG qml: BENCH-PANEL-OK roomListSection.sectionHeight=35
+      1  DEBUG qml: BENCH-PANEL-OK PeerList sized 280x864
+      1  DEBUG qml: BENCH-PANEL-OK parent chain sized, depth=8 (host layer not checked: (no parent))
+      1  DEBUG qml: BENCH-PANEL-INFO settings expand (bench-env limited): 35 -> 35 (expanded=true hostHeight=864 contentHeight=0)

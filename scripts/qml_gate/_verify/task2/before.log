@@ -1,0 +1,15 @@
+  INFO: Launching config: "/tmp/task2prevbench/shell.qml"
+  INFO: Shell ID: "714f45db7f679731f8029da0e04603c6" Path ID "714f45db7f679731f8029da0e04603c6"
+  INFO: Saving logs to "/run/user/1000/quickshell/by-id/znzq1igcvkt/log.qslog"
+  WARN: <Unknown File>: QML ProxyFloatingWindow: Setting `width` is deprecated. Set `implicitWidth` instead.
+  WARN: <Unknown File>: QML ProxyFloatingWindow: Setting `height` is deprecated. Set `implicitHeight` instead.
+ DEBUG qml: Lanchat.version=0.0.0-bench rooms=1
+  INFO: Configuration Loaded
+ DEBUG qml: after expand: settings.height=675
+ DEBUG qml: settings.children=1
+ DEBUG qml:   REP swatch repeater at depth 7 count=2
+ DEBUG qml: BENCH-OK swatch delegate found, token=accent hex=#ff0000
+  WARN scene: @shared/SettingsPanel.qml[605:-1]: TypeError: Cannot read property 'token' of undefined
+ DEBUG qml: BENCH-OK swatch click dispatched; expect stub setRoomColor line above
+ DEBUG qml: BENCH-PASS
+  WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.portal.Error.Failed", "Could not register app ID: Connection already associated with an application ID")

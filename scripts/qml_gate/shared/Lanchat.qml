@@ -89,4 +89,35 @@ QtObject {
   function firewallClose() { console.log("stub firewallClose") }
   function clearAllChats() { console.log("stub clearAllChats") }
   function setRoomColor(roomId, token, hex) { console.log("stub setRoomColor", roomId, token, hex) }
+  // ---- whole-panel bench surface (panelbench; mirrors real singleton) ----
+  property var typing: ({})
+  property var pendingSends: []
+  property bool dlActive: false
+  property real dlBytes: 0
+  property string dlFileId: ""
+  property real dlTotal: 0
+  property int onlineCount: 1
+  property string panelSize: "medium"
+  property bool panelOpen: false
+  property bool chatAlertIsError: false
+  property var roomFileStatuses: ({})
+  property bool updateChecking: false
+  property bool updateApplying: false
+  property string updateApplyState: ""
+  function resetHistoryMeta(id) { console.log("stub resetHistoryMeta", id) }
+  function refreshHistory(id, a, b) { console.log("stub refreshHistory", id, a, b) }
+  function clearUnread(id) { console.log("stub clearUnread", id) }
+  function createRoom(name, members) { console.log("stub createRoom", name) }
+  function addFriendByFingerprint(fp) { console.log("stub addFriendByFingerprint", fp) }
+  function cancelFriendRequest(id) { console.log("stub cancelFriendRequest", id) }
+  function acceptAttachment(mid) { console.log("stub acceptAttachment", mid) }
+  function acceptRoomAttachment(roomId, mid) { console.log("stub acceptRoomAttachment", roomId, mid) }
+  function refreshFirewall() { console.log("stub refreshFirewall") }
+  function checkForUpdate() { console.log("stub checkForUpdate") }
+  function applyUpdate() { console.log("stub applyUpdate") }
+  function setMyName(n) { console.log("stub setMyName", n) }
+  function setPanelSize(s) { console.log("stub setPanelSize", s); panelSize = s }
+  function setPeerColW(w) { console.log("stub setPeerColW", w); peerColW = w }
+  function setCustomSize(w, h) { console.log("stub setCustomSize", w, h); customW = w; customH = h }
+  function setDownloadDir(d) { console.log("stub setDownloadDir", d) }
 }
