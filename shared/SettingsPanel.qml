@@ -292,7 +292,7 @@ Item {
                     text: (Lanchat.myId || "…").slice(0, 20) + "…"
                     color: Color.accent
                     font.family: Style.font.mono || Style.font.family
-                    font.pixelSize: Style.font.micro
+                    font.pixelSize: Style.font.caption
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                   }
