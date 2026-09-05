@@ -48,7 +48,63 @@ def wait_message(d, with_attachment=False, timeout=8.0):
     return None
 
 
+def _hist_stub_state():
+    """A minimal STATE stub for history-module unit tests (no daemon)."""
+    import history as history_mod
+
+    class _State:
+        pass
+
+    st = _State()
+    st.hist_lock = threading.Lock()
+    st.hist_crypto = None
+    st.history = []
+    return history_mod, st
+
+
+def test_mark_attachment_saved():
+    """mark_attachment_saved: in-place flag + persistence, and False for
+    unknown / empty mid / attachment-less messages."""
+    import tempfile
+
+    history_mod, st = _hist_stub_state()
+    tmp = tempfile.mkdtemp(prefix="lanchat-hist-test-")
+    try:
+        # Redirect the state files away from the real ~/.local/state/lanchat.
+        history_mod.STATE_DIR = tmp
+        history_mod.HISTORY_PATH = os.path.join(tmp, "history.json")
+        history_mod.HISTORY_KEY = os.path.join(tmp, "history.key")
+        history_mod.init(st)
+
+        st.history = [
+            {"mid": "m1", "from": "p", "to": "me",
+             "attachment": {"fileId": "f1", "name": "a.txt"}},
+            {"mid": "m2", "from": "p", "to": "me",
+             "attachment": {"fileId": "f2", "name": "b.txt"}},
+            {"mid": "m3", "from": "p", "to": "me"},  # no attachment
+        ]
+        m1 = st.history[0]
+
+        # happy path: flag set IN PLACE on the shared dict, history re-persisted
+        assert history_mod.mark_attachment_saved("m1") is True
+        assert m1["attachment"]["accepted"] is True, "flag must be set in place"
+        assert st.history[1]["attachment"].get("accepted") is None
+        assert os.path.exists(history_mod.HISTORY_PATH), "history must re-persist"
+
+        # negative paths: no match, no mid, no attachment
+        assert history_mod.mark_attachment_saved("nope") is False
+        assert history_mod.mark_attachment_saved("") is False
+        assert history_mod.mark_attachment_saved("m3") is False
+
+        # idempotent: second call still True
+        assert history_mod.mark_attachment_saved("m1") is True
+        print("OK  mark_attachment_saved: in-place flag + persist + negatives")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
+    test_mark_attachment_saved()
     ha = make_home("a", 4991, "Alpha"); hb = make_home("b", 4992, "Beta")
     a = Daemon(ha, 4991, "Alpha"); b = Daemon(hb, 4992, "Beta")
     try:

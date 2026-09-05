@@ -1,0 +1,10 @@
+OK  mark_attachment_saved: in-place flag + persist + negatives
+OK  happy path: 1 progress events, file saved with exact bytes, mid echoed
+OK  hostile ../ name sanitized -> saved inside downloadDir
+OK  sha256 mismatch rejected (no file, no .part)
+OK  socket path: untrusted requester gated; unknown fileId -> attachmentError
+OK  size check: incomplete transfer (bytes missing) rejected, no file
+OK  offline sender fail-fast: attachment-saved ok:false, no hang, no .part
+OK  _safe_filename sanitizes 7 hostile names
+
+ALL ATTACHMENT TESTS PASSED

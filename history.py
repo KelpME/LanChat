@@ -231,8 +231,28 @@ def delete_message(mid: str) -> bool:
     return removed
 
 
+def mark_attachment_saved(mid: str) -> bool:
+    """Mark an attachment message as accepted in persisted history.
+
+    Sets message["attachment"]["accepted"] = True (in place — the dict is
+    shared with STATE.history) for the message with this mid, then re-persists.
+    Called by attachments._finalize_download on the ok/saved path so the UI's
+    pending accept bar stays cleared across history reloads. Failed saves do
+    NOT call this (the bar stays up for a retry). Returns True if a matching
+    message with an attachment was found and updated.
+    """
+    if not mid:
+        return False
+    with STATE.hist_lock:
+        for m in STATE.history:
+            if m.get("mid") == mid and isinstance(m.get("attachment"), dict):
+                m["attachment"]["accepted"] = True
+                _save_history_locked()
+                return True
+    return False
+
+
 def edit_message(mid: str, new_text: str) -> bool:
-    """Replace a message's text (by mid). Returns True if found and edited."""
     new_text = new_text.strip()
     if not new_text:
         return False
