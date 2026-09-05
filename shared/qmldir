@@ -3,4 +3,8 @@ singleton Lanchat 1.0 Lanchat.qml
 ChatMessage 1.0 ChatMessage.qml
 RoomMessage 1.0 RoomMessage.qml
 PeerList 1.0 PeerList.qml
+RoomListSection 1.0 RoomListSection.qml
 SettingsPanel 1.0 SettingsPanel.qml
+ChatThread 1.0 ChatThread.qml
+RoomView 1.0 RoomView.qml
+ComposeBox 1.0 ComposeBox.qml
