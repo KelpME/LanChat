@@ -36,13 +36,14 @@ Item {
       onCountChanged: Qt.callLater(function() { positionViewAtEnd() })
 
       delegate: Column {
+        id: roomMsgDelegate
         required property var modelData
         width: roomList.width
         spacing: Style.spacing.xs
 
         RoomMessage {
           id: roomMsg
-          modelData: modelData
+          modelData: roomMsgDelegate.modelData
           maxWidth: roomList.width * 0.8
           selectedRoom: roomView.selectedRoom
           timeLabel: roomView.timeLabel

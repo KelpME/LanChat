@@ -53,13 +53,14 @@ ListView {
     }
 
     delegate: Column {
+      id: msgDelegate
       required property var modelData
       width: chatThread.width
       spacing: Style.spacing.xs
 
       ChatMessage {
         id: chatMsg
-        modelData: modelData
+        modelData: msgDelegate.modelData
         maxWidth: chatThread.width * 0.8
         editingMid: chatThread.editingMid
         timeLabel: chatThread.timeLabel

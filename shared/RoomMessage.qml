@@ -208,7 +208,7 @@ Column {
             id: statusChip
             required property var modelData
             readonly property var st:
-              (fileBubbleRef.statusMap || {})[modelData] || null
+              (fileBubbleRect.statusMap || {})[modelData] || null
             width: roomStatusText.implicitWidth + Style.space(10)
             height: Style.space(16)
             radius: height / 2
@@ -236,17 +236,17 @@ Column {
         spacing: Style.space(6)
 
         Button {
-          visible: fileBubbleRef.senderIsFriend
-          text: fileBubbleRef.fileDownloading ? "Saving…" : "Save"
-          enabled: !fileBubbleRef.fileDownloading
+          visible: fileBubbleRect.senderIsFriend
+          text: fileBubbleRect.fileDownloading ? "Saving…" : "Save"
+          enabled: !fileBubbleRect.fileDownloading
           fontSize: Style.font.caption
           onClicked: Lanchat.acceptRoomAttachment(modelData.from,
-            fileBubbleRef.att.fileId, fileBubbleRef.att.name,
-            modelData.mid, fileBubbleRef.att.sha256 || "",
+            fileBubbleRect.att.fileId, fileBubbleRect.att.name,
+            modelData.mid, fileBubbleRect.att.sha256 || "",
             Lanchat.selectedRoomId)
         }
         Text {
-          visible: !fileBubbleRef.senderIsFriend
+          visible: !fileBubbleRect.senderIsFriend
           text: "⚠ Befriend " + (modelData.fromName || "the sender")
                 + " to accept this file"
           color: Color.urgent
@@ -256,10 +256,8 @@ Column {
         }
       }
     }
-    // Reference back to the bubble's properties from the
-    // delegates (fileBubbleRef = the Rectangle above). Direct
-    // id reference — the old `fileCol.parent` indirection
-    // threw "fileBubbleRef is not defined" at runtime.
-    readonly property var fileBubbleRef: fileBubbleRect
+    // The fileBubbleRect id is referenced from the nested delegates
+    // above; the old bare `fileBubbleRef` name was a property, not an
+    // id, so it was out of scope inside those delegates.
   }
 }

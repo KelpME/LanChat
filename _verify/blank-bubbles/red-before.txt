@@ -1,0 +1,19 @@
+[32m  INFO[0m: Launching config: "/tmp/qsgate/bubblebench-fix/bubblebench.qml"
+[32m  INFO[0m: Shell ID: "da2a454be80987a07f752c944734ed92" Path ID "da2a454be80987a07f752c944734ed92"
+[32m  INFO[0m: Saving logs to "/run/user/1000/quickshell/by-id/raqr11cswkt/log.qslog"
+[33m  WARN[0m: <Unknown File>: QML ProxyFloatingWindow: Setting `width` is deprecated. Set `implicitWidth` instead.
+[33m  WARN[0m: <Unknown File>: QML ProxyFloatingWindow: Setting `height` is deprecated. Set `implicitHeight` instead.
+[32m  INFO[0m: Configuration Loaded
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[35:-1]: TypeError: Cannot read property 'outgoing' of undefined
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[34:-1]: TypeError: Cannot read property 'outgoing' of undefined
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[33:-1]: TypeError: Cannot read property 'outgoing' of undefined
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[65:-1]: TypeError: Cannot read property 'outgoing' of undefined
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[51:-1]: TypeError: Cannot read property 'friendRequest' of undefined
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[85:-1]: TypeError: Cannot read property 'attachment' of undefined
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[96:-1]: TypeError: Cannot read property 'outgoing' of undefined
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[63:-1]: TypeError: Cannot read property 'outgoing' of undefined
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[62:-1]: TypeError: Cannot read property 'outgoing' of undefined
+[33m  WARN[97m scene[0m: @shared/ChatMessage.qml[61:-1]: TypeError: Cannot read property 'outgoing' of undefined
+[33m  WARN[97m qt.qpa.services[0m: Failed to register with host portal QDBusError("org.freedesktop.portal.Error.Failed", "Could not register app ID: Connection already associated with an application ID")
+[34m DEBUG[97m qml[0m: BENCH-BUBBLE delegate modelData = undefined
+[34m DEBUG[97m qml[0m: BENCH-BUBBLE-FAIL delegate's modelData did NOT resolve (mid=undefined)
