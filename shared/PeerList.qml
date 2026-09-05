@@ -153,20 +153,28 @@ Item {
 
       // Friend control on the peer card: an "add friend" button for
       // strangers, or a friend/pending badge once a request is in.
+      // The badge width is derived from its label's measured width
+      // (plus symmetric padding) so "✓ Friend" is never clipped;
+      // pending keeps a compact round-ish footprint, strangers keep
+      // the fixed "＋" button size.
       Item {
         id: friendBadge
+        // Horizontal padding between the label text edge and the
+        // badge edge on each side.
+        readonly property real labelPad: 8
+        readonly property string fstate: friendStateFn(modelData.id)
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
         anchors.rightMargin: Style.spacing.sm
-        width: friendStateFn(modelData.id) === "" ? Style.space(24)
-             : friendStateFn(modelData.id) === "friend" ? Style.space(30)
+        width: fstate === "friend" ? friendLabel.implicitWidth + 2 * labelPad
+             : fstate === "" ? Style.space(24)
              : Style.space(14)
         height: Style.space(18)
 
         // Stranger -> "+" button to send a friend request.
         Button {
           anchors.fill: parent
-          visible: friendStateFn(modelData.id) === ""
+          visible: friendBadge.fstate === ""
           text: "\uFF0B"   // ＋
           fontSize: Style.font.caption
           tooltipText: "Send friend request to " + modelData.name
@@ -175,10 +183,11 @@ Item {
 
         // Pending / friend -> state badge.
         Text {
+          id: friendLabel
           anchors.centerIn: parent
-          visible: friendStateFn(modelData.id) !== ""
-          text: friendStateFn(modelData.id) === "friend" ? "\u2713 Friend" : "\u2026"
-          color: friendStateFn(modelData.id) === "friend" ? Color.accent : Color.muted
+          visible: friendBadge.fstate !== ""
+          text: friendBadge.fstate === "friend" ? "\u2713 Friend" : "\u2026"
+          color: friendBadge.fstate === "friend" ? Color.accent : Color.muted
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
           font.weight: Font.DemiBold
