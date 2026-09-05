@@ -1,0 +1,3 @@
+OK  e2e: accepted flag persisted to history.json and survived reload
+OK  e2e: history file on disk, first bytes: b'TEFO' (encrypted blob)
+E2E PASSED

@@ -199,6 +199,10 @@ def _finalize_download(res, mid: str, file_id: str, error: str = "") -> None:
         server._log("attachment-saved file=%s" % os.path.basename(save_to))
         server._emit({"event": "attachment-saved", "ok": True, "path": save_to,
                "mid": mid, "fileId": file_id})
+        # Persist the accepted flag so the UI's pending-accept bar stays gone
+        # after a history reload (deferred import — server.py runs as
+        # __main__ and aliases sys.modules["server"] to itself).
+        server.history.mark_attachment_saved(mid)
         # Room file: report the delivery back to the SENDER (mesh) so their UI
         # shows ✓ saved for this member. Daemon-driven per-member status, never
         # client-guessed. Only fires for a room-file pull (room id recorded on
