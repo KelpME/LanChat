@@ -1,0 +1,15 @@
+  INFO: Launching config: "/tmp/task2bench/shell.qml"
+  INFO: Shell ID: "f9cf2de58cb3c9761fe356629b49d6c0" Path ID "f9cf2de58cb3c9761fe356629b49d6c0"
+  INFO: Saving logs to "/run/user/1000/quickshell/by-id/wp2r19icvkt/log.qslog"
+  WARN: <Unknown File>: QML ProxyFloatingWindow: Setting `width` is deprecated. Set `implicitWidth` instead.
+  WARN: <Unknown File>: QML ProxyFloatingWindow: Setting `height` is deprecated. Set `implicitHeight` instead.
+ DEBUG qml: Lanchat.version=0.0.0-bench rooms=1
+  INFO: Configuration Loaded
+ DEBUG qml: after expand: settings.height=675
+ DEBUG qml: settings.children=1
+ DEBUG qml:   REP swatch repeater at depth 7 count=2
+ DEBUG qml: BENCH-OK swatch delegate found, token=accent hex=#ff0000
+ DEBUG qml: stub setRoomColor r1 accent #ff0000
+ DEBUG qml: BENCH-OK swatch click dispatched; expect stub setRoomColor line above
+ DEBUG qml: BENCH-PASS
+  WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.portal.Error.Failed", "Could not register app ID: Connection already associated with an application ID")

@@ -30,10 +30,14 @@ cp "$REPO"/shared/ChatThread.qml "$REPO"/shared/RoomView.qml "$BENCH"/shared/ 2>
 cp "$REPO"/scripts/qml_gate/shared/Lanchat.qml "$BENCH"/shared/
 cp "$REPO"/shared/Lanchat.qml "$BENCH"/shared/Lanchat.real.qml 2>/dev/null || true
 cp "$REPO"/shared/SettingsPanel.qml "$BENCH"/shared/
+# Whole-panel bench: runs the REAL Panel.qml, copied next to the shell so
+# panelbench's Qt.createComponent("Panel.qml") resolves inside the bench dir.
+cp "$REPO"/scripts/qml_gate/panelbench.qml "$BENCH"/
+cp "$REPO"/Panel.qml "$BENCH"/
 
-for sh in "$BENCH"/shell*.qml; do
+for sh in "$BENCH"/shell*.qml "$BENCH"/panelbench.qml; do
   echo "=== $sh ==="
   WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}" \
     timeout 30 quickshell -p "$sh" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | \
-    grep -E "BENCH|TypeError|ReferenceError|Unable to assign|is not defined|ERROR" | sort | uniq -c | sort -rn | head -12
+    { grep -E "BENCH|TypeError|ReferenceError|Unable to assign|is not defined|ERROR" | sort | uniq -c | sort -rn | head -12 || true; }
 done
