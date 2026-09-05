@@ -180,7 +180,7 @@ Panel {
     selectedPeerId = id
     Lanchat.resetHistoryMeta(id)
     Lanchat.refreshHistory(id, 0, 50)
-    list.positionViewAtEnd()
+    chatThreadView.positionViewAtEnd()
   }
 
   function send() {
@@ -201,7 +201,7 @@ Panel {
       }
       setInputText("")
       root.pendingAttachments = []
-      list.positionViewAtEnd()
+      chatThreadView.positionViewAtEnd()
       return
     }
     if (!selectedPeerId) return
@@ -220,7 +220,7 @@ Panel {
     }
     setInputText("")
     root.pendingAttachments = []
-    list.positionViewAtEnd()
+    chatThreadView.positionViewAtEnd()
   }
 
   // Pick a file to attach and send it. The panel is a full-screen
@@ -527,7 +527,7 @@ Panel {
       Lanchat.refreshFirewall()
       if (selectedPeerId === "" && Lanchat.displayPeers.length > 0)
         selectedPeerId = Lanchat.displayPeers[0].id
-      Qt.callLater(function() { list.positionViewAtEnd() })
+      Qt.callLater(function() { chatThreadView.positionViewAtEnd() })
     }
   }
 

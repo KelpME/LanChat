@@ -385,7 +385,7 @@ Item {
               text: "Fingerprint: " + shortFpFn(modelData.fingerprint || modelData.peerId)
               color: Color.popups.mutedText
               font.family: Style.font.mono || Style.font.family
-              font.pixelSize: Style.font.micro
+              font.pixelSize: Style.font.caption
               elide: Text.ElideRight
             }
           }
