@@ -1,0 +1,5 @@
+ scripts/qml_gate/run.sh |  8 +++++---
+ shared/ChatThread.qml   |  3 ++-
+ shared/RoomMessage.qml  | 22 ++++++++++------------
+ shared/RoomView.qml     |  3 ++-
+ 4 files changed, 19 insertions(+), 17 deletions(-)

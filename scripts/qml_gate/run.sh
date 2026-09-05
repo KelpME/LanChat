@@ -11,8 +11,9 @@
 #     populates the model one frame late via Qt.callLater, asserts, Qt.exit(0|1)
 #
 # Usage: scripts/qml_gate/run.sh            (uses the committed bench shells)
-# Known benign noise: modelData-undefined TypeErrors during the pre-populate
-# frame — classify via A/B against a git-HEAD copy before treating as regression.
+# modelData-undefined TypeErrors after model population are the blank-bubble
+# regression (2026-09-05): the delegate must resolve modelData post-populate;
+# pre-populate-frame noise is benign.
 set -euo pipefail
 BENCH=/tmp/qsgate/benchshell
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -33,9 +34,10 @@ cp "$REPO"/shared/SettingsPanel.qml "$BENCH"/shared/
 # Whole-panel bench: runs the REAL Panel.qml, copied next to the shell so
 # panelbench's Qt.createComponent("Panel.qml") resolves inside the bench dir.
 cp "$REPO"/scripts/qml_gate/panelbench.qml "$BENCH"/
+cp "$REPO"/scripts/qml_gate/bubblebench.qml "$BENCH"/
 cp "$REPO"/Panel.qml "$BENCH"/
 
-for sh in "$BENCH"/shell*.qml "$BENCH"/panelbench.qml; do
+for sh in "$BENCH"/shell*.qml "$BENCH"/panelbench.qml "$BENCH"/bubblebench.qml; do
   echo "=== $sh ==="
   WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}" \
     timeout 30 quickshell -p "$sh" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | \
