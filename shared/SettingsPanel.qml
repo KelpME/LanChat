@@ -586,6 +586,7 @@ Item {
                       model: settingsPanel.themePalette
 
                       Rectangle {
+                        id: swatchRect
                         required property var modelData
                         width: Style.space(16)
                         height: Style.space(16)
@@ -602,7 +603,7 @@ Item {
                             // disables rendering, but the choice persists).
                             for (var i = 0; i < Lanchat.rooms.length; i++)
                               Lanchat.setRoomColor(Lanchat.rooms[i].roomId,
-                                parent.parent.modelData.token, parent.parent.modelData.hex)
+                                swatchRect.modelData.token, swatchRect.modelData.hex)
                           }
                         }
                       }
