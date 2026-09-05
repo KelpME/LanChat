@@ -735,7 +735,12 @@ Panel {
             height: parent.height
             color: Util.alpha(Color.foreground, 0.04)
 
+            // Sized wrapper: children anchor to this parent (PeerList fills
+            // it; RoomListSection/SettingsPanel hang off its edges). Lost in
+            // the step-4 extraction — without it the Item is 0x0 and the
+            // whole left column renders blank.
             Item {
+              anchors.fill: parent
               PeerList {
                 id: peerListPanel
                 anchors.fill: parent
