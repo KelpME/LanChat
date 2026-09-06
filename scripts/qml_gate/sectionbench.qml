@@ -143,6 +143,23 @@ Item {
     if (pl.expanded !== true) return fail("peers section must start expanded, got " + pl.expanded)
     console.log(p + "-OK A1 peers section present, default expanded=true")
 
+    // ---- A1b: the list body must actually have WIDTH (regression guard) --
+    // anchors.leftMargin/rightMargin WITHOUT anchors.left/right silently
+    // zero the width: data + onlineCount stay correct but no row ever
+    // paints (shipped 2026-09-05, user-visible blank list).
+    var lvFound = null
+    function scanLV(n) {
+      if (!n || lvFound) return
+      if (n.contentHeight !== undefined && n.contentY !== undefined) { lvFound = n; return }
+      var kids = n.children
+      if (kids) for (var i = 0; i < kids.length; i++) scanLV(kids[i])
+    }
+    scanLV(pl)
+    if (!lvFound) return fail("peer ListView not found in tree")
+    if (!(lvFound.width > 0))
+      return fail("peer ListView width=" + lvFound.width + " (zero-width anchors regression)")
+    console.log(p + "-OK A1b peer ListView width=" + Math.round(lvFound.width))
+
     // ---- A2: collapse animates, settles closed, re-open animates --------
     if (pl.animateSections === undefined) return fail("PeerList has no animateSections switch")
     pl.animateSections = true

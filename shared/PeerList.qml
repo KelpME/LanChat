@@ -55,6 +55,8 @@ Item {
     id: listZone
     anchors.top: notifBanner.bottom
     anchors.topMargin: Style.spacing.sm
+    anchors.left: parent.left
+    anchors.right: parent.right
     anchors.leftMargin: Style.spacing.sm
     anchors.rightMargin: Style.spacing.sm
     anchors.bottom: parent.bottom
