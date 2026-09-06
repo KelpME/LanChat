@@ -1,0 +1,8 @@
+{
+  "name": "stub",
+  "title": "Stub (framework test game)",
+  "modes": ["vs"],
+  "minPlayers": 1,
+  "maxPlayers": 8,
+  "version": "0.0.1"
+}

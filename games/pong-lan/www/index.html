@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pong LAN — forge-lan reference game</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0d1117; color: #c9d1d9;
+    font-family: system-ui, sans-serif; overflow: hidden; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 12px; }
+  canvas { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }
+  #hud { font-size: 14px; color: #8b949e; min-height: 20px; }
+  #status { font-size: 13px; color: #58a6ff; min-height: 18px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="640" height="360"></canvas>
+  <div id="hud">Score 0 : 0</div>
+  <div id="status">connecting…</div>
+</div>
+
+<script type="module">
+  // forge-lan host interface + loopback transport (pointed at the local lanchat
+  // daemon's /game feed+control endpoints). Session identity comes from the URL
+  // (?lan=, ?room=, ?game=, ?lanToken=) or defaults.
+  import { createLanHost, createLoopbackTransport } from './lan.js'
+
+  const canvas = document.getElementById('game')
+  const ctx = canvas.getContext('2d')
+  const hud = document.getElementById('hud')
+  const status = document.getElementById('status')
+
+  const W = 640, H = 360
+  const PADDLE_W = 10, PADDLE_H = 60, BALL = 8
+  const PADDLE_SPEED = 300
+
+  // ---- local-only render state (the sim is authoritative on the host, but
+  // for a reference game we keep a local prediction + render whatever snapshot
+  // the host sends; pong is simple enough that we render the snapshot directly).
+  let state = {
+    mode: 'vs', phase: 'playing',
+    p1: { x: 0.5, lives: 5, score: 0 },   // normalized x (0..1)
+    p2: { x: 0.5, lives: 5, score: 0 },
+    ball: { x: 0.5, y: 0.5, vx: 0, vy: 0 },
+  }
+  let youAre = ''      // 'p1' | 'p2' | '' (host-side seat)
+
+  // ---- the host ----
+  const host = createLanHost({
+    transport: createLoopbackTransport(),
+  })
+
+  host.onSessionStart((ev) => { youAre = ev.youAre || ''; setStatus(`joined as ${youAre || 'host'}`) })
+  host.onSnapshot((s) => { if (s) { state = s; render() } })
+  host.onEvent((e) => { if (e && e.type === 'score') setStatus('score!') })
+  host.join('seat1', { accent: '#58a6ff' })
+
+  function setStatus(msg) { status.textContent = msg }
+
+  // ---- input: mouse x -> normalized paddle ----
+  function pointerX(ev) {
+    const r = canvas.getBoundingClientRect()
+    return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width))
+  }
+  canvas.addEventListener('mousemove', (ev) => host.sendInput('paddle', pointerX(ev)))
+  canvas.addEventListener('touchmove', (ev) => host.sendInput('paddle', pointerX(ev.touches[0])), { passive: true })
+
+  // ---- render ----
+  function render() {
+    ctx.clearRect(0, 0, W, H)
+    // self = this window's seat (bottom); opponent top.
+    const selfX = youAre === 'p2' ? (state.p2 && state.p2.x) : (state.p1 && state.p1.x)
+    const oppX  = youAre === 'p2' ? (state.p1 && state.p1.x) : (state.p2 && state.p2.x)
+    // paddles (normalized x, rendered at fixed y rows)
+    ctx.fillStyle = '#58a6ff'
+    ctx.fillRect((selfX || 0.5) * W - PADDLE_W / 2, H - PADDLE_H - 8, PADDLE_W, PADDLE_H)
+    ctx.fillStyle = '#f85149'
+    ctx.fillRect((oppX || 0.5) * W - PADDLE_W / 2, 8, PADDLE_W, PADDLE_H)
+    // ball
+    ctx.fillStyle = '#e6edf3'
+    ctx.beginPath(); ctx.arc((state.ball.x || 0.5) * W, (state.ball.y || 0.5) * H, BALL, 0, Math.PI * 2); ctx.fill()
+    // scores
+    const s1 = (state.p1 && state.p1.score) || 0, s2 = (state.p2 && state.p2.score) || 0
+    hud.textContent = `Score ${s1} : ${s2}`
+  }
+
+  render()
+</script>
+</body>
+</html>
