@@ -79,6 +79,38 @@ Panel {
       Lanchat.roomAdd(Lanchat.selectedRoomId, peerId)
   }
 
+  // ---- games platform (room-chat game UX) ----
+  readonly property var currentRoomSession: Lanchat.gameSessions[Lanchat.selectedRoomId] || null
+
+  function launchGame() {
+    // A session already active in this room → open its window (any player).
+    if (root.currentRoomSession && root.currentRoomSession.windowUrl) {
+      Qt.openUrlExternally(root.currentRoomSession.windowUrl)
+      return
+    }
+    // No session yet: the owner creates pong-lan + opens it; a member sends an
+    // invite to the owner (who sees an Accept banner in the header).
+    if (root.selectedRoom && root.selectedRoom.owner === Lanchat.myId) {
+      Lanchat.gameCreate(Lanchat.selectedRoomId, "pong-lan", "vs", {})
+    } else {
+      Lanchat.gameCreate(Lanchat.selectedRoomId, "pong-lan", "vs", {})
+    }
+  }
+
+  function acceptGameInvite(inv) {
+    Lanchat.gameAccept(inv.roomId, inv.game, inv.mode, {}, inv.from)
+  }
+
+  function declineGameInvite(inv) {
+    Lanchat.gameDecline(inv.roomId, "", inv.from)
+  }
+
+  function currentRoomInvite() {
+    for (var i = 0; i < Lanchat.gameInvites.length; i++)
+      if (Lanchat.gameInvites[i].roomId === Lanchat.selectedRoomId) return Lanchat.gameInvites[i]
+    return null
+  }
+
   // The current Omarchy theme's palette for the room color picker: the
   // canonical token set the daemon-side color records reference. Swatches
   // resolve to the VIEWER's theme values (all offered, none filtered —
@@ -945,6 +977,77 @@ Panel {
                 fontSize: Style.font.caption
                 tooltipText: "Close conversation (deselect peer)"
                 onClicked: root.closeChat()
+              }
+
+              // Games platform: a game glyph in the pinned header, only for a
+              // selected ROOM. Clicking opens the active session's game window,
+              // or launches pong-lan if none is active.
+              Button {
+                id: gameBtn
+                visible: root.inRoom
+                anchors.right: closeChatBtn.left
+                anchors.rightMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                text: "\uF11B"  // fa-gamepad
+                fontSize: Style.font.caption
+                foreground: root.currentRoomSession ? Color.accent : Color.foreground
+                tooltipText: root.currentRoomSession ? "Open game" : "Start Pong LAN"
+                onClicked: root.launchGame()
+              }
+
+              // Games platform: a pending game-invite banner (the owner sees
+              // this when a member requests a game). Accept starts the session;
+              // Decline dismisses it.
+              Rectangle {
+                id: gameInviteBar
+                visible: root.inRoom && root.currentRoomInvite() !== null
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 22
+                color: Color.popups.background
+                border.color: Color.accent
+                border.width: 1
+
+                Text {
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.currentRoomInvite()
+                        ? (root.currentRoomInvite().fromName || "A member") + " wants to play " + root.currentRoomInvite().game
+                        : ""
+                  color: Color.foreground
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                  width: parent.width - 120
+                }
+
+                Button {
+                  id: gameInviteAccept
+                  anchors.right: gameInviteDecline.left
+                  anchors.rightMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "Accept"
+                  fontSize: Style.font.caption
+                  foreground: Color.accent
+                  onClicked: {
+                    var inv = root.currentRoomInvite()
+                    if (inv) root.acceptGameInvite(inv)
+                  }
+                }
+                Button {
+                  id: gameInviteDecline
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "Decline"
+                  fontSize: Style.font.caption
+                  foreground: Color.foreground
+                  onClicked: {
+                    var inv = root.currentRoomInvite()
+                    if (inv) root.declineGameInvite(inv)
+                  }
+                }
               }
 
               Button {

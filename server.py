@@ -2706,7 +2706,8 @@ def handle_command(cmd: dict) -> None:
                 _emit({"event": "error", "message": "Game not available"})
             else:
                 _emit({"event": "game", "kind": "created", "roomId": room_id,
-                       "gameId": s["gameId"], "game": gname, "mode": mode})
+                       "gameId": s["gameId"], "game": gname, "mode": mode,
+                       "windowUrl": game_kit.game_window_url(gname, room_id, s["gameId"])})
         else:
             ok = game_kit.send_game(room.get("owner"), {"t": "game", "kind": "invite",
                                                         "roomId": room_id, "game": gname,

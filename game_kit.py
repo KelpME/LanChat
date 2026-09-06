@@ -183,6 +183,22 @@ def game_web_dir(game_name: str) -> str:
     return web if os.path.isdir(web) else ""
 
 
+def game_window_url(game_name: str, room_id: str, game_id: str) -> str:
+    """Build the browser launch URL for a game window served by THIS daemon's
+    plain-HTTP loopback feed. Includes the token (the game's loopback transport
+    needs it to auth) + roomId/gameId so the window knows its session. The QML
+    opens this URL; it never needs the token itself."""
+    import urllib.parse
+
+    import http_api  # noqa: F401  (loopback port helper)
+    import server  # deferred, late-bound
+    lb = http_api._loopback_port()
+    token = str(server.STATE.config.get("token", ""))
+    q = urllib.parse.quote
+    return ("http://127.0.0.1:%d/www/%s/index.html?token=%s&room=%s&game=%s"
+            % (lb, q(game_name), q(token), q(room_id), q(game_id)))
+
+
 def _scan_dir(base, bundled, out):
     if not base or not os.path.isdir(base):
         return
@@ -587,7 +603,8 @@ def handle_game_msg(msg: dict, addr) -> None:
                           game=str(msg.get("game", "")), seed=msg.get("seed"),
                           theme=msg.get("theme") or {}, you_are=me):
             server._emit({"event": "game", "kind": "invite-accepted",
-                          "roomId": room_id, "gameId": game_id, "from": from_pid})
+                          "roomId": room_id, "gameId": game_id, "from": from_pid,
+                          "windowUrl": game_window_url(str(msg.get("game", "")), room_id, game_id)})
         return
 
     if kind == "inviteDecline":
@@ -600,7 +617,8 @@ def handle_game_msg(msg: dict, addr) -> None:
                           game=str(msg.get("game", "")), seed=msg.get("seed"),
                           theme=msg.get("theme") or {}, you_are=str(msg.get("youAre", ""))):
             server._emit({"event": "game", "kind": "joined",
-                          "roomId": room_id, "gameId": game_id, "from": from_pid})
+                          "roomId": room_id, "gameId": game_id, "from": from_pid,
+                          "windowUrl": game_window_url(str(msg.get("game", "")), room_id, game_id)})
         return
 
     if kind in ("snapshot", "event"):

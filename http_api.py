@@ -430,25 +430,33 @@ def _loopback_port() -> int:
 
 def _start_loopback() -> bool:
     """Start the plain-HTTP loopback game feed on httpPort+1 (127.0.0.1 only).
-    Independent of the TLS API (the browser must not hit a self-signed cert)."""
+    Independent of the TLS API (the browser must not hit a self-signed cert).
+    Runs the bind in a background thread so a slow/contended bind NEVER delays
+    the daemon's TCP listener startup (a fixed test sleep must not miss it)."""
     global _loopback, _loopback_thread
     import server
     if _loopback is not None:
         return True
-    last_err = None
-    for attempt in range(5):
-        try:
-            srv = http.server.ThreadingHTTPServer(("127.0.0.1", _loopback_port()), _GameLoopbackHandler)
-            _loopback = srv
-            _loopback_thread = threading.Thread(target=srv.serve_forever, daemon=True)
-            _loopback_thread.start()
-            server._emit({"event": "game-feed", "enabled": True, "port": _loopback_port(), "bind": "127.0.0.1"})
-            return True
-        except OSError as e:
-            last_err = e
-            time.sleep(0.4)
-    server._emit({"event": "game-feed", "enabled": False, "port": _loopback_port(), "error": str(last_err)})
-    return False
+
+    def _bind():
+        global _loopback, _loopback_thread
+        last_err = None
+        for attempt in range(5):
+            try:
+                srv = http.server.ThreadingHTTPServer(("127.0.0.1", _loopback_port()), _GameLoopbackHandler)
+                _loopback = srv
+                _loopback_thread = threading.Thread(target=srv.serve_forever, daemon=True)
+                _loopback_thread.start()
+                server._emit({"event": "game-feed", "enabled": True, "port": _loopback_port(), "bind": "127.0.0.1"})
+                return True
+            except OSError as e:
+                last_err = e
+                time.sleep(0.4)
+        server._emit({"event": "game-feed", "enabled": False, "port": _loopback_port(), "error": str(last_err)})
+        return False
+
+    threading.Thread(target=_bind, daemon=True).start()
+    return True
 
 
 def _stop_loopback() -> None:

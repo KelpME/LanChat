@@ -98,6 +98,11 @@ QtObject {
   property var roomInvites: []    // [{roomId,name,from,fromName}] unaccepted invites
   property var roomFileStatuses: ({}) // roomId|mid -> {peerId: {status,name}}
   property bool roomHostOnline: true // mirrored room/owner connectivity (frozen-state banner)
+  // Games platform: the active game session state + pending invites.
+  // gameSessions[roomId] = { gameId, game, mode, windowUrl, youAre, active:true }
+  property var gameSessions: ({})
+  property var gameInvites: []   // [{roomId,game,from,fromName,mode}] pending invites
+  property var availableGames: [] // [{name,title,version,modes,maxPlayers}] from game-list
 
   // Re-evaluate host-online for the selected room: owner == us → online;
   // otherwise the owner must appear in the live peer set (the daemon drops
@@ -462,6 +467,37 @@ QtObject {
 
   function toggleRoomColors(roomId, enabled) {
     daemon.write(JSON.stringify({ cmd: "toggleRoomColors", roomId: roomId, enabled: enabled }) + "\n")
+  }
+
+  // ---- games platform (commands from the UI / local feed) ----
+  function gameList() {
+    daemon.write(JSON.stringify({ cmd: "gameList" }) + "\n")
+  }
+  function gameCreate(roomId, game, mode, theme) {
+    daemon.write(JSON.stringify({ cmd: "gameCreate", roomId: roomId, game: game,
+      mode: mode || "vs", theme: theme || {} }) + "\n")
+  }
+  function gameAccept(roomId, game, mode, theme, from) {
+    daemon.write(JSON.stringify({ cmd: "gameAccept", roomId: roomId, game: game,
+      mode: mode || "vs", theme: theme || {}, from: from || "" }) + "\n")
+  }
+  function gameDecline(roomId, gameId, from) {
+    daemon.write(JSON.stringify({ cmd: "gameDecline", roomId: roomId, gameId: gameId || "",
+      from: from || "" }) + "\n")
+  }
+  function gameJoin(roomId, gameId, theme) {
+    daemon.write(JSON.stringify({ cmd: "gameJoin", roomId: roomId, gameId: gameId,
+      theme: theme || {} }) + "\n")
+  }
+  function gameInput(roomId, gameId, action, value) {
+    daemon.write(JSON.stringify({ cmd: "gameInput", roomId: roomId, gameId: gameId,
+      action: action, value: value }) + "\n")
+  }
+  function gameDrop(roomId, gameId) {
+    daemon.write(JSON.stringify({ cmd: "gameDrop", roomId: roomId, gameId: gameId }) + "\n")
+  }
+  function gameLeave(roomId, gameId) {
+    daemon.write(JSON.stringify({ cmd: "gameLeave", roomId: roomId, gameId: gameId }) + "\n")
   }
 
   // Room file save: same pull transport as 1:1, plus the room id so the
@@ -1129,6 +1165,52 @@ QtObject {
       cur[obj.peer] = { status: obj.status, error: obj.error || "", name: obj.peerName || "" }
       nextStatuses[key] = cur
       lanchat.roomFileStatuses = nextStatuses
+      break
+    }
+
+    case "game-list": {
+      lanchat.availableGames = obj.games || []
+      break
+    }
+
+    case "game": {
+      var gk = obj.kind
+      var gr = obj.roomId || ""
+      if (gk === "invite") {
+        // Someone wants to play in a room we own. Add a pending invite the
+        // room header can Accept/Decline.
+        var dup = false
+        for (var gi = 0; gi < lanchat.gameInvites.length; gi++) {
+          if (lanchat.gameInvites[gi].roomId === gr && lanchat.gameInvites[gi].from === obj.from) dup = true
+        }
+        if (!dup) lanchat.gameInvites = lanchat.gameInvites.concat([{
+          roomId: gr, game: obj.game || "", mode: obj.mode || "vs",
+          from: obj.from || "", fromName: obj.fromName || "",
+        }])
+      } else if (gk === "created" || gk === "invite-accepted" || gk === "joined") {
+        // A session is active in this room. Store it (incl. the launch URL)
+        // so the room header can show "Play" / open the window.
+        var gid = obj.gameId || ""
+        var gu = obj.windowUrl || ""
+        var next = {}
+        for (var gs in lanchat.gameSessions) next[gs] = lanchat.gameSessions[gs]
+        next[gr] = { gameId: gid, game: obj.game || "", mode: obj.mode || "",
+                     windowUrl: gu, active: true }
+        lanchat.gameSessions = next
+        // drop any pending invite for this room (it was accepted/joined)
+        var rem = []
+        for (var gi2 = 0; gi2 < lanchat.gameInvites.length; gi2++) {
+          if (lanchat.gameInvites[gi2].roomId !== gr) rem.push(lanchat.gameInvites[gi2])
+        }
+        lanchat.gameInvites = rem
+      } else if (gk === "invite-declined") {
+        // The host declined our request — clear any invite we had pending.
+        var rem2 = []
+        for (var gi3 = 0; gi3 < lanchat.gameInvites.length; gi3++) {
+          if (lanchat.gameInvites[gi3].roomId !== gr) rem2.push(lanchat.gameInvites[gi3])
+        }
+        lanchat.gameInvites = rem2
+      }
       break
     }
 
