@@ -79,36 +79,6 @@ Panel {
       Lanchat.roomAdd(Lanchat.selectedRoomId, peerId)
   }
 
-  // ---- games platform (room-chat game UX) ----
-  readonly property var currentRoomSession: Lanchat.gameSessions[Lanchat.selectedRoomId] || null
-  readonly property bool iAmRoomOwner: root.selectedRoom ? (root.selectedRoom.owner === Lanchat.myId) : false
-
-  // Clean model: ONLY the room owner launches a game (they run the sim).
-  // Members JOIN the game the owner started. No invite/accept flow.
-  function launchGame() {
-    var sess = root.currentRoomSession
-    if (sess && sess.windowUrl) {
-      // Session active: owner opens it, member joins then opens it.
-      if (!root.iAmRoomOwner) Lanchat.gameJoin(Lanchat.selectedRoomId, sess.gameId, {})
-      Qt.openUrlExternally(sess.windowUrl)
-      return
-    }
-    // No session: only the owner can launch.
-    if (root.iAmRoomOwner) {
-      Lanchat.gameCreate(Lanchat.selectedRoomId, "pong-lan", "vs", {})
-    }
-    // A member with no active session has nothing to do — the gamepad is
-    // disabled for them until the owner starts a game.
-  }
-
-  // The gamepad's affordance per role/state (drives label + enabled).
-  readonly property string gameActionLabel: {
-    if (!root.inRoom) return ""
-    if (root.currentRoomSession) return root.iAmRoomOwner ? "Open game" : "Join game"
-    return root.iAmRoomOwner ? "Start Pong LAN" : "Waiting for host to start a game"
-  }
-  readonly property bool gameActionEnabled: root.inRoom && (root.currentRoomSession !== null || root.iAmRoomOwner)
-
   // The current Omarchy theme's palette for the room color picker: the
   // canonical token set the daemon-side color records reference. Swatches
   // resolve to the VIEWER's theme values (all offered, none filtered —
@@ -975,24 +945,6 @@ Panel {
                 fontSize: Style.font.caption
                 tooltipText: "Close conversation (deselect peer)"
                 onClicked: root.closeChat()
-              }
-
-              // Games platform: a game glyph in the pinned header, only for a
-              // selected ROOM. Owner: Start/Open the game. Member: Join the
-              // owner's game (disabled until a session exists — only the room
-              // owner can launch).
-              Button {
-                id: gameBtn
-                visible: root.inRoom
-                enabled: root.gameActionEnabled
-                anchors.right: closeChatBtn.left
-                anchors.rightMargin: Style.spacing.sm
-                anchors.verticalCenter: parent.verticalCenter
-                text: "\uF11B"  // fa-gamepad
-                fontSize: Style.font.caption
-                foreground: root.currentRoomSession ? Color.accent : (root.gameActionEnabled ? Color.foreground : Color.muted)
-                tooltipText: root.gameActionLabel
-                onClicked: root.launchGame()
               }
 
               Button {
