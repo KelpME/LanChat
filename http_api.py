@@ -337,7 +337,53 @@ class _GameLoopbackHandler(http.server.BaseHTTPRequestHandler):
             if data is None:
                 return self._send_json(404, {"ok": False, "error": "session not found"})
             return self._send_json(200, {"ok": True, **data})
+        if parsed.path == "/game/list":
+            # Available games (name/title/version) — the UI picker reads this.
+            import game_kit
+            return self._send_json(200, {"ok": True, "games": [
+                {"name": g["name"], "title": g["title"], "version": g["version"],
+                 "modes": g["modes"], "maxPlayers": g["maxPlayers"]}
+                for g in game_kit.discover_games()]})
+        # Static game-bundle serving: /www/<gameId>/<path> from the game's web dir.
+        if parsed.path.startswith("/www/"):
+            return self._serve_www(parsed.path[len("/www/"):])
         self._send_json(404, {"ok": False, "error": "not found"})
+
+    def _serve_www(self, rel: str):
+        """Serve a static file from a game bundle's `www/` folder. The first
+        path segment is the game name; the rest is the file under its www root.
+        index.html is served for a bare game-name path. Only bundled/user games
+        are reachable — never arbitrary paths (path-traversal guarded)."""
+        import os as _os
+
+        import game_kit
+        parts = rel.split("/", 1)
+        game_name = parts[0]
+        sub = parts[1] if len(parts) > 1 else ""
+        web = game_kit.game_web_dir(game_name)
+        if not web:
+            return self._send_json(404, {"ok": False, "error": "game not found"})
+        # Resolve + guard against path traversal.
+        safe = _os.path.normpath(sub or "index.html")
+        if safe.startswith("..") or _os.path.isabs(safe):
+            return self._send_json(403, {"ok": False, "error": "forbidden"})
+        full = _os.path.join(web, safe)
+        if not _os.path.isfile(full):
+            return self._send_json(404, {"ok": False, "error": "not found"})
+        import mimetypes
+        mime = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        try:
+            with open(full, "rb") as f:
+                data = f.read()
+        except OSError:
+            return self._send_json(404, {"ok": False, "error": "not found"})
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
+        return
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)

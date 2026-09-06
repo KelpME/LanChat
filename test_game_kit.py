@@ -330,8 +330,8 @@ def test_route_join_host_applies():
         s = game_kit.create_session("room1", "stub", "vs", host, {}, {})
         gid = s["gameId"]
         # patch host_id to be the owner + rooms.get_room so route_join treats us as host
-        import server as _server_mod
         import rooms as _rooms_mod
+        import server as _server_mod
         orig_host = _server_mod.host_id
         orig_room = _rooms_mod.get_room
         _server_mod.host_id = lambda: host
@@ -345,6 +345,30 @@ def test_route_join_host_applies():
         finally:
             _server_mod.host_id = orig_host
             _rooms_mod.get_room = orig_room
+    finally:
+        fx.cleanup()
+
+
+def test_game_web_dir_resolves_bundle():
+    """game_web_dir resolves a game's www/ folder (bundle hosting root)."""
+    fx = _Fixture()
+    try:
+        _setup(fx)
+        fx.add_bundled("webby", {"name": "webby", "title": "Webby", "version": "1.0.0"}, STUB_GAME_PY,
+                       web_files={"index.html": "<html>web</html>"})
+        # the fixture puts web files under <dir>/web; game_web_dir looks for www/
+        # add a www/ dir explicitly
+        import os as _os
+        www = _os.path.join(fx.bundled, "webby", "www")
+        _os.makedirs(www, exist_ok=True)
+        with open(_os.path.join(www, "index.html"), "w") as f:
+            f.write("<html>web</html>")
+        d = game_kit.game_web_dir("webby")
+        assert d and d.endswith(os.path.join("webby", "www"))
+        assert os.path.isfile(os.path.join(d, "index.html"))
+        # unknown game -> ''
+        assert game_kit.game_web_dir("nope") == ""
+        print("  game_web_dir resolves bundle www root: OK")
     finally:
         fx.cleanup()
 

@@ -173,6 +173,16 @@ def discover_games() -> list:
     return [v for _, v in sorted(found.items())]
 
 
+def game_web_dir(game_name: str) -> str:
+    """The static web root for a game bundle (its `www/` folder), or '' if the
+    game has no web frontend. Resolved from the installed game folder."""
+    meta = next((g for g in discover_games() if g["name"] == game_name), None)
+    if not meta:
+        return ""
+    web = os.path.join(meta["path"], "www")
+    return web if os.path.isdir(web) else ""
+
+
 def _scan_dir(base, bundled, out):
     if not base or not os.path.isdir(base):
         return

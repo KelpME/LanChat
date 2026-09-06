@@ -1,0 +1,8 @@
+{
+  "name": "pong-lan",
+  "title": "Pong LAN",
+  "modes": ["vs"],
+  "minPlayers": 1,
+  "maxPlayers": 2,
+  "version": "1.0.0"
+}
