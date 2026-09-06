@@ -94,6 +94,68 @@ def start_beats(daemons_ports):
     threading.Thread(target=_beat, daemon=True).start()
 
 
+def test_member_leave(oo, aa, ido, ida, check, wait_for):
+    """Regression for 'leave this room' (rooms.member_leave): a member's
+    roomLeave must (1) drop the room from the LEAVER's own list, (2) reach
+    the OWNER so the authoritative roster drops them, and (3) freeze with no
+    half-left state when the owner is offline."""
+
+    def fresh_room(tag):
+        oo.cmd(cmd="createRoom", name=tag)
+        created = oo.wait_event("room-created", timeout=6)
+        rid = (created or {}).get("roomId", "")
+        check("%s: room created" % tag, bool(rid))
+        oo.cmd(cmd="roomInvite", roomId=rid, peer=ida)
+        inv = aa.wait_event("room-invite", timeout=6)
+        check("%s: invite reaches A" % tag, inv is not None and inv.get("roomId") == rid)
+        aa.cmd(cmd="roomJoin", roomId=rid)
+        got = wait_for(lambda: [s for s in aa.events_of("room-state")
+                                if s.get("room", {}).get("roomId") == rid], 8)
+        check("%s: A joined (roomState seen)" % tag, bool(got))
+        return rid
+
+    # -- online leave: leaver's list AND owner's authoritative roster update
+    rid2 = fresh_room("LeaveRoom")
+    n_alist = len(aa.events_of("room-list"))
+    n_ostate = len(oo.events_of("room-state"))
+    n_olist = len(oo.events_of("room-list"))
+    aa.cmd(cmd="roomLeave", roomId=rid2)
+    # Wait for a room-list event emitted AFTER the leave (member_leave always
+    # emits one) and assert the room is gone from THAT event's snapshot —
+    # `not any()` over a not-yet-arrived window races and vacuously passes.
+    drop = wait_for(lambda: [e for e in aa.events_of("room-list")[n_alist:]
+                             if all(r.get("roomId") != rid2
+                                    for r in e.get("rooms", []))], 6)
+    check("leaver's room-list drops the room", bool(drop))
+    new_state = wait_for(lambda: [s for s in oo.events_of("room-state")[n_ostate:]
+                                  if s.get("room", {}).get("roomId") == rid2], 6)
+    check("owner receives room-state after member leave", bool(new_state))
+    check("owner roster drops the leaver",
+          ida not in ((new_state or [{}])[-1].get("room", {}).get("members", {})))
+    # memberCount must drop in a room-list event emitted AFTER the leave —
+    # the creation event already had count 1, so an all-history any() is
+    # vacuously true on unpatched code.
+    cnt = wait_for(lambda: [r for e in oo.events_of("room-list")[n_olist:]
+                            for r in e.get("rooms", [])
+                            if r.get("roomId") == rid2 and r.get("memberCount") == 1], 4)
+    check("owner room-list memberCount drops to 1", bool(cnt))
+
+    # -- offline owner: the leave must freeze, not half-apply locally.
+    # (A fresh room is needed: rid2 legitimately left aa's cache above.)
+    rid3 = fresh_room("LeaveFrozen")
+    oo.stop()
+    time.sleep(0.5)
+    while aa.wait_event("error", timeout=0.1):
+        pass
+    aa.cmd(cmd="roomLeave", roomId=rid3)
+    err = aa.wait_event("error", timeout=6)
+    check("offline owner: leave errors (frozen)",
+          err is not None and "host offline" in str(err.get("message", "")))
+    check("offline owner: no half-left (room still listed)",
+          any(r.get("roomId") == rid3
+              for e in aa.events_of("room-list") for r in e.get("rooms", [])))
+
+
 def main():
     ho = make_home("o", 4971, "Owner")
     ha = make_home("a", 4972, "Alpha")
@@ -278,6 +340,9 @@ def main():
                                    and s.get("room", {}).get("colorsEnabled")
                                    and s.get("room", {}).get("seq", 0) > seq_after
                                    for s in a.events_of("room-state")), 6) is not None)
+
+        # ---- 8b. member leave regression (needs live owner; step 9 stops it)
+        test_member_leave(o, a, ido, ida, check, wait_for)
 
         # ---- 9. owner-offline freeze + mesh survives + persistence after
         o.stop()

@@ -404,12 +404,25 @@ def owner_toggle_colors(room: dict, enabled: bool) -> bool:
 
 def member_leave(room: dict, peer_id: str) -> bool:
     """A member (or the owner) leaves. Owner leaving DISBANDS the room for
-    everyone (v1 has no owner-transfer to hand it to — approved)."""
+    everyone (v1 has no owner-transfer to hand it to — approved). A member's
+    leave rides a roomLeave envelope to the OWNER, who applies it to the
+    authoritative roster (handle_room_msg); if the owner's socket is down the
+    leave freezes — no half-left (the next roomState sync would resurrect)."""
     import server  # deferred, late-bound
     with rooms_lock():
         if peer_id not in room.get("members", {}):
             return False
+    if not _is_owner(room, peer_id):
+        if not server._write(room.get("owner", ""),
+                             {"t": "room", "kind": "roomLeave",
+                              "roomId": room["roomId"], "from": server.host_id(),
+                              "fromName": server.display_name()}):
+            _err("host offline — changes frozen")
+            return False
+    with rooms_lock():
         was_owner = _is_owner(room, peer_id)
+        if peer_id not in room.get("members", {}):
+            return False
         del room["members"][peer_id]
         _bump(room)
         if was_owner or not room["members"]:
@@ -417,7 +430,7 @@ def member_leave(room: dict, peer_id: str) -> bool:
             _persist_owner()
             remaining = list(room.get("members", {}).keys())
         else:
-            STATE.rooms_cache[room["roomId"]] = room
+            STATE.rooms_cache.pop(room["roomId"], None)
             _persist_cache()
             remaining = []
     if was_owner or not room["members"]:
@@ -425,8 +438,8 @@ def member_leave(room: dict, peer_id: str) -> bool:
         for pid in remaining:
             server._write(pid, {"t": "room", "kind": "roomRemove", "roomId": room["roomId"],
                                 "from": server.host_id(), "fromName": server.display_name()})
-    else:
-        _send_room_state(room)
+    # Non-owner leave: no local roomState broadcast — the OWNER applies the
+    # leave authoritatively and rebroadcasts to the remaining members.
     _emit_room_list()
     server._diag("room-left", roomId=room["roomId"][:12], peer=peer_id[:12], owner=was_owner)
     return True
@@ -497,6 +510,15 @@ def handle_room_msg(msg: dict, addr) -> None:
             fan_out_room_file(room, msg)
         else:
             handle_room_file_msg(msg, addr)
+        return
+    if kind == "roomLeave":
+        # A member resigned: we own this room, so the authoritative roster
+        # drops them. owner_remove deletes, bumps, persists, and rebroadcasts
+        # the roomState to the remaining members; the roomRemove echo back to
+        # the leaver no-ops — their cache copy is already popped.
+        room = STATE.rooms.get(room_id)
+        if room is not None and _is_owner(room, server.host_id()):
+            owner_remove(room, from_pid)
         return
     if kind == "roomJoin":
         # Only the owner processes joins, and only for a room they own.
