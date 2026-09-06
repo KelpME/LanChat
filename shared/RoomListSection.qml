@@ -41,6 +41,7 @@ Column {
   // ---- outgoing signals (host panel wires these to its own handlers) ----
   signal roomSelected(string roomId)
   signal roomLeaveRequested()
+  signal roomForgetRequested()
   signal roomCreateRequested()
 
   // ---- public surface for the host panel (was: roomsSection.expanded = ...) ----
@@ -147,6 +148,15 @@ Column {
         required property var modelData
         readonly property string roomId: modelData.roomId
         readonly property var room: Lanchat.roomStates[modelData.roomId] || modelData
+        // An ORPHANED room: we neither own it nor appear in its roster. That's
+        // the stuck-group case (leave ✕ needs a member record and so is dead);
+        // only such rooms show the "forget" action.
+        readonly property bool orphaned: {
+          if (!roomGroup.room) return true
+          if (roomGroup.room.owner === Lanchat.myId) return false
+          var members = roomGroup.room.members || {}
+          return !(Lanchat.myId in members)
+        }
         // Per-group collapse: the chevron on the header row
         // toggles the member list under THIS group only.
         // Clicking the group name still opens the room chat.
@@ -217,7 +227,7 @@ Column {
           // click lands here, not on room-select.
           Button {
             id: roomCollapseBtn
-            anchors.right: roomLeaveBtn.left
+            anchors.right: roomGroup.orphaned ? roomForgetBtn.left : roomLeaveBtn.left
             anchors.rightMargin: Style.spacing.xs
             anchors.verticalCenter: parent.verticalCenter
             text: roomGroup.expanded ? "▾" : "▸"
@@ -233,11 +243,25 @@ Column {
             anchors.rightMargin: Style.spacing.sm
             anchors.verticalCenter: parent.verticalCenter
             visible: modelData.roomId === Lanchat.selectedRoomId
+                     && !roomGroup.orphaned
             text: "✕"
             fontSize: Style.font.caption
             foreground: Color.muted
             tooltipText: "Leave this room"
             onClicked: roomsSection.roomLeaveRequested()
+          }
+          Button {
+            id: roomForgetBtn
+            anchors.right: parent.right
+            anchors.rightMargin: Style.spacing.sm
+            anchors.verticalCenter: parent.verticalCenter
+            visible: modelData.roomId === Lanchat.selectedRoomId
+                     && roomGroup.orphaned
+            text: "forget"
+            fontSize: Style.font.caption
+            foreground: Color.urgent
+            tooltipText: "Forget this dismissed/orphaned room (you are no longer in it)"
+            onClicked: roomsSection.roomForgetRequested()
           }
         }
 

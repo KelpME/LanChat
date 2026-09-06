@@ -280,6 +280,16 @@ Panel {
     Lanchat.selectedRoomId = ""
   }
 
+  // Drop an ORPHANED room from the local cache (see rooms.forget_room): the
+  // group you're no longer part of but leave ✕ couldn't clear because there's
+  // no member record. Local-only; no owner is told (none exists to tell).
+  function forgetSelectedRoom() {
+    if (Lanchat.selectedRoomId) {
+      Lanchat.roomForget(Lanchat.selectedRoomId)
+      Lanchat.selectedRoomId = ""
+    }
+  }
+
   // Commit the display-name field if it holds a non-empty value. Guarded so a
   // transient empty state (field cleared mid-edit) doesn't wipe the name; only
   // a real value is saved.
@@ -791,6 +801,7 @@ Panel {
 
                 onRoomSelected: function(roomId) { root.selectRoom(roomId) }
                 onRoomLeaveRequested: root.leaveSelectedRoom()
+                onRoomForgetRequested: root.forgetSelectedRoom()
                 onRoomCreateRequested: { root.showRoomNameDialog = true; root.newRoomName = "" }
               }
               // ---- settings: collapsible ------------------------------

@@ -445,6 +445,39 @@ def member_leave(room: dict, peer_id: str) -> bool:
     return True
 
 
+def forget_room(room_id: str) -> bool:
+    """Locally DROP an orphaned/stale room from our own cache WITHOUT touching
+    the wire. Intended for rooms we neither own nor belong to (e.g. an invite
+    stub whose owner never sent an authoritative roomState, or a room whose
+    owner went away before admitting us) — the case where neither member_leave
+    nor owner_remove has anything to act on, so the group would otherwise stay
+    stuck forever.
+
+    Safety gates (so a user can never 'forget' themselves out of a real room):
+      - refuses a room we are a MEMBER of (use member_leave instead — leaving a
+        live room must reach the owner so the roster drops us)
+      - refuses a room we OWN (owner_remove / member_leave disband handles it)
+      - otherwise: drop from STATE.rooms_cache, persist, re-emit the list.
+        Nothing is sent to anyone (there's no authoritative keeper left to
+        tell), matching the cache-ownership model.
+    Returns True when a cache entry was actually removed."""
+    import server  # deferred, late-bound
+    me = server.host_id()
+    with rooms_lock():
+        room = STATE.rooms_cache.get(room_id)
+        if room is None or room_id in STATE.rooms:
+            return False
+        if me in room.get("members", {}):
+            return False  # live member — must leave through the owner
+        if room.get("owner") == me:
+            return False  # we own an authoritative copy; not a forget case
+        del STATE.rooms_cache[room_id]
+        _persist_cache()
+    _emit_room_list()
+    server._diag("room-forgotten", roomId=room_id[:12])
+    return True
+
+
 # --------------------------------------------------------------------------
 # Inbound wire kinds (t:"room") — server.py's _handle_incoming calls these
 # --------------------------------------------------------------------------

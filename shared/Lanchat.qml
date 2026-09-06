@@ -447,6 +447,9 @@ QtObject {
   function roomLeave(roomId) {
     daemon.write(JSON.stringify({ cmd: "roomLeave", roomId: roomId }) + "\n")
   }
+  function roomForget(roomId) {
+    daemon.write(JSON.stringify({ cmd: "roomForget", roomId: roomId }) + "\n")
+  }
 
   function roomRemove(roomId, peerId) {
     daemon.write(JSON.stringify({ cmd: "roomRemove", roomId: roomId, peer: peerId }) + "\n")

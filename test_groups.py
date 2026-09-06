@@ -156,6 +156,53 @@ def test_member_leave(oo, aa, ido, ida, check, wait_for):
               for e in aa.events_of("room-list") for r in e.get("rooms", [])))
 
 
+def test_forget(oo, aa, ido, ida, live_room_id, check, wait_for):
+    """Regression for 'forget dismissed/orphaned room' (rooms.forget_room,
+    command roomForget). An ORPHANED room — one we neither own nor appear in
+    the roster — is exactly the stuck-group case: roomLeave can't drop it
+    (leave needs a member record), so we must be able to forget it locally.
+    Also verifies the safety gate: a room we're a live member of is refused.
+
+    Roles (same convention as test_member_leave): oo = the daemon that OWNS
+    the rooms, aa = a peer daemon, ida = aa's fingerprint."""
+
+    # Build an orphaned-room for aa: oo invites aa, but aa never joins. The
+    # invite seeds a cache stub in aa's store with an empty roster and a
+    # remote owner (oo) — a room aa is not actually part of.
+    oo.cmd(cmd="createRoom", name="GhostRoom")
+    created = oo.wait_event("room-created", timeout=6)
+    rid = (created or {}).get("roomId", "")
+    check("forget: ghost room created", bool(rid))
+    oo.cmd(cmd="roomInvite", roomId=rid, peer=ida)
+    inv = wait_for(lambda: [e for e in aa.events_of("room-invite")
+                            if e.get("roomId") == rid], 6)
+    check("forget: invite stub reaches member", bool(inv))
+    # roomLeave on the orphan must NOT drop it (no member record -> leave
+    # early-returns False; the room stays listed).
+    aa.cmd(cmd="roomLeave", roomId=rid)
+    pre = wait_for(lambda: [e for e in aa.events_of("room-list")
+                            for r in e.get("rooms", []) if r.get("roomId") == rid], 6)
+    check("forget: orphaned room persists after roomLeave (leave dead)", bool(pre))
+
+    # roomForget on the orphaned room DOES drop it locally.
+    aa.cmd(cmd="roomForget", roomId=rid)
+    gone = wait_for(lambda: [e for e in aa.events_of("room-list")
+                             if all(r.get("roomId") != rid for r in e.get("rooms", []))], 6)
+    check("forget: roomForget drops the orphaned room", bool(gone))
+
+    # Safety gate: a room aa is a LIVE member of must refuse roomForget.
+    # Reuse the main room aa already joined in main().
+    live = live_room_id
+    n_err = len(aa.events_of("error"))
+    aa.cmd(cmd="roomForget", roomId=live)
+    err = wait_for(lambda: [e for e in aa.events_of("error")[n_err:]
+                            if "Nothing to forget" in str(e.get("message", ""))], 5)
+    check("forget: live-member room refuses forget (error)", bool(err))
+    still = wait_for(lambda: [e for e in aa.events_of("room-list")
+                              for r in e.get("rooms", []) if r.get("roomId") == live], 5)
+    check("forget: live-member room still listed", bool(still))
+
+
 def main():
     ho = make_home("o", 4971, "Owner")
     ha = make_home("a", 4972, "Alpha")
@@ -341,7 +388,13 @@ def main():
                                    and s.get("room", {}).get("seq", 0) > seq_after
                                    for s in a.events_of("room-state")), 6) is not None)
 
-        # ---- 8b. member leave regression (needs live owner; step 9 stops it)
+        # ---- 8b. forget-orphaned-room regression (needs live owner — must
+        # run before test_member_leave, whose offline-owner half stops `o`.
+        # Uses daemon b + room rid so the unconsumed room-invite event lands in
+        # b's queue, never polluting a's queue that test_member_leave reads.)
+        test_forget(o, b, ido, idb, rid, check, wait_for)
+
+        # ---- 8c. member leave regression (needs live owner; step 9 stops it)
         test_member_leave(o, a, ido, ida, check, wait_for)
 
         # ---- 9. owner-offline freeze + mesh survives + persistence after

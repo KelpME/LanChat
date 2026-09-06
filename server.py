@@ -225,7 +225,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   successful apply (the lanchat.path watcher misses updates that don't touch
 #   server.py), so the reported version is never stale.
 
-VERSION = "1.5.51"
+VERSION = "1.5.52"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2389,6 +2389,15 @@ def handle_command(cmd: dict) -> None:
             _emit({"event": "error", "message": "Only the room owner can remove members"})
         else:
             rooms.owner_remove(room, str(cmd.get("peer", "")))
+    elif kind == "roomForget":
+        # Local cleanup for an ORPHANED room (a cache-only room we neither own
+        # nor belong to — e.g. a stale invite stub whose owner never sent a
+        # roomState). No wire messages; the UI can drop a group this way that
+        # roomLeave can't (leave needs a member record). See rooms.forget_room.
+        ok = rooms.forget_room(str(cmd.get("roomId", "")))
+        if not ok:
+            _emit({"event": "error",
+                   "message": "Nothing to forget — you still own or belong to this room"})
     elif kind == "roomSetCanInvite":
         room = STATE.rooms.get(str(cmd.get("roomId", "")))
         if room is None or room.get("owner") != host_id():
