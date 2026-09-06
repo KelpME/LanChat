@@ -103,9 +103,15 @@ export function createLanHost(opts = {}) {
  * @param {object} [opts] { endpoint?, token?, roomId?, gameId?, fetchImpl? }
  */
 export function createLoopbackTransport(opts = {}) {
+  // The endpoint defaults to the page's OWN origin: the game window is served
+  // by the same loopback feed (127.0.0.1:4815) that exposes /game/*, so a
+  // same-origin default needs no ?lan= query param. Overridable via opts,
+  // window.FORGE_LAN_ENDPOINT, or ?lan=.
+  const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || ''
   const endpoint = opts.endpoint
     || (typeof window !== 'undefined' && window.FORGE_LAN_ENDPOINT)
     || (typeof window !== 'undefined' && new URLSearchParams(location.search).get('lan'))
+    || origin
     || ''
   const token = opts.token
     || (typeof window !== 'undefined' && (window.FORGE_LAN_TOKEN || new URLSearchParams(location.search).get('lanToken')))
