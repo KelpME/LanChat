@@ -323,6 +323,20 @@ class _GameLoopbackHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
+
+        # Static game-bundle files (the game window's own JS/CSS/html) are NOT
+        # token-gated: the browser loads them via relative imports with no
+        # token in the URL. The loopback bind (127.0.0.1) is the boundary for
+        # these; they contain no secrets, only the game's client code. Only the
+        # /game/* feed/control endpoints touch real state and need the token.
+        if parsed.path.startswith("/www/"):
+            return self._serve_www(parsed.path[len("/www/"):])
+        if parsed.path in ("/favicon.ico", "/favicon.png"):
+            self.send_response(204)
+            self.end_headers()
+            return
+
+        # Everything else is the token-gated game feed/control surface.
         token = (qs.get("token") or [""])[0]
         if not self._gate(token):
             return
@@ -344,9 +358,6 @@ class _GameLoopbackHandler(http.server.BaseHTTPRequestHandler):
                 {"name": g["name"], "title": g["title"], "version": g["version"],
                  "modes": g["modes"], "maxPlayers": g["maxPlayers"]}
                 for g in game_kit.discover_games()]})
-        # Static game-bundle serving: /www/<gameId>/<path> from the game's web dir.
-        if parsed.path.startswith("/www/"):
-            return self._serve_www(parsed.path[len("/www/"):])
         self._send_json(404, {"ok": False, "error": "not found"})
 
     def _serve_www(self, rel: str):
