@@ -81,44 +81,33 @@ Panel {
 
   // ---- games platform (room-chat game UX) ----
   readonly property var currentRoomSession: Lanchat.gameSessions[Lanchat.selectedRoomId] || null
+  readonly property bool iAmRoomOwner: root.selectedRoom ? (root.selectedRoom.owner === Lanchat.myId) : false
 
+  // Clean model: ONLY the room owner launches a game (they run the sim).
+  // Members JOIN the game the owner started. No invite/accept flow.
   function launchGame() {
     var sess = root.currentRoomSession
-    // A session already active in this room:
     if (sess && sess.windowUrl) {
-      // If I'm the OWNER, my daemon already has the authoritative session — open
-      // the window directly.
-      if (root.selectedRoom && root.selectedRoom.owner === Lanchat.myId) {
-        Qt.openUrlExternally(sess.windowUrl)
-        return
-      }
-      // I'm a MEMBER joining an existing session: my daemon only mirrors it after
-      // a joinAck. Send a gameJoin so the host acks + my daemon mirrors the
-      // session, THEN open the window (the joined event carries the windowUrl).
-      Lanchat.gameJoin(Lanchat.selectedRoomId, sess.gameId, {})
-      // Open optimistically — the transport's join POST also creates the mirror
-      // on the member daemon (route_join -> member relays a join). If it 404s
-      // the feed, the joinAck will retry.
+      // Session active: owner opens it, member joins then opens it.
+      if (!root.iAmRoomOwner) Lanchat.gameJoin(Lanchat.selectedRoomId, sess.gameId, {})
       Qt.openUrlExternally(sess.windowUrl)
       return
     }
-    // No session yet: the owner creates pong-lan; a member sends an invite.
-    Lanchat.gameCreate(Lanchat.selectedRoomId, "pong-lan", "vs", {})
+    // No session: only the owner can launch.
+    if (root.iAmRoomOwner) {
+      Lanchat.gameCreate(Lanchat.selectedRoomId, "pong-lan", "vs", {})
+    }
+    // A member with no active session has nothing to do — the gamepad is
+    // disabled for them until the owner starts a game.
   }
 
-  function acceptGameInvite(inv) {
-    Lanchat.gameAccept(inv.roomId, inv.game, inv.mode, {}, inv.from)
+  // The gamepad's affordance per role/state (drives label + enabled).
+  readonly property string gameActionLabel: {
+    if (!root.inRoom) return ""
+    if (root.currentRoomSession) return root.iAmRoomOwner ? "Open game" : "Join game"
+    return root.iAmRoomOwner ? "Start Pong LAN" : "Waiting for host to start a game"
   }
-
-  function declineGameInvite(inv) {
-    Lanchat.gameDecline(inv.roomId, "", inv.from)
-  }
-
-  function currentRoomInvite() {
-    for (var i = 0; i < Lanchat.gameInvites.length; i++)
-      if (Lanchat.gameInvites[i].roomId === Lanchat.selectedRoomId) return Lanchat.gameInvites[i]
-    return null
-  }
+  readonly property bool gameActionEnabled: root.inRoom && (root.currentRoomSession !== null || root.iAmRoomOwner)
 
   // The current Omarchy theme's palette for the room color picker: the
   // canonical token set the daemon-side color records reference. Swatches
@@ -989,74 +978,21 @@ Panel {
               }
 
               // Games platform: a game glyph in the pinned header, only for a
-              // selected ROOM. Clicking opens the active session's game window,
-              // or launches pong-lan if none is active.
+              // selected ROOM. Owner: Start/Open the game. Member: Join the
+              // owner's game (disabled until a session exists — only the room
+              // owner can launch).
               Button {
                 id: gameBtn
                 visible: root.inRoom
+                enabled: root.gameActionEnabled
                 anchors.right: closeChatBtn.left
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
                 text: "\uF11B"  // fa-gamepad
                 fontSize: Style.font.caption
-                foreground: root.currentRoomSession ? Color.accent : Color.foreground
-                tooltipText: root.currentRoomSession ? "Open game" : "Start Pong LAN"
+                foreground: root.currentRoomSession ? Color.accent : (root.gameActionEnabled ? Color.foreground : Color.muted)
+                tooltipText: root.gameActionLabel
                 onClicked: root.launchGame()
-              }
-
-              // Games platform: a pending game-invite banner (the owner sees
-              // this when a member requests a game). Accept starts the session;
-              // Decline dismisses it.
-              Rectangle {
-                id: gameInviteBar
-                visible: root.inRoom && root.currentRoomInvite() !== null
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 22
-                color: Color.popups.background
-                border.color: Color.accent
-                border.width: 1
-
-                Text {
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: root.currentRoomInvite()
-                        ? (root.currentRoomInvite().fromName || "A member") + " wants to play " + root.currentRoomInvite().game
-                        : ""
-                  color: Color.foreground
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                  width: parent.width - 120
-                }
-
-                Button {
-                  id: gameInviteAccept
-                  anchors.right: gameInviteDecline.left
-                  anchors.rightMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: "Accept"
-                  fontSize: Style.font.caption
-                  foreground: Color.accent
-                  onClicked: {
-                    var inv = root.currentRoomInvite()
-                    if (inv) root.acceptGameInvite(inv)
-                  }
-                }
-                Button {
-                  id: gameInviteDecline
-                  anchors.right: parent.right
-                  anchors.rightMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: "Decline"
-                  fontSize: Style.font.caption
-                  foreground: Color.foreground
-                  onClicked: {
-                    var inv = root.currentRoomInvite()
-                    if (inv) root.declineGameInvite(inv)
-                  }
-                }
               }
 
               Button {
