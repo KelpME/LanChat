@@ -58,7 +58,11 @@ Item {
       "ipcTarget": "KelpME.lanchat",
       "manageIpc": false,
       "anchorItem": null,
-      "hostWidget": null
+      "hostWidget": null,
+      // bench switch: whole-panel asserts read height the frame after
+      // toggling; production animation defers that. Animation is
+      // sectionbench's job. Panel forwards it to all three sections.
+      "animateSections": false
     })
     if (!panel) {
       fail("Panel object could not be created")

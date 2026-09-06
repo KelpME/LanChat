@@ -17,6 +17,15 @@ Column {
   // NOTE: anchors.bottom (settings.top) is set at the Panel.qml call site —
   // the `settings` id is file-local to Panel.qml and not visible from here.
   height: roomsHeader.height + (roomsSection.expanded ? roomsListCol.height : 0)
+  // Smooth expand/collapse; the body stays visible during the slide, so
+  // rows scroll under the header edge instead of popping in/out.
+  // animateSections=false is the bench/reduced-motion switch (asserts read
+  // height on the same frame they toggle).
+  property bool animateSections: true
+  Behavior on height {
+    enabled: roomsSection.animateSections
+    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+  }
 
   // ---- inputs from the host panel ----
   property real peerRowH

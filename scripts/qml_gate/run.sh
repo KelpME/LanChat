@@ -34,12 +34,13 @@ cp "$REPO"/shared/SettingsPanel.qml "$BENCH"/shared/
 # Whole-panel bench: runs the REAL Panel.qml, copied next to the shell so
 # panelbench's Qt.createComponent("Panel.qml") resolves inside the bench dir.
 cp "$REPO"/scripts/qml_gate/panelbench.qml "$BENCH"/
+cp "$REPO"/scripts/qml_gate/sectionbench.qml "$BENCH"/
 cp "$REPO"/scripts/qml_gate/bubblebench.qml "$BENCH"/
 cp "$REPO"/scripts/qml_gate/roomcolorbench.qml "$BENCH"/
 cp "$REPO"/scripts/qml_gate/friendbadgebench.qml "$BENCH"/
 cp "$REPO"/Panel.qml "$BENCH"/
 
-for sh in "$BENCH"/shell*.qml "$BENCH"/panelbench.qml "$BENCH"/bubblebench.qml "$BENCH"/friendbadgebench.qml "$BENCH"/roomcolorbench.qml; do
+for sh in "$BENCH"/shell*.qml "$BENCH"/panelbench.qml "$BENCH"/sectionbench.qml "$BENCH"/bubblebench.qml "$BENCH"/friendbadgebench.qml "$BENCH"/roomcolorbench.qml; do
   echo "=== $sh ==="
   WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}" \
     timeout 30 quickshell -p "$sh" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | \

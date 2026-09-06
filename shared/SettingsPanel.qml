@@ -20,10 +20,19 @@ Item {
                Math.min(settingsPanel.hostHeight * 0.8,
                         Math.max(0, settingsPanel.hostHeight - settingsPanel.alertStackBottom - settingsHeader.height - Style.space(12))))
     : 0)
+  // Smooth expand/collapse; the inner settingsCol animates its own height
+  // in step so the body never pops during the transition.
+  // animateSections=false is the bench/reduced-motion switch.
+  property bool animateSections: true
+  Behavior on height {
+    enabled: settingsPanel.animateSections
+    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+  }
 
   property bool expanded: false
   property bool diagExpanded: false
   signal collapseRoomsRequested()
+  signal collapsePeersRequested()
 
   // --- sibling/parent geometry inputs (no out-of-item refs in the body) ---
   // Bottom of the pinned alert stack (PeerList's notifBanner region): the
@@ -121,6 +130,12 @@ Item {
                            Math.min(settingsPanel.hostHeight * 0.8,
                                     Math.max(0, settingsPanel.hostHeight - settingsPanel.alertStackBottom - settingsHeader.height - Style.space(12))))
                 : 0)
+              // Animates in step with the root so the body slides instead
+              // of popping; body stays visible during the transition.
+              Behavior on height {
+                enabled: settingsPanel.animateSections
+                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+              }
 
               // header
               Item {
@@ -140,10 +155,13 @@ Item {
                   anchors.fill: parent
                   onClicked: {
                     settingsPanel.expanded = !settingsPanel.expanded
-                    // Mutually exclusive with Rooms: expanding Settings
-                    // collapses the rooms list so the two never split the
+                    // Mutually exclusive with Peers AND Rooms: expanding
+                    // Settings collapses both so the two never split the
                     // peer-list space between them.
-                    if (settingsPanel.expanded) settingsPanel.collapseRoomsRequested()
+                    if (settingsPanel.expanded) {
+                      settingsPanel.collapseRoomsRequested()
+                      settingsPanel.collapsePeersRequested()
+                    }
                   }
                 }
 

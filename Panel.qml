@@ -31,6 +31,10 @@ Panel {
   // Peer-list row height — single text line (same as room member lines).
   property real peerRowH: Style.space(24)
 
+  // Bench/reduced-motion switch: false disables the 160ms expand/collapse
+  // animation on all three left-column sections (peers, rooms, settings).
+  property bool animateSections: true
+
   // The conversation currently on screen ("" = none selected).
   property string selectedPeerId: ""
 
@@ -751,6 +755,9 @@ Panel {
                 inRoom: root.inRoom
                 showFwAlert: root.showFwAlert
                 bottomInset: roomListSection.sectionHeight
+                animateSections: root.animateSections
+
+                onCollapseSettingsRequested: settings.expanded = false
 
                 friendStateFn: root.friendState
                 shortFpFn: root.shortFp
@@ -776,6 +783,7 @@ Panel {
                 anchors.bottom: settings.top
 
                 peerRowH: root.peerRowH
+                animateSections: root.animateSections
                 settingsCol: settings
                 amRoomOwnerOfFn: root.amRoomOwnerOf
                 selectRoomFn: root.selectRoom
@@ -795,6 +803,7 @@ Panel {
                 expanded: false
                 alertStackBottom: peerListPanel.alertStackBottom
                 hostHeight: parent.height
+                animateSections: root.animateSections
 
                 selectedOwnedRoom: root.selectedOwnedRoom
                 themePalette: root.themePalette
@@ -806,6 +815,7 @@ Panel {
                 shortPath: root.shortPath
 
                 onCollapseRoomsRequested: roomListSection.collapseSection()
+                onCollapsePeersRequested: peerListPanel.collapsePeers()
                 onOpenHelpRequested: root.openHelp()
                 onCommitNameRequested: function(text) { root.commitName(text) }
                 onCopyToClipboardRequested: function(text) { root.copyToClipboard(text) }

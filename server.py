@@ -225,7 +225,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   successful apply (the lanchat.path watcher misses updates that don't touch
 #   server.py), so the reported version is never stale.
 
-VERSION = "1.5.50"
+VERSION = "1.5.51"
 def _git_version() -> str:
     try:
         import subprocess as _sp

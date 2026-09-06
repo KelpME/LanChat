@@ -19,6 +19,9 @@ Item {
 
   RoomListSection {
     id: roomListSection
+    // bench switch: these asserts read height the frame after toggling;
+    // the production animation defers that. Animation is sectionbench's job.
+    animateSections: false
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.bottom: parent.bottom

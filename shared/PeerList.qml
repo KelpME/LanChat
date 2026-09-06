@@ -24,6 +24,16 @@ Item {
   property bool showOnboarding: true
   property bool notifExpanded: true
 
+  // ---- collapsible peers list (same pattern as Rooms/Settings) ---------
+  // The peers list is the column's primary content, so it starts OPEN.
+  // Expanding it is exclusive with Settings only (Rooms and Peers may be
+  // open at the same time); the host panel wires collapseSettingsRequested
+  // to settings.expanded = false.
+  property bool expanded: true
+  property bool animateSections: true
+  signal collapseSettingsRequested()
+  function collapsePeers() { peerListRoot.expanded = false }
+
   // ---- outgoing signals (host panel wires these to its own handlers) ----
   signal peerSelected(string id)
   signal chatClosed()
@@ -37,41 +47,53 @@ Item {
 
   // ---- peers list (moved verbatim from Panel.qml) ----
 
-  // ---- peers list (scrollable) ---------------------------
-  // Clicking blank space in the peer list (below the last row,
-  // or anywhere when no peers are listed) deselects the active
-  // peer so no chat shows on the right. This area sits BEHIND
-  // the ListView, so clicks on an actual peer row still land on
-  // the row's own MouseArea and select it; only clicks that fall
-  // through (empty space) reach here and close the conversation.
-  // The ListView is only interactive (grabber) when it actually
-  // overflows — exactly when rows fill the column and no blank
-  // space exists to click.
-  MouseArea {
-    id: peerListBlankArea
-    anchors.top: notifBanner.bottom
-    anchors.topMargin: Style.spacing.sm
-    anchors.bottom: parent.bottom
-    anchors.bottomMargin: Style.spacing.xs + bottomInset
-    anchors.left: parent.left
-    anchors.right: parent.right
-    visible: selectedPeerId !== ""
-    onClicked: chatClosed()
-  }
-
-  ListView {
-    id: peerList
-    width: parent.width
+  // ---- collapsible peer-list body -------------------------
+  // Wrapper holds the shared anchors; the inner clip item animates its
+  // height to 0 when the section is collapsed (smooth slide under the
+  // banners) instead of snapping the anchors.
+  Item {
+    id: listZone
     anchors.top: notifBanner.bottom
     anchors.topMargin: Style.spacing.sm
     anchors.leftMargin: Style.spacing.sm
     anchors.rightMargin: Style.spacing.sm
     anchors.bottom: parent.bottom
     anchors.bottomMargin: Style.spacing.xs + bottomInset
-    clip: true
-    interactive: peerList.contentHeight > peerList.height
-    model: Lanchat.displayPeers
-    spacing: Style.spacing.xs
+
+    // Clicking blank space in the peer list (below the last row,
+    // or anywhere when no peers are listed) deselects the active
+    // peer so no chat shows on the right. This area sits BEHIND
+    // the ListView, so clicks on an actual peer row still land on
+    // the row's own MouseArea and select it; only clicks that fall
+    // through (empty space) reach here and close the conversation.
+    // The ListView is only interactive (grabber) when it actually
+    // overflows — exactly when rows fill the column and no blank
+    // space exists to click.
+    MouseArea {
+      id: peerListBlankArea
+      anchors.fill: parent
+      visible: selectedPeerId !== ""
+      onClicked: chatClosed()
+    }
+
+    Item {
+      id: listClip
+      width: parent.width
+      height: peerListRoot.expanded ? parent.height : 0
+      clip: true
+      Behavior on height {
+        enabled: peerListRoot.animateSections
+        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+      }
+
+      ListView {
+        id: peerList
+        width: parent.width
+        height: parent.height
+        clip: false
+        interactive: peerList.contentHeight > peerList.height
+        model: Lanchat.displayPeers
+        spacing: Style.spacing.xs
 
     delegate: Rectangle {
       required property var modelData
@@ -205,6 +227,8 @@ Item {
       font.pixelSize: Style.font.caption
       wrapMode: Text.Wrap
       horizontalAlignment: Text.AlignHCenter
+    }
+      }
     }
   }
 
@@ -403,13 +427,51 @@ Item {
     }
   }
 
-  // ---- peers online: pinned above settings ----------------
+  // ---- section header: "Peers ▾ (n)" toggle, same visual language ------
+  // as the Rooms and Settings headers. Sits above the status bar; the
+  // status/alerts stay visible even when the list is collapsed. Opening
+  // the peers list collapses Settings only (Rooms may stay open).
+  Item {
+    id: peersHeader
+    width: parent.width
+    height: Style.space(26)
+
+    Rectangle {
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: 1
+      color: Color.popups.border
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      onClicked: {
+        peerListRoot.expanded = !peerListRoot.expanded
+        if (peerListRoot.expanded) peerListRoot.collapseSettingsRequested()
+      }
+    }
+
+    Text {
+      anchors.left: parent.left
+      anchors.leftMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      text: (peerListRoot.expanded ? "Peers ▾ " : "Peers ▸ ")
+            + "(" + Lanchat.displayPeers.length + ")"
+      color: Color.popups.text
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.weight: Font.Bold
+    }
+  }
+
+  // ---- peers online: pinned under the header ----------------
   Column {
     id: peersOnlineBar
     width: parent.width
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.top: parent.top
+    anchors.top: peersHeader.bottom
     anchors.topMargin: Style.spacing.xs
     spacing: Style.space(3)
 
