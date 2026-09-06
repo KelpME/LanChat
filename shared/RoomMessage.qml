@@ -5,8 +5,8 @@ import qs.Commons
 // Ui override — the extracted file must import it itself (move artifact).
 import qs.Ui
 
-// One room message: meta row (sender + time, member color tint), the
-// member-tinted text bubble with luminance-derived ink, and the room-file
+// One room message: meta row (sender + time), the
+// member-colored text bubble with luminance-derived ink, and the room-file
 // bubble with per-member status chips and the Save/befriend row. Extracted
 // verbatim from Panel.qml's roomList delegate (zero behavior change) — the
 // delegate wrapper stays in Panel.qml so the ListView contract (required
@@ -38,12 +38,8 @@ Column {
     anchors.right: modelData.outgoing ? parent.right : undefined
     text: (modelData.outgoing ? "You · " : modelData.fromName + " · ")
           + roomMessage.timeLabel(modelData.ts)
-    color: {
-      if (!roomMessage.selectedRoom || !roomMessage.selectedRoom.colorsEnabled) return Color.muted
-      var mem = (roomMessage.selectedRoom.members || {})[modelData.from]
-      var col = Lanchat.roomMemberColor(mem)
-      return col !== "" ? col : Color.muted
-    }
+    // Name stays neutral: the room color now lives on the bubble.
+    color: Color.muted
     font.family: Style.font.family
     font.pixelSize: Style.font.caption
   }
@@ -54,33 +50,29 @@ Column {
   // low-contrast color choice yields adapted text, never an
   // excluded swatch). Same function local and remote.
   Rectangle {
-    readonly property color memberTint: {
-      if (!roomMessage.selectedRoom || !roomMessage.selectedRoom.colorsEnabled) return "transparent"
-      var mem = (roomMessage.selectedRoom.members || {})[modelData.from]
-      var col = Lanchat.roomMemberColor(mem)
-      return col !== "" ? col : "transparent"
-    }
     readonly property color bubbleBase: modelData.outgoing
       ? Style.selectedAccentFill : Style.normalFill
-    // Composite the member tint over the base bubble fill
-    // at 25% (low-alpha tint, so the derived ink always
-    // clears the contrast ratio).
+    // Full member color fills the bubble ("my room color"
+    // setting); resolves the raw string here so an unset or
+    // disabled color falls back to the base fill (a coerced
+    // color OBJECT never === the string "transparent").
     readonly property color bubbleColor: {
-      var t = memberTint
-      if (t === "transparent") return bubbleBase
-      return Qt.rgba(t.r * 0.25 + bubbleBase.r * 0.75,
-                     t.g * 0.25 + bubbleBase.g * 0.75,
-                     t.b * 0.25 + bubbleBase.b * 0.75,
-                     Math.max(bubbleBase.a, 0.85))
+      if (!roomMessage.selectedRoom || !roomMessage.selectedRoom.colorsEnabled) return bubbleBase
+      var mem = (roomMessage.selectedRoom.members || {})[modelData.from]
+      var col = Lanchat.roomMemberColor(mem)
+      return col !== "" ? col : bubbleBase
     }
     // Relative luminance (sRGB-linearized) of the bubble
-    // fill; ink flips dark/light at L 0.35.
+    // fill; ink flips dark/light near the equal-contrast
+    // crossover for full-opacity fills (L 0.18 — the old
+    // 0.35 was tuned for the 25% composite and left mid-tone
+    // member colors with ~2.6:1 ink contrast).
     function rlin(c) {
       return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
     }
     readonly property real lum: 0.2126 * rlin(bubbleColor.r)
       + 0.7152 * rlin(bubbleColor.g) + 0.0722 * rlin(bubbleColor.b)
-    readonly property color ink: lum > 0.35 ? Color.background : Color.popups.text
+    readonly property color ink: lum > 0.18 ? Color.background : Color.popups.text
 
     visible: !!(modelData.text !== "") && !(modelData.attachment && modelData.attachment.name)
     width: Math.min(roomMessage.maxWidth,

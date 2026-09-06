@@ -48,7 +48,14 @@ QtObject {
   function sendTypingStopped(peerId) { console.log("stub typingStopped") }
   function loadOlder(peerId) { console.log("stub loadOlder", peerId) }
   function sendTyping(peerId) { console.log("stub typing", peerId) }
-  function roomMemberColor(mem) { return "#888888" }
+  // Mirrors shared/Lanchat.qml roomMemberColor: token "theme" → accent,
+  // else the member's hex, else "" (the #888888 stub constant made
+  // roomcolorbench's member colors unresolvable).
+  function roomMemberColor(mem) {
+    if (!mem || !mem.color) return ""
+    if (mem.color.token === "theme") return String(Color.accent)
+    return mem.color.hex || ""
+  }
   function shellQuote(s) { return "'" + s + "'" }
   function roomSetCanInvite(roomId, peerId, can) { console.log("stub roomSetCanInvite", roomId, peerId, can) }
   property bool roomHostOnline: true
