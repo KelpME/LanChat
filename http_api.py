@@ -142,6 +142,21 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if parsed.path == "/game/feed":
+            # Loopback game feed the game window's browser polls. Carries
+            # roomId+gameId (session scope); returns buffered events since
+            # `after` plus the latest authoritative snapshot. Not gated behind
+            # apiFullAccess (a live game window is not script read-access).
+            import game_kit
+            room_id = (qs.get("roomId") or [""])[0]
+            game_id = (qs.get("gameId") or [""])[0]
+            after = int((qs.get("after") or ["0"])[0] or 0)
+            if not room_id or not game_id:
+                return self._send_json(400, {"ok": False, "error": "roomId and gameId required"})
+            data = game_kit.feed_drain(room_id, game_id, after)
+            if data is None:
+                return self._send_json(404, {"ok": False, "error": "session not found"})
+            return self._send_json(200, {"ok": True, **data})
         self._send_json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self):
@@ -167,6 +182,34 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
             if not server.send_message(to, text):
                 return self._send_json(500, {"ok": False, "error": "delivery failed"})
             return self._send_json(200, {"ok": True})
+        # ---- loopback game control (the game window's transport) ----
+        if parsed.path.startswith("/game/"):
+            # Auth is enforced the same way (token in the JSON body).
+            token = body.get("token")
+            if self._auth_blocked():
+                return self._send_json(429, {"ok": False, "error": "rate limited"})
+            if not self._auth_ok(token):
+                return self._send_json(401, {"ok": False, "error": "unauthorized"})
+            import game_kit
+            room_id = str(body.get("roomId", ""))
+            game_id = str(body.get("gameId", ""))
+            if parsed.path == "/game/join":
+                return self._send_json(200, {"ok": True, **game_kit.route_join(
+                    room_id, game_id, str(body.get("seat", "")), body.get("theme") or {})})
+            if parsed.path == "/game/input":
+                if not room_id or not game_id:
+                    return self._send_json(400, {"ok": False, "error": "roomId and gameId required"})
+                return self._send_json(200, {"ok": True, **game_kit.route_input(
+                    room_id, game_id, str(body.get("action", "")), body.get("value"))})
+            if parsed.path == "/game/drop":
+                if not room_id or not game_id:
+                    return self._send_json(400, {"ok": False, "error": "roomId and gameId required"})
+                return self._send_json(200, {"ok": True, **game_kit.route_drop(
+                    room_id, game_id, str(body.get("seat", "")))})
+            if parsed.path == "/game/leave":
+                if not room_id or not game_id:
+                    return self._send_json(400, {"ok": False, "error": "roomId and gameId required"})
+                return self._send_json(200, {"ok": True, **game_kit.route_leave(room_id, game_id)})
         self._send_json(404, {"ok": False, "error": "not found"})
 
 

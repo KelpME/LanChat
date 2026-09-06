@@ -597,6 +597,9 @@ def handle_game_msg(msg: dict, addr) -> None:
         # Host -> member: authoritative state / discrete event. Cache the
         # latest snapshot for the local feed; emit for the UI.
         _mirror_state(game_id, msg.get("state"))
+        feed_push_snapshot(room_id, game_id, msg.get("state"))
+        if kind == "event" and msg.get("gameEvent") is not None:
+            feed_push_event(room_id, game_id, msg.get("gameEvent"))
         server._emit({"event": "game", "kind": kind, "roomId": room_id,
                       "gameId": game_id,
                       "gameEvent": msg.get("gameEvent") if kind == "event" else None,
@@ -656,6 +659,140 @@ def _mirror_state(game_id, state) -> None:
             return
 
 
+# --------------------------------------------------------------------------
+# Per-session feed buffer (for the local loopback feed the browser polls)
+# --------------------------------------------------------------------------
+
+FEED_MAX_EVENTS = 200  # keep only the latest N queued events per session
+
+
+def _feed(session) -> dict:
+    """Lazy per-session feed buffer: { seq, snapshot, events } where seq is a
+    monotonic cursor and events is a capped list [{ seq, ... }] the browser
+    drains with ?after=<seq>."""
+    if not isinstance(session.get("feed"), dict):
+        session["feed"] = {"seq": 0, "snapshot": None, "events": []}
+    return session["feed"]
+
+
+def feed_push_event(room_id, game_id, game_event) -> None:
+    """Buffer a discrete event for the local feed (host's own sim events or a
+    member's received events). Kept capped; never raises."""
+    try:
+        s = get_session(room_id, game_id)
+        if s is None:
+            return
+        f = _feed(s)
+        with _lock():
+            f["seq"] += 1
+            f["events"].append({"seq": f["seq"], **game_event})
+            if len(f["events"]) > FEED_MAX_EVENTS:
+                del f["events"][: len(f["events"]) - FEED_MAX_EVENTS]
+    except Exception:
+        pass
+
+
+def feed_push_snapshot(room_id, game_id, state) -> None:
+    """Record the latest authoritative snapshot for the local feed."""
+    try:
+        s = get_session(room_id, game_id)
+        if s is None:
+            return
+        with _lock():
+            _feed(s)["snapshot"] = state
+    except Exception:
+        pass
+
+
+def feed_drain(room_id, game_id, after):
+    """Return { snapshot, events, latest } for the loopback feed — events with
+    seq > `after`, plus the latest snapshot. Thread-safe."""
+    s = get_session(room_id, game_id)
+    if s is None:
+        return None
+    with _lock():
+        f = _feed(s)
+        events = [e for e in f["events"] if e["seq"] > (after or 0)]
+        return {"snapshot": f["snapshot"], "events": events, "latest": f["seq"]}
+
+
+# --------------------------------------------------------------------------
+# Loopback control (called by http_api /game/* endpoints — the game window's
+# transport hits these; the daemon relays to the host or applies locally)
+# --------------------------------------------------------------------------
+
+def route_join(room_id, game_id, seat_id, theme) -> dict:
+    """Game window join/rejoin. If we are the room owner we apply locally;
+    otherwise forward a join over the wire to the host. Returns a result dict
+    the endpoint echoes to the browser."""
+    import rooms
+    import server  # deferred, late-bound
+    room = rooms.get_room(room_id)
+    host = (room or {}).get("owner")
+    me = server.host_id()
+    if host == me:
+        s = get_session(room_id, game_id)
+        if s is None:
+            return {"ok": False, "error": "session not found"}
+        if seat_id:
+            player_join(room_id, game_id, seat_id, theme or {})
+        return {"ok": True, "gameId": game_id, "roomId": room_id,
+                "mode": s.get("mode"), "seed": s.get("seed"), "youAre": seat_id or me}
+    if host:
+        send_game(host, {"t": "game", "kind": "join", "roomId": room_id,
+                         "gameId": game_id, "theme": theme or {}, "fromName": server.display_name()})
+        return {"ok": True, "pending": True}
+    return {"ok": False, "error": "host offline — changes frozen"}
+
+
+def route_input(room_id, game_id, action, value) -> dict:
+    """Game window control input. Host applies locally; member forwards to host."""
+    import rooms
+    import server  # deferred, late-bound
+    room = rooms.get_room(room_id)
+    host = (room or {}).get("owner")
+    me = server.host_id()
+    if host == me:
+        apply_input(room_id, game_id, me, action, value)
+        return {"ok": True}
+    if host:
+        send_game(host, {"t": "game", "kind": "input", "roomId": room_id,
+                         "gameId": game_id, "action": action, "value": value,
+                         "fromName": server.display_name()})
+        return {"ok": True}
+    return {"ok": False, "error": "host offline"}
+
+
+def route_drop(room_id, game_id, seat_id) -> dict:
+    """Game window drop. Host applies locally; member forwards to host."""
+    import rooms
+    import server  # deferred, late-bound
+    room = rooms.get_room(room_id)
+    host = (room or {}).get("owner")
+    me = server.host_id()
+    if host == me:
+        player_drop(room_id, game_id, seat_id or me)
+        return {"ok": True}
+    if host:
+        send_game(host, {"t": "game", "kind": "drop", "roomId": room_id,
+                         "gameId": game_id, "fromName": server.display_name()})
+        return {"ok": True}
+    return {"ok": False, "error": "host offline"}
+
+
+def route_leave(room_id, game_id) -> dict:
+    """Game window leave (abandon). Member forwards to host."""
+    import rooms
+    import server  # deferred, late-bound
+    room = rooms.get_room(room_id)
+    host = (room or {}).get("owner")
+    me = server.host_id()
+    if host and host != me:
+        send_game(host, {"t": "game", "kind": "leave", "roomId": room_id,
+                         "gameId": game_id, "fromName": server.display_name()})
+    return {"ok": True}
+
+
 # ---- host sim thread ------------------------------------------------------
 
 def _sim_thread() -> None:
@@ -693,11 +830,14 @@ def _my_id():
 
 
 def _broadcast_snapshot(s) -> None:
-    """Host: send the authoritative snapshot + discrete events to every player."""
+    """Host: send the authoritative snapshot + discrete events to every player,
+    and buffer the snapshot into the HOST's own local feed (the host's browser
+    window reads the local feed, not the wire)."""
     room_id, gid = s.get("roomId"), s.get("gameId")
     state = session_snapshot(room_id, gid)
     if state is None:
         return
+    feed_push_snapshot(room_id, gid, state)
     for fp in list(s.get("players", {}).keys()):
         if fp == _my_id():
             continue  # host's own window reads the local feed, not the wire

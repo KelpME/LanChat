@@ -266,6 +266,60 @@ def test_persistence_roundtrip_drops_game_instance():
         fx.cleanup()
 
 
+def test_feed_buffer_drain_after_cursor():
+    fx = _Fixture()
+    try:
+        _setup(fx)
+        fx.add_bundled("stub", STUB_MANIFEST, STUB_GAME_PY)
+        host = "h" * 40
+        s = game_kit.create_session("room1", "stub", "vs", host, {}, {})
+        gid = s["gameId"]
+        # push events + snapshots into the feed
+        game_kit.feed_push_event("room1", gid, {"type": "ball-bounce"})
+        game_kit.feed_push_snapshot("room1", gid, {"x": 0.5, "score": 1})
+        game_kit.feed_push_event("room1", gid, {"type": "score", "score": 1})
+        # drain from 0 -> both events, seq monotonic
+        d1 = game_kit.feed_drain("room1", gid, 0)
+        assert d1 is not None
+        assert [e["seq"] for e in d1["events"]] == [1, 2]
+        assert d1["snapshot"]["score"] == 1
+        assert d1["latest"] == 2
+        # drain from 2 -> only events after (none), snapshot still present
+        d2 = game_kit.feed_drain("room1", gid, 2)
+        assert d2["events"] == []
+        assert d2["snapshot"]["x"] == 0.5
+        # drain from 1 -> only the second event
+        d3 = game_kit.feed_drain("room1", gid, 1)
+        assert [e["seq"] for e in d3["events"]] == [2]
+        # unknown session -> None
+        assert game_kit.feed_drain("room1", "nope", 0) is None
+        print("  feed buffer drains by after-cursor: OK")
+    finally:
+        fx.cleanup()
+
+
+def test_feed_buffer_capped():
+    fx = _Fixture()
+    try:
+        _setup(fx)
+        fx.add_bundled("stub", STUB_MANIFEST, STUB_GAME_PY)
+        host = "h" * 40
+        s = game_kit.create_session("room1", "stub", "vs", host, {}, {})
+        gid = s["gameId"]
+        # exceed the cap; only the latest FEED_MAX_EVENTS survive
+        n = game_kit.FEED_MAX_EVENTS + 20
+        for i in range(n):
+            game_kit.feed_push_event("room1", gid, {"type": "e", "i": i})
+        d = game_kit.feed_drain("room1", gid, 0)
+        assert len(d["events"]) == game_kit.FEED_MAX_EVENTS
+        # the survivors are the NEWEST (highest seq) — first survivor has seq n-FEED_MAX_EVENTS+1
+        assert d["events"][0]["seq"] == n - game_kit.FEED_MAX_EVENTS + 1
+        assert d["latest"] == n
+        print("  feed buffer caps at FEED_MAX_EVENTS: OK")
+    finally:
+        fx.cleanup()
+
+
 def _main():
     t0 = time.time()
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
