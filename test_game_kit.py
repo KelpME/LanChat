@@ -320,6 +320,35 @@ def test_feed_buffer_capped():
         fx.cleanup()
 
 
+def test_route_join_host_applies():
+    """route_join on the host (we own the room) applies locally."""
+    fx = _Fixture()
+    try:
+        _setup(fx)
+        fx.add_bundled("stub", STUB_MANIFEST, STUB_GAME_PY)
+        host = "h" * 40
+        s = game_kit.create_session("room1", "stub", "vs", host, {}, {})
+        gid = s["gameId"]
+        # patch host_id to be the owner + rooms.get_room so route_join treats us as host
+        import server as _server_mod
+        import rooms as _rooms_mod
+        orig_host = _server_mod.host_id
+        orig_room = _rooms_mod.get_room
+        _server_mod.host_id = lambda: host
+        _rooms_mod.get_room = lambda rid: {"roomId": rid, "owner": host}
+        try:
+            r = game_kit.route_join("room1", gid, "seat2", {"accent": "#000"})
+            assert r["ok"] is True
+            assert r["youAre"] == "seat2"
+            assert "seat2" in game_kit.get_session("room1", gid)["players"]
+            print("  route_join (host) applies locally: OK")
+        finally:
+            _server_mod.host_id = orig_host
+            _rooms_mod.get_room = orig_room
+    finally:
+        fx.cleanup()
+
+
 def _main():
     t0 = time.time()
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

@@ -2989,6 +2989,12 @@ def main() -> None:
     _emit(_ready_event())
     if http_enabled():
         _start_http()
+    # The plain-HTTP loopback game feed is independent of the TLS HTTP API and
+    # always available (the browser game window needs it, cert-free).
+    try:
+        http_api._start_loopback()
+    except Exception:
+        pass
     threading.Thread(target=tcp_loop, daemon=True).start()
     threading.Thread(target=udp_loop, daemon=True).start()
     threading.Thread(target=conn_loop, daemon=True).start()
