@@ -83,18 +83,27 @@ Panel {
   readonly property var currentRoomSession: Lanchat.gameSessions[Lanchat.selectedRoomId] || null
 
   function launchGame() {
-    // A session already active in this room → open its window (any player).
-    if (root.currentRoomSession && root.currentRoomSession.windowUrl) {
-      Qt.openUrlExternally(root.currentRoomSession.windowUrl)
+    var sess = root.currentRoomSession
+    // A session already active in this room:
+    if (sess && sess.windowUrl) {
+      // If I'm the OWNER, my daemon already has the authoritative session — open
+      // the window directly.
+      if (root.selectedRoom && root.selectedRoom.owner === Lanchat.myId) {
+        Qt.openUrlExternally(sess.windowUrl)
+        return
+      }
+      // I'm a MEMBER joining an existing session: my daemon only mirrors it after
+      // a joinAck. Send a gameJoin so the host acks + my daemon mirrors the
+      // session, THEN open the window (the joined event carries the windowUrl).
+      Lanchat.gameJoin(Lanchat.selectedRoomId, sess.gameId, {})
+      // Open optimistically — the transport's join POST also creates the mirror
+      // on the member daemon (route_join -> member relays a join). If it 404s
+      // the feed, the joinAck will retry.
+      Qt.openUrlExternally(sess.windowUrl)
       return
     }
-    // No session yet: the owner creates pong-lan + opens it; a member sends an
-    // invite to the owner (who sees an Accept banner in the header).
-    if (root.selectedRoom && root.selectedRoom.owner === Lanchat.myId) {
-      Lanchat.gameCreate(Lanchat.selectedRoomId, "pong-lan", "vs", {})
-    } else {
-      Lanchat.gameCreate(Lanchat.selectedRoomId, "pong-lan", "vs", {})
-    }
+    // No session yet: the owner creates pong-lan; a member sends an invite.
+    Lanchat.gameCreate(Lanchat.selectedRoomId, "pong-lan", "vs", {})
   }
 
   function acceptGameInvite(inv) {

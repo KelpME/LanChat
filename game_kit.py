@@ -767,6 +767,11 @@ def route_join(room_id, game_id, seat_id, theme) -> dict:
         return {"ok": True, "gameId": game_id, "roomId": room_id,
                 "mode": s.get("mode"), "seed": s.get("seed"), "youAre": seat_id or me}
     if host:
+        # MEMBER side: create a local mirror NOW so this machine's feed can
+        # serve the window immediately (the host's joinAck will populate it).
+        # Without this, the window's first feed poll 404s ("session not found")
+        # and the client appears to "not connect."
+        _mirror_upsert(room_id, game_id, host=host, mode="", game="", seed=None, you_are=seat_id or "")
         send_game(host, {"t": "game", "kind": "join", "roomId": room_id,
                          "gameId": game_id, "theme": theme or {}, "fromName": server.display_name()})
         return {"ok": True, "pending": True}

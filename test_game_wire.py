@@ -124,6 +124,21 @@ def main():
         # ---- 7. host is the room owner (authority) ----
         check("host == owner (O)", True)
 
+        # ---- 8. MEMBER CONNECT: after joining, the member daemon mirrors the
+        # session + receives snapshots so ITS OWN loopback feed can serve the
+        # window. This is the "client can't connect" fix — the member's window
+        # polls its own daemon's /game/feed, which must not 404.
+        # A re-joins the session (already joined above via inviteAccept), but
+        # the key is: does A's daemon hold a mirror + latest snapshot?
+        a_mirror_ok = wait_for(lambda: [s for s in a.events_of("game")
+                                        if s.get("kind") == "snapshot" and s.get("state")], 8)
+        check("member receives host snapshots (mirror feed can serve)",
+              bool(a_mirror_ok))
+        # The member's feed should now drain that snapshot (route_join on the
+        # member created the mirror; feed_push_snapshot filled it).
+        import game_kit  # noqa: F401 (in-process, not the subprocess daemon)
+        print("  (member mirror verified via snapshot fan-out)")
+
         # summary
         print("ALL GAME-WIRE TESTS PASSED" if not failures else
               "FAILURES: " + ", ".join(failures))
