@@ -499,7 +499,14 @@ def load_config() -> None:
 
     token = str(STATE.config.get("token", "")).strip()
     if len(token) < 8:
-        _emit({"event": "error", "message": "lanchat token must be at least 8 chars. Edit ~/.config/omarchy/lanchat.json"})
+        # A missing or too-short token is a real security problem (the TLS API
+        # and the loopback game feed both auth on it) — generate + persist one
+        # rather than run token-less. The old behavior only warned and left the
+        # daemon effectively unauthenticated.
+        _log("token-regenerated")
+        token = secrets.token_hex(16)
+        STATE.config["token"] = token
+        _save_config()
     STATE.config["token"] = token
 
 
