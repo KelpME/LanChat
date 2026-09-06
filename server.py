@@ -43,6 +43,7 @@ import time
 import urllib.parse  # noqa: F401  (used by http_api via server.<name>)
 
 import attachments
+import game_kit
 import history
 import http_api
 
@@ -311,6 +312,7 @@ identity.init(STATE)
 history.init(STATE)
 attachments.init(STATE)
 rooms.init(STATE)
+game_kit.init(STATE)
 http_api.init(STATE)
 
 
