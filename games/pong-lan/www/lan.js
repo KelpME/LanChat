@@ -115,6 +115,7 @@ export function createLoopbackTransport(opts = {}) {
     || ''
   const token = opts.token
     || (typeof window !== 'undefined' && (window.FORGE_LAN_TOKEN || new URLSearchParams(location.search).get('lanToken')))
+    || (typeof window !== 'undefined' && new URLSearchParams(location.search).get('token')) // the window URL carries ?token=
     || ''
   const roomId = opts.roomId
     || (typeof window !== 'undefined' && new URLSearchParams(location.search).get('room'))
