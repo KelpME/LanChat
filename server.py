@@ -224,8 +224,12 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #  1.5.51 — update button: explicitly restart the lanchat.service daemon after a
 #   successful apply (the lanchat.path watcher misses updates that don't touch
 #   server.py), so the reported version is never stale.
+#  1.5.53 — peer and room chats are strictly mutually exclusive: selecting a
+#   peer (while a group chat is open) now closes the room, and the auto-select
+#   of a first peer is skipped while a room chat is open — so you can never have
+#   a peer and a group open as chats at the same time.
 
-VERSION = "1.5.52"
+VERSION = "1.5.53"
 def _git_version() -> str:
     try:
         import subprocess as _sp

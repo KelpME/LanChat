@@ -181,6 +181,10 @@ Panel {
 
   function selectPeer(id) {
     root.confirmUnfriend = false
+    // Mutually exclusive with the room chat (mirror of selectRoom clearing the
+    // peer): picking a peer closes any open group chat.
+    Lanchat.selectedRoomId = ""
+    editingMid = ""
     selectedPeerId = id
     Lanchat.resetHistoryMeta(id)
     Lanchat.refreshHistory(id, 0, 50)
@@ -539,7 +543,8 @@ Panel {
       Lanchat.clearUnread()
       // Refresh firewall state so the peers-online alert is current.
       Lanchat.refreshFirewall()
-      if (selectedPeerId === "" && Lanchat.displayPeers.length > 0)
+      if (selectedPeerId === "" && Lanchat.displayPeers.length > 0 &&
+          Lanchat.selectedRoomId === "")
         selectedPeerId = Lanchat.displayPeers[0].id
       Qt.callLater(function() { chatThreadView.positionViewAtEnd() })
     }
