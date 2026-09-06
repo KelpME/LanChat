@@ -226,7 +226,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   successful apply (the lanchat.path watcher misses updates that don't touch
 #   server.py), so the reported version is never stale.
 
-VERSION = "1.5.51"
+VERSION = "1.5.52"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -1917,6 +1917,10 @@ def _handle_incoming(msg: dict, addr) -> None:
     if msg.get("t") == "roomFile":
         rooms.handle_room_file_msg(msg, addr)
         return
+    # ---- games platform (room-scoped multiplayer, host-authoritative) ----
+    if msg.get("t") == "game":
+        game_kit.handle_game_msg(msg, addr)
+        return
     if msg.get("t") == "attachmentRequest":
         # Recipient wants a file we registered. Stream it back over the socket
         # (sender side). The connection is already authenticated, so the
@@ -2681,6 +2685,114 @@ def handle_command(cmd: dict) -> None:
         _emit({"event": "firewall-status", **_firewall_script("open")})
     elif kind == "firewallClose":
         _emit({"event": "firewall-status", **_firewall_script("close")})
+    # ---- games platform (commands from the UI / local feed) ----
+    elif kind == "gameList":
+        _emit({"event": "game-list", "games": game_kit.discover_games()})
+    elif kind == "gameCreate":
+        # Host/requester side: a member asks to start a game in a room. If we
+        # are the room owner we create the session directly; otherwise we send
+        # an invite to the owner. `members` is the room's member map (used by
+        # the host sim on create).
+        room_id = str(cmd.get("roomId", ""))
+        gname = str(cmd.get("game", ""))
+        mode = str(cmd.get("mode", "vs"))
+        theme = cmd.get("theme") or {}
+        room = rooms.get_room(room_id)
+        if room is None:
+            _emit({"event": "error", "message": "Room not found"})
+        elif room.get("owner") == host_id():
+            s = game_kit.create_session(room_id, gname, mode, host_id(), theme, room.get("members", {}))
+            if s is None:
+                _emit({"event": "error", "message": "Game not available"})
+            else:
+                _emit({"event": "game", "kind": "created", "roomId": room_id,
+                       "gameId": s["gameId"], "game": gname, "mode": mode})
+        else:
+            ok = game_kit.send_game(room.get("owner"), {"t": "game", "kind": "invite",
+                                                        "roomId": room_id, "game": gname,
+                                                        "mode": mode, "theme": theme,
+                                                        "fromName": display_name()})
+            if not ok:
+                _emit({"event": "error", "message": "host offline — changes frozen"})
+    elif kind == "gameAccept":
+        # We are the room owner; a member's invite was accepted in the UI.
+        room_id = str(cmd.get("roomId", ""))
+        gname = str(cmd.get("game", ""))
+        mode = str(cmd.get("mode", "vs"))
+        theme = cmd.get("theme") or {}
+        from_pid = str(cmd.get("from", ""))
+        room = rooms.get_room(room_id)
+        if room is None:
+            _emit({"event": "error", "message": "Room not found"})
+            return
+        s = game_kit.create_session(room_id, gname, mode, host_id(), theme, room.get("members", {}))
+        if s is None:
+            _emit({"event": "error", "message": "Game not available"})
+            return
+        # The inviting member joins as a player.
+        if from_pid and from_pid != host_id():
+            game_kit.player_join(room_id, s["gameId"], from_pid, theme)
+        _emit({"event": "game", "kind": "created", "roomId": room_id,
+               "gameId": s["gameId"], "game": gname, "mode": mode})
+        if from_pid:
+            game_kit.send_game(from_pid, {"t": "game", "kind": "inviteAccept",
+                                          "roomId": room_id, "gameId": s["gameId"],
+                                          "mode": mode, "game": gname, "seed": s.get("seed"),
+                                          "theme": theme})
+    elif kind == "gameDecline":
+        room_id = str(cmd.get("roomId", ""))
+        from_pid = str(cmd.get("from", ""))
+        if from_pid:
+            game_kit.send_game(from_pid, {"t": "game", "kind": "inviteDecline",
+                                          "roomId": room_id, "gameId": str(cmd.get("gameId", "")),
+                                          "fromName": display_name()})
+    elif kind == "gameJoin":
+        # A member (re)joins a session: send a join over the wire to the host.
+        room_id = str(cmd.get("roomId", ""))
+        game_id = str(cmd.get("gameId", ""))
+        room = rooms.get_room(room_id)
+        if room is None:
+            _emit({"event": "error", "message": "Room not found"})
+            return
+        host = room.get("owner")
+        if host == host_id():
+            # we are the host; rejoin locally
+            game_kit.player_join(room_id, game_id, host_id(), cmd.get("theme") or {})
+        elif host:
+            game_kit.send_game(host, {"t": "game", "kind": "join", "roomId": room_id,
+                                      "gameId": game_id, "theme": cmd.get("theme") or {},
+                                      "fromName": display_name()})
+    elif kind == "gameInput":
+        # Member control input: forward to the host over the wire.
+        room_id = str(cmd.get("roomId", ""))
+        game_id = str(cmd.get("gameId", ""))
+        room = rooms.get_room(room_id)
+        host = (room or {}).get("owner")
+        if host == host_id():
+            game_kit.apply_input(room_id, game_id, host_id(), str(cmd.get("action", "")), cmd.get("value"))
+        elif host:
+            game_kit.send_game(host, {"t": "game", "kind": "input", "roomId": room_id,
+                                      "gameId": game_id, "action": str(cmd.get("action", "")),
+                                      "value": cmd.get("value"), "fromName": display_name()})
+    elif kind == "gameDrop":
+        room_id = str(cmd.get("roomId", ""))
+        game_id = str(cmd.get("gameId", ""))
+        room = rooms.get_room(room_id)
+        host = (room or {}).get("owner")
+        if host == host_id():
+            game_kit.player_drop(room_id, game_id, host_id())
+        elif host:
+            game_kit.send_game(host, {"t": "game", "kind": "drop", "roomId": room_id,
+                                      "gameId": game_id, "fromName": display_name()})
+    elif kind == "gameLeave":
+        room_id = str(cmd.get("roomId", ""))
+        game_id = str(cmd.get("gameId", ""))
+        room = rooms.get_room(room_id)
+        host = (room or {}).get("owner")
+        if host and host != host_id():
+            game_kit.send_game(host, {"t": "game", "kind": "leave", "roomId": room_id,
+                                      "gameId": game_id, "fromName": display_name()})
+        # local mirror teardown (host's own leave is a host-side action)
 
 
 def stdin_loop() -> None:
@@ -2880,6 +2992,7 @@ def main() -> None:
     threading.Thread(target=tcp_loop, daemon=True).start()
     threading.Thread(target=udp_loop, daemon=True).start()
     threading.Thread(target=conn_loop, daemon=True).start()
+    game_kit.start_sim_thread()  # host-authoritative games sim (no-ops when no sessions)
     if args.socket:
         # Keep the process alive; systemd supervises it. If every control
         # client drops and none reconnects, still run (network daemon).

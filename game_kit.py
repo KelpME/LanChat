@@ -18,11 +18,12 @@ Design (plans/GAMES-PLATFORM.md, approved 2026-09-06):
   authenticated TLS socket as {"t":"game",...}; the local render feed is a
   loopback HTTP consumer (http_api pattern), never the peer.
 
-Phase 1 scope (this commit): the framework core — Game backend interface,
-registry (bundled + user dirs), session lifecycle, host authority, and
-persistence helpers. All headless-testable (no transport, no QML yet).
-Transport/wire + localhost feed land in Phase 2; the reference game
-(pong_bricks) in Phase 3.
+Phase 1 (committed): framework core — Game backend interface, registry,
+session lifecycle, host authority, join/drop/rejoin, persistence.
+Phase 2 (this): wire transport + localhost feed — {"t":"game",...} wire
+types over the existing TLS socket (send_game + handle_game_msg), and a
+loopback HTTP feed + static web serving. Still headless-testable. The
+reference game (pong_bricks) + host sim thread land in Phase 3.
 
 Ownership: STATE.game_sessions (roomId -> session), STATE.games_lock.
 At-rest crypto reuses the history module's AES-256-GCM helpers (degrades to
@@ -39,6 +40,7 @@ Module contract (matches rooms.py/history.py/attachments.py exactly):
 import json
 import os
 import secrets
+import threading
 import time
 
 # init(state) wiring: STATE is bound once by server.py at import time
@@ -254,6 +256,13 @@ def sessions() -> dict:
 
 
 def _lock():
+    # ensure STATE.game_sessions + STATE.games_lock exist (lazy init also
+    # used by sessions()); the sim thread calls _lock() before any session
+    # exists, so it must never hit a missing attribute.
+    if not hasattr(STATE, "game_sessions"):
+        STATE.game_sessions = {}
+    if not hasattr(STATE, "games_lock"):
+        STATE.games_lock = threading.Lock()
     return STATE.games_lock
 
 
@@ -474,11 +483,230 @@ def _persist() -> None:
                 _log("game-error", game=game_id, op="persist", error=str(e))
 
 
-# --------------------------------------------------------------------------
-# Misc helpers
-# --------------------------------------------------------------------------
-
 def _log(event: str, **kw) -> None:
     import server  # deferred, late-bound
     kw["event"] = event
     server._emit(kw)
+
+
+# --------------------------------------------------------------------------
+# Phase 2: wire transport (daemon ↔ daemon over the existing TLS socket)
+# --------------------------------------------------------------------------
+# All game traffic rides the existing authenticated socket as {"t":"game",...}
+# via server._write — no new ports/security surface. The room OWNER's daemon is
+# the host (runs the sim); members send input and receive snapshots/events.
+#
+# Wire kinds (peer daemon <-> peer daemon):
+#   invite          member->host   {game, mode, theme}         initiate
+#   inviteAccept    host->member   {gameId, mode, seed, theme} start
+#   inviteDecline   host->member   {}                          refuse
+#   join            member->host   {gameId, theme}             live join/rejoin
+#   joinAck         host->member   {gameId, mode, seed, theme, youAre}
+#   drop            member->host   {gameId}                    leave mid-game
+#   input           member->host   {gameId, action, value}     control
+#   snapshot        host->member   {gameId, state}             authoritative state
+#   event           host->member   {gameId, gameEvent}         discrete signal
+#   leave           member->host   {gameId}                    abandon
+#
+# The first version that carries the games protocol (both machines must run it
+# for a game to be joinable — same rule as every lanchat protocol change).
+GAME_MIN_VERSION = "1.5.52"
+
+
+def send_game(peer_id: str, payload: dict) -> bool:
+    """Send a t:"game" envelope to a peer over the existing socket."""
+    import server  # deferred, late-bound
+    payload.setdefault("t", "game")
+    payload.setdefault("from", server.host_id())
+    payload.setdefault("fromName", server.display_name())
+    return server._write(peer_id, payload)
+
+
+def _peer_supports_games(pid: str) -> bool:
+    """Version gate: refuse to start/join a game with a peer whose advertised
+    base version predates the games protocol."""
+    import server  # deferred, late-bound
+    peer = server.find_peer(pid) or {}
+    ver = str(peer.get("version") or "")
+    base = ver.split("-")[0] if ver else ""
+    if not base:
+        return False  # no advertised version = can't verify the protocol exists
+    try:
+        parts = [int(x) for x in base.split(".")]
+    except ValueError:
+        return False
+    want = [int(x) for x in GAME_MIN_VERSION.split(".")]
+    return parts >= want
+
+
+def _base_theme(peer_id: str) -> dict:
+    """A member's theme (accent/normal/border) — best-effort from the daemon's
+    own palette; the real per-player colors come from the frontend later.
+    The daemon doesn't hold the QML palette; carry a neutral placeholder the
+    frontend replaces with the live theme at render time."""
+    return {"accent": "", "normal": "", "border": ""}
+
+
+# ---- inbound t:"game" dispatch (called from server._handle_incoming) ------
+
+def handle_game_msg(msg: dict, addr) -> None:
+    """Route an inbound t:"game" envelope. The connection is already
+    authenticated (from = proven fingerprint), same trust level as chat."""
+    import server  # deferred, late-bound
+    kind = str(msg.get("kind", ""))
+    from_pid = str(msg.get("from", ""))
+    room_id = str(msg.get("roomId", ""))
+    game_id = str(msg.get("gameId", ""))
+    me = server.host_id()
+
+    if kind == "invite":
+        # A member wants to play. We are (or aren't) the room owner; only the
+        # owner runs the sim. Emit the invite to the UI for Accept/Decline.
+        if room_id and not server.is_trusted(from_pid):
+            return
+        server._emit({"event": "game", "kind": "invite", "roomId": room_id,
+                      "from": from_pid, "fromName": str(msg.get("fromName") or ""),
+                      "game": str(msg.get("game", "")), "mode": str(msg.get("mode", "")),
+                      "theme": msg.get("theme") or {}})
+        return
+
+    if kind == "inviteAccept":
+        # The host accepted our invite: session starts. Store the mirror so
+        # our local feed can serve it.
+        if _mirror_upsert(room_id, game_id, host=from_pid, mode=str(msg.get("mode", "")),
+                          game=str(msg.get("game", "")), seed=msg.get("seed"),
+                          theme=msg.get("theme") or {}, you_are=me):
+            server._emit({"event": "game", "kind": "invite-accepted",
+                          "roomId": room_id, "gameId": game_id, "from": from_pid})
+        return
+
+    if kind == "inviteDecline":
+        server._emit({"event": "game", "kind": "invite-declined",
+                      "roomId": room_id, "gameId": game_id, "from": from_pid})
+        return
+
+    if kind == "joinAck":
+        if _mirror_upsert(room_id, game_id, host=from_pid, mode=str(msg.get("mode", "")),
+                          game=str(msg.get("game", "")), seed=msg.get("seed"),
+                          theme=msg.get("theme") or {}, you_are=str(msg.get("youAre", ""))):
+            server._emit({"event": "game", "kind": "joined",
+                          "roomId": room_id, "gameId": game_id, "from": from_pid})
+        return
+
+    if kind in ("snapshot", "event"):
+        # Host -> member: authoritative state / discrete event. Cache the
+        # latest snapshot for the local feed; emit for the UI.
+        _mirror_state(game_id, msg.get("state"))
+        server._emit({"event": "game", "kind": kind, "roomId": room_id,
+                      "gameId": game_id,
+                      "gameEvent": msg.get("gameEvent") if kind == "event" else None,
+                      "state": msg.get("state") if kind == "snapshot" else None})
+        return
+
+    # Everything below is addressed to the HOST (we must own the room and the
+    # session). Non-hosts ignore — mirrors the room owner-authority model.
+    if kind in ("join", "drop", "input", "leave"):
+        s = get_session(room_id, game_id)
+        if s is None or s.get("host") != me:
+            return
+        if kind == "join":
+            if not _peer_supports_games(from_pid):
+                send_game(from_pid, {"t": "game", "kind": "joinAck",
+                                     "roomId": room_id, "gameId": game_id,
+                                     "error": "peer-version-too-old"})
+                return
+            player_join(room_id, game_id, from_pid, msg.get("theme") or _base_theme(from_pid))
+            send_game(from_pid, {"t": "game", "kind": "joinAck", "roomId": room_id,
+                                 "gameId": game_id, "mode": s.get("mode"),
+                                 "game": s.get("game"), "seed": s.get("seed"),
+                                 "theme": msg.get("theme") or {}, "youAre": from_pid})
+            _broadcast_snapshot(s)
+        elif kind == "drop":
+            player_drop(room_id, game_id, from_pid)
+        elif kind == "input":
+            apply_input(room_id, game_id, from_pid, str(msg.get("action", "")), msg.get("value"))
+        elif kind == "leave":
+            player_drop(room_id, game_id, from_pid)
+        return
+
+
+# ---- member-side mirror (for the local feed; host also keeps one) ---------
+
+def _mirror_upsert(room_id, game_id, **kw) -> bool:
+    if not game_id:
+        return False
+    with _lock():
+        s = sessions()
+        room_games = s.setdefault(room_id, {})
+        if game_id in room_games:
+            return True
+        mirror = {"gameId": game_id, "roomId": room_id, "phase": "playing",
+                  "players": {}, "host": kw.get("host"), "mode": kw.get("mode"),
+                  "game": kw.get("game"), "seed": kw.get("seed"),
+                  "theme": kw.get("theme") or {}, "youAre": kw.get("you_are"),
+                  "state": None, "mirror": True}
+        room_games[game_id] = mirror
+        return True
+
+
+def _mirror_state(game_id, state) -> None:
+    for room_id, games in sessions().items():
+        if game_id in games:
+            games[game_id]["state"] = state
+            return
+
+
+# ---- host sim thread ------------------------------------------------------
+
+def _sim_thread() -> None:
+    """Authoritative sim loop on the HOST (owner) daemon: ticks every live
+    session we own and broadcasts snapshots at the game's snapshot_rate."""
+    while True:
+        start = time.time()
+        with _lock():
+            snap_sets = []  # (session, due) collected per game
+            for room_id, games in sessions().items():
+                for gid, s in list(games.items()):
+                    inst = s.get("gameInst")
+                    if inst is None or s.get("host") != _my_id():
+                        continue  # only host sims tick here
+                    rate = getattr(inst, "snapshot_rate", 20) or 20
+                    tick_session(room_id, gid, 1.0 / (getattr(inst, "tick_rate", 60) or 60))
+                    s.setdefault("_last_snap", 0)
+                    due = (start - s["_last_snap"]) >= (1.0 / rate)
+                    if due:
+                        s["_last_snap"] = start
+                        snap_sets.append(s)
+        for s in snap_sets:
+            try:
+                _broadcast_snapshot(s)
+            except Exception:
+                pass
+        # sleep to approx tick_rate (cap 200Hz to avoid busy-spin)
+        elapsed = time.time() - start
+        time.sleep(max(0.0, (1.0 / 200.0) - elapsed))
+
+
+def _my_id():
+    import server  # deferred, late-bound
+    return server.host_id()
+
+
+def _broadcast_snapshot(s) -> None:
+    """Host: send the authoritative snapshot + discrete events to every player."""
+    room_id, gid = s.get("roomId"), s.get("gameId")
+    state = session_snapshot(room_id, gid)
+    if state is None:
+        return
+    for fp in list(s.get("players", {}).keys()):
+        if fp == _my_id():
+            continue  # host's own window reads the local feed, not the wire
+        send_game(fp, {"t": "game", "kind": "snapshot", "roomId": room_id,
+                       "gameId": gid, "state": state})
+
+
+def start_sim_thread() -> None:
+    """Start the daemon-wide host sim thread (called once at daemon init)."""
+    t = threading.Thread(target=_sim_thread, daemon=True)
+    t.start()
+
