@@ -217,7 +217,8 @@ Column {
             anchors.rightMargin: Style.spacing.sm
             anchors.verticalCenter: parent.verticalCenter
             text: Object.keys(roomGroup.room.members || {}).length
-            color: Color.muted
+            color: Color.accent
+            font.bold: true
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
           }
@@ -232,7 +233,7 @@ Column {
             anchors.verticalCenter: parent.verticalCenter
             text: roomGroup.expanded ? "▾" : "▸"
             fontSize: Style.font.caption
-            foreground: Color.muted
+            foreground: Color.accent
             tooltipText: roomGroup.expanded ? "Hide members" : "Show members"
             onClicked: roomGroup.expanded = !roomGroup.expanded
           }
@@ -242,11 +243,13 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.sm
             anchors.verticalCenter: parent.verticalCenter
-            visible: modelData.roomId === Lanchat.selectedRoomId
-                     && !roomGroup.orphaned
+            // Always visible so you can leave any non-orphaned group without
+            // first selecting it (a group you still belong to is always
+            // leave-able).
+            visible: !roomGroup.orphaned
             text: "✕"
             fontSize: Style.font.caption
-            foreground: Color.muted
+            foreground: Color.urgent
             tooltipText: "Leave this room"
             onClicked: roomsSection.roomLeaveRequested()
           }
@@ -255,8 +258,10 @@ Column {
             anchors.right: parent.right
             anchors.rightMargin: Style.spacing.sm
             anchors.verticalCenter: parent.verticalCenter
-            visible: modelData.roomId === Lanchat.selectedRoomId
-                     && roomGroup.orphaned
+            // Always visible for orphaned groups (same principle as the leave
+            // ✕ on live groups): forget is the only action an orphaned room
+            // supports, so it mustn't require selecting the group first.
+            visible: roomGroup.orphaned
             text: "forget"
             fontSize: Style.font.caption
             foreground: Color.urgent

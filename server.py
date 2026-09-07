@@ -258,8 +258,14 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   it opens, so the update badge/button already reflects whether a new version
 #   is available without a manual click. Re-entry guarded so a startup check
 #   never stacks with a manual one; a plain CURRENT is a no-op.
+#  1.5.57 — group list: the leave ✕ (and orphaned-room forget) is always
+#   visible, no longer hidden until the group is selected — you can leave any
+#   group without opening its chat first. Visibility fixes: the member-count
+#   badge and the collapse ▾/▸ button are now Color.accent (bold badge), and
+#   the leave ✕ is Color.urgent, so all three read clearly instead of
+#   low-contrast muted.
 
-VERSION = "1.5.56"
+VERSION = "1.5.57"
 def _git_version() -> str:
     try:
         import subprocess as _sp
