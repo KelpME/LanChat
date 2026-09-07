@@ -117,11 +117,16 @@ Column {
       anchors.topMargin: Style.space(5)
       anchors.rightMargin: Style.space(5)
       text: parent.copied ? "\u2713" : "\uF0C5"
-      color: parent.copied ? Color.accent : Color.muted
+      // Contrast: the copy glyph sits on the bubble fill (normalFill /
+      // selectedAccentFill), not the panel — Color.muted is tuned for the
+      // panel background and disappears on the bubble. popups.text is the
+      // same ink the message body uses, so the icon always reads; the
+      // checkmark stays accent for the copied confirmation.
+      color: parent.copied ? Color.accent : Color.popups.text
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
       visible: parent.hovered || parent.copied
-      opacity: parent.copied ? 1.0 : 0.8
+      opacity: parent.copied ? 1.0 : 0.85
 
       MouseArea {
         anchors.fill: parent
