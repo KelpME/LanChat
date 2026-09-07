@@ -58,18 +58,15 @@ Column {
     // before the friend accepts.
     visible: !(modelData.friendRequest && modelData.held)
     readonly property real bubbleMaxWidth: chatMessage.maxWidth
-    // Minimum readable width: a short message must never compress the
-    // inner Column (and wrap its text into unreadable slivers).
-    // (Style.space(180) evaluates NaN in some bench contexts — built from
-    // proven space() values instead.)
-    readonly property real minBubbleW: Math.min(bubbleMaxWidth,
-                                                Style.space(14) * 13)
     readonly property real bubblePaddingX: Style.space(10)
     readonly property real bubblePaddingY: Style.space(6)
+    readonly property real bubbleExtra: Style.space(6)
 
-    width: Math.max(minBubbleW,
-                    Math.min(bubbleMaxWidth,
-                             messageText.width + bubblePaddingX * 2 + Style.space(6)))
+    // Hug the text: bubble = text's natural (unwrapped) width + padding,
+    // capped. implicitWidth is wrap-independent, so there is no cycle —
+    // short messages shrink the bubble, long ones grow to the cap and wrap.
+    width: Math.min(bubbleMaxWidth,
+                    messageText.implicitWidth + bubblePaddingX * 2 + bubbleExtra)
     height: innerCol.childrenRect.height + bubblePaddingY * 2
     radius: Math.max(Style.cornerRadius, Style.space(6))
     // Horizontal alignment via x — anchors on a Column child disable the
@@ -137,13 +134,13 @@ Column {
       }
 
       // ---- row 2: the message text ----------------------------------------
-      // width = innerCol width CLAMPED by the unwrapped line length: short
-      // texts size the bubble to their natural width; long texts fill up
-      // to the cap and wrap. (implicitWidth is wrap-independent, so the
-      // bubble width binding has no cycle through the wrapping.)
+      // Fill the inner width; the BUBBLE decides the width from the text's
+      // natural implicitWidth (capped) — the text never constrains itself
+      // through its own rendered width, so wrapping behaves exactly like
+      // any chat app: grow to cap, then wrap.
       Text {
         id: messageText
-        width: Math.min(innerCol.width, implicitWidth)
+        width: innerCol.width
         // Show the attachment (paperclip + name) so an attachment-only
         // message isn't a blank bubble; text + attachment stack.
         text: (modelData.attachment && modelData.attachment.name)
