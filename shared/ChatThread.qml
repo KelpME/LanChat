@@ -97,7 +97,7 @@ ListView {
       ChatMessage {
         id: chatMsg
         modelData: msgDelegate.modelData
-        maxWidth: chatThread.width * 0.8
+        maxWidth: chatThread.width * 2 / 3
         editingMid: chatThread.editingMid
         timeLabel: chatThread.timeLabel
         onEditRequested: function(mid, text) { chatThread.editRequested(mid, text) }
