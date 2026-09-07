@@ -479,7 +479,7 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       elide: Text.ElideRight
       text: Lanchat.daemonState === "running"
-        ? ((Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online")
+        ? "(" + Lanchat.onlineCount + ") online"
         : (Lanchat.daemonState === "starting"
            ? "Starting daemon…"
            : "⚠ Daemon not running — lanchat is offline")
