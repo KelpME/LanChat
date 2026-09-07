@@ -270,7 +270,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.65"
+VERSION = "1.5.66"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2818,6 +2818,14 @@ def handle_command(cmd: dict) -> None:
         _emit({"event": "firewall-status", **_firewall_script("open")})
     elif kind == "firewallClose":
         _emit({"event": "firewall-status", **_firewall_script("close")})
+    elif kind == "setLastOpen":
+        # UI session state: which chat was last open (peer id, roomId, or ""
+        # for none). Persisted so the panel reopens the same view on boot.
+        t = str(cmd.get("type", ""))
+        i = str(cmd.get("id", ""))
+        if t in ("peer", "room", "none"):
+            STATE.config["lastOpen"] = {"type": t, "id": i}
+            _save_config()
 
 
 def stdin_loop() -> None:
@@ -2929,6 +2937,7 @@ def _ready_event() -> dict:
         "sendDelay": STATE.config.get("sendDelay", 0),
         "apiFullAccess": api_full_access(),
         "panelSize": panel_size(),
+        "lastOpen": STATE.config.get("lastOpen", {"type": "none", "id": ""}),
         "customW": int(STATE.config.get("customW", 0) or 0),
         "customH": int(STATE.config.get("customH", 0) or 0),
         "peerColW": int(STATE.config.get("peerColW", 0) or 0),

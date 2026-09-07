@@ -672,6 +672,14 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setPanelSize", size: size }) + "\n")
   }
 
+  // Persist which chat the UI has open (peer id, roomId, or none) so the
+  // panel reopens the same view on next boot.
+  property var lastOpen: {"type": "none", "id": ""}
+  function setLastOpen(t, id) {
+    lastOpen = {"type": t, "id": id || ""}
+    daemon.write(JSON.stringify({ cmd: "setLastOpen", type: t, id: id || "" }) + "\n")
+  }
+
   // Set a manual pixel size for the panel. 0 on either axis means "follow
   // the preset" for that axis; persisted so the size survives a restart.
   function setCustomSize(w, h) {
@@ -794,6 +802,7 @@ QtObject {
       if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
       if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
       if (obj.panelSize !== undefined) lanchat.panelSize = obj.panelSize
+      if (obj.lastOpen !== undefined) lanchat.lastOpen = obj.lastOpen
       if (obj.visibility !== undefined) lanchat.visibility = obj.visibility
       if (obj.acceptRequests !== undefined) lanchat.acceptRequests = obj.acceptRequests
       if (obj.customW !== undefined) lanchat.customW = obj.customW

@@ -186,6 +186,7 @@ Panel {
     Lanchat.selectedRoomId = ""
     editingMid = ""
     selectedPeerId = id
+    Lanchat.setLastOpen("peer", id)
     Lanchat.resetHistoryMeta(id)
     Lanchat.refreshHistory(id, 0, 50)
     chatThreadView.positionViewAtEnd()
@@ -268,6 +269,7 @@ Panel {
     editingMid = ""
     selectedPeerId = ""
     Lanchat.selectedRoomId = ""
+    Lanchat.setLastOpen("none", "")
   }
 
   // Select a room (mutually exclusive with the peer chat) and pull its history.
@@ -277,6 +279,7 @@ Panel {
     editingMid = ""
     selectedPeerId = ""
     Lanchat.selectRoom(roomId)
+    Lanchat.setLastOpen("room", roomId)
   }
 
   function leaveSelectedRoom() {
@@ -543,9 +546,15 @@ Panel {
       Lanchat.clearUnread()
       // Refresh firewall state so the peers-online alert is current.
       Lanchat.refreshFirewall()
-      if (selectedPeerId === "" && Lanchat.displayPeers.length > 0 &&
-          Lanchat.selectedRoomId === "")
-        selectedPeerId = Lanchat.displayPeers[0].id
+      if (selectedPeerId === "" && Lanchat.selectedRoomId === "") {
+        // Restore the last-open chat (peer, room, or nothing) instead of
+        // defaulting to the first peer in the list.
+        var lo = Lanchat.lastOpen || {}
+        if (lo.type === "peer" && lo.id)
+          root.selectPeer(lo.id)
+        else if (lo.type === "room" && lo.id)
+          root.selectRoom(lo.id)
+      }
       Qt.callLater(function() { chatThreadView.positionViewAtEnd() })
     }
   }

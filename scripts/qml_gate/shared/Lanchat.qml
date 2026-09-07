@@ -124,6 +124,8 @@ QtObject {
   function applyUpdate() { console.log("stub applyUpdate") }
   function setMyName(n) { console.log("stub setMyName", n) }
   function setPanelSize(s) { console.log("stub setPanelSize", s); panelSize = s }
+  property var lastOpen: {"type": "none", "id": ""}
+  function setLastOpen(t, id) { console.log("stub setLastOpen", t, id); lastOpen = {"type": t, "id": id || ""} }
   function setPeerColW(w) { console.log("stub setPeerColW", w); peerColW = w }
   function setCustomSize(w, h) { console.log("stub setCustomSize", w, h); customW = w; customH = h }
   function setDownloadDir(d) { console.log("stub setDownloadDir", d) }
