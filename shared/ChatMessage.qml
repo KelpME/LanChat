@@ -158,12 +158,15 @@ Column {
       }
 
       // ---- row 3: timestamp, same inside edge ------------------------------
+      // Outgoing fill is a translucent accent wash (alpha 0.18) — a dimmed
+      // light text on it is invisible against a light wallpaper. Same ink
+      // as the message body, full opacity; received side keeps 0.7.
       Text {
         id: timeText
         x: modelData.outgoing ? innerCol.width - implicitWidth : 0
         text: chatMessage.timeLine
         color: Color.popups.text
-        opacity: 0.7
+        opacity: modelData.outgoing ? 1.0 : 0.7
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
