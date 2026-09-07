@@ -57,7 +57,7 @@ Item {
             text: roomMsgDelegate.index > 0 && roomView.roomThread[roomMsgDelegate.index - 1]
                   ? (roomView.roomThread[roomMsgDelegate.index - 1].outgoing ? "You" : (roomView.roomThread[roomMsgDelegate.index - 1].fromName || "them"))
                   : ""
-            color: Color.muted
+            color: Color.popups.text
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
           }
@@ -71,7 +71,7 @@ Item {
           Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: roomMsgDelegate.modelData.outgoing ? "You" : (roomMsgDelegate.modelData.fromName || "them")
-            color: Color.muted
+            color: Color.popups.text
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
           }

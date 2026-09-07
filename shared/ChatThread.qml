@@ -74,7 +74,7 @@ ListView {
           text: msgDelegate.index > 0 && chatThread.thread[msgDelegate.index - 1]
                 ? (chatThread.thread[msgDelegate.index - 1].outgoing ? "You" : (chatThread.thread[msgDelegate.index - 1].fromName || "them"))
                 : ""
-          color: Color.muted
+          color: Color.popups.text
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
         }
@@ -88,7 +88,7 @@ ListView {
         Text {
           anchors.horizontalCenter: parent.horizontalCenter
           text: msgDelegate.modelData.outgoing ? "You" : (msgDelegate.modelData.fromName || "them")
-          color: Color.muted
+          color: Color.popups.text
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
         }
