@@ -72,7 +72,7 @@ Column {
     // Horizontal alignment via x — anchors on a Column child disable the
     // whole positioner ("Column will not function"): left on outgoing,
     // right on received.
-    x: modelData.outgoing ? 0 : chatMessage.width - width
+    x: modelData.outgoing ? chatMessage.width - width : 0
     border.width: modelData.outgoing ? 0 : 1
     border.color: Style.normalBorderColor
     color: modelData.outgoing
@@ -98,7 +98,7 @@ Column {
         id: btnRow
         spacing: Style.space(8)
         height: Style.space(13)
-        x: modelData.outgoing ? 0 : innerCol.width - btnRow.implicitWidth
+        x: modelData.outgoing ? innerCol.width - btnRow.implicitWidth : 0
 
         Text {
           text: chatMessage.copied ? "\u2713" : "\uF0C5"
@@ -154,7 +154,7 @@ Column {
 
       // ---- row 3: timestamp, same inside edge ------------------------------
       Text {
-        x: modelData.outgoing ? 0 : innerCol.width - implicitWidth
+        x: modelData.outgoing ? innerCol.width - implicitWidth : 0
         text: chatMessage.timeLine
         color: Color.popups.text
         opacity: 0.7
