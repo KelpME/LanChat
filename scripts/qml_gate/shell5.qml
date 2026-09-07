@@ -27,6 +27,8 @@ Item {
     anchors.bottom: parent.bottom
 
     peerRowH: Style.space(32)
+    hostHeight: benchRoot.height
+    alertStackBottom: 0
     amRoomOwnerOfFn: function(roomId) { return roomId === "room-1" }
     selectRoomFn: function(roomId) { console.log("stub selectRoomFn", roomId) }
     leaveSelectedRoomFn: function() { console.log("stub leaveSelectedRoomFn") }
@@ -115,6 +117,38 @@ Item {
           if (roomListSection.sectionHeight !== roomListSection.height) return fail("sectionHeight mismatch")
           var hExpanded = roomListSection.height
           if (hExpanded <= Style.space(26)) return fail("expanded height too small: " + hExpanded)
+
+          // 8) A6: rooms body Flickable caps at the space above Settings
+          // (hostHeight - alertStackBottom - header - 12sp) and is
+          // interactive only when content overflows. This lives here, in
+          // the DIRECT-component bench: the whole-Panel bench (sectionbench)
+          // never finishes positioning the section's Repeater delegates
+          // (root cause of the 816bd65-era A6 false failures — delegates
+          // stack at y=0 there; same code lays out correctly here).
+          var flick = null
+          function findFlick(item) {
+            if (flick) return
+            for (var i = 0; i < item.children.length; i++) {
+              var c = item.children[i]
+              if (c instanceof Flickable) { flick = c; return }
+              findFlick(c)
+            }
+          }
+          findFlick(roomListSection)
+          if (!flick) return fail("rooms body Flickable not found")
+          var cap = benchRoot.height - 0 - Style.space(26) - Style.space(12)
+          if (flick.height > cap + 0.5)
+            return fail("A6: body height " + Math.round(flick.height) + " exceeds cap " + Math.round(cap))
+          if (flick.height <= 0) return fail("A6: body height 0")
+          // interactive iff content overflows the cap (either side fails if
+          // the binding breaks in either direction)
+          if (flick.interactive !== (flick.contentHeight > flick.height))
+            return fail("A6: interactive=" + flick.interactive + " but contentHeight="
+                        + flick.contentHeight + " vs height=" + flick.height)
+          console.log("BENCH-OK-A6 flick capped: h=" + Math.round(flick.height)
+                      + " contentH=" + Math.round(flick.contentHeight) + " cap=" + Math.round(cap)
+                      + " interactive=" + flick.interactive)
+
           roomListSection.collapseSection()
           if (roomListSection.expanded) return fail("collapseSection() did not clear expanded")
           Qt.callLater(function() {

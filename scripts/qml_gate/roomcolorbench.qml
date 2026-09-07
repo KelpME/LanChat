@@ -4,7 +4,9 @@
 //   1. p1 bubble is exactly #D35F5F (full member color, not a 25% composite)
 //   2. p2 bubble is exactly #1A3A6B
 //   3. p1 ink != p2 ink (luminance flip works at full opacity)
-//   4. meta text color is Color.muted for both, NOT member color
+//   4. (1.5.65) the meta "Name · time" row no longer exists — the sender
+//      name lives on the voice-change dividers (RoomView) and the time rides
+//      the bubble corner, so there is no meta text to assert muted.
 // Then colorsEnabled = false (whole benchRoom object REASSIGNED — mutating a
 // JS object field fires no QML change notification): both bubbles fall back
 // to the base fill (no member hex).
@@ -110,7 +112,6 @@ Item {
 
   function checkOne(rec, expHex, otherInk) {
     if (!rec.bubble) return fail("bubble Rectangle not found for " + rec.mid)
-    if (!rec.meta) return fail("meta Text not found for " + rec.mid)
     var got = norm(rec.bubble.bubbleColor)
     if (got !== norm(expHex))
       return fail(rec.mid + " bubble is " + got + ", expected " + expHex
@@ -121,11 +122,7 @@ Item {
         return fail(rec.mid + " ink equals sibling ink (" + mine + ")"
                     + " — luminance flip failed at full opacity")
     }
-    var metaCol = norm(rec.meta.color)
-    if (metaCol !== norm(Color.muted))
-      return fail(rec.mid + " meta text color is " + metaCol
-                  + ", expected Color.muted (" + norm(Color.muted)
-                  + "), NOT member color")
+    // meta row removed in 1.5.65: names on dividers, time on the bubble.
     console.log("BENCH-ROOMCOLOR-OK " + rec.mid + " bubble is " + expHex)
     return true
   }
@@ -139,7 +136,6 @@ Item {
     var ink1 = norm(recs[0].bubble.ink)
     if (!checkOne(recs[0], "#D35F5F", null)) return
     if (!checkOne(recs[1], "#1A3A6B", ink1)) return
-    console.log("BENCH-ROOMCOLOR-OK meta text color is Color.muted for both, NOT member color")
     console.log("BENCH-ROOMCOLOR-OK p1 ink != p2 ink (luminance flip works at full opacity)")
     // REASSIGN the whole var property: field mutation
     // (benchRoom.colorsEnabled = false) fires no QML change

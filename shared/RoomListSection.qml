@@ -118,15 +118,24 @@ Column {
   Flickable {
     id: roomsBodyFlick
     width: parent.width
+    // Explicit content-height source: childrenRect (the positioner's actual
+    // laid-out geometry) instead of the Column's implicitHeight. In the
+    // whole-Panel bench the populated-but-zero implicitHeight read made
+    // contentHeight 0 and collapsed the body; childrenRect is computed from
+    // the same layout pass that sizes the delegates, so it can't disagree
+    // with them. (max of the two: childrenRect is authoritative once laid
+    // out, implicitHeight is a safety floor if a pass hasn't run yet.)
+    readonly property real bodyContentH: Math.max(roomsListCol.childrenRect.height,
+                                                  roomsListCol.implicitHeight)
     height: roomsSection.expanded
       ? (roomsSection.hostHeight > 0
-         ? Math.max(0, Math.min(roomsListCol.implicitHeight,
+         ? Math.max(0, Math.min(bodyContentH,
                                 Math.max(Style.space(26),
                                          roomsSection.hostHeight - roomsSection.alertStackBottom - roomsHeader.height - Style.space(12))))
-         : roomsListCol.implicitHeight)
+         : bodyContentH)
       : 0
     contentWidth: width
-    contentHeight: roomsListCol.implicitHeight
+    contentHeight: bodyContentH
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     interactive: contentHeight > height
