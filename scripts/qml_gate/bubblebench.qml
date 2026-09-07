@@ -63,11 +63,13 @@ Item {
     console.log("BENCH-BUBBLE delegate modelData = " + JSON.stringify(msg.modelData))
     if (!msg.modelData || msg.modelData.mid !== "m1")
       return fail("delegate's modelData did NOT resolve (mid=" + (msg.modelData && msg.modelData.mid) + ")")
-    // The bubble text item: id messageText lives inside the bubble Rectangle
+    // The bubble text item: the bubble Rectangle is the child with a
+    // `bubblePaddingX` property (1.5.70 layout); its messageText child
+    // carries the resolved text. (copied moved to the ChatMessage root.)
     var bubbleText = null
     for (var i = 0; i < msg.children.length; i++) {
       var kid = msg.children[i]
-      if (kid.hasOwnProperty && kid.hasOwnProperty("copied")) {
+      if (kid.bubblePaddingX !== undefined) {
         for (var k = 0; k < kid.children.length; k++) {
           if (kid.children[k].text !== undefined && kid.children[k].text === "ping") bubbleText = kid.children[k]
         }

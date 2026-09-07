@@ -270,7 +270,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.70"
+VERSION = "1.5.71"
 def _git_version() -> str:
     try:
         import subprocess as _sp

@@ -40,37 +40,41 @@ Column {
     + (modelData.edited ? " (edited)" : "")
     + (modelData.outgoing && modelData.mid && Lanchat.readReceipts[modelData.mid] ? " ✓" : "")
   // Hover state lives on the root now (covers the buttons row too).
-  readonly property bool hovered: msgHover.containsMouse
+  // HoverHandler is a non-visual QObject: it covers the whole delegate
+  // WITHOUT participating in the Column's layout (a filling MouseArea
+  // would either break the positioner or bind its height to it — loop).
+  readonly property bool hovered: msgHover.hovered
   property bool copied: false
 
-  // Whole-delegate hover probe (buttons only, NoButton — never steals
-  // clicks from the bubble or its children).
-  MouseArea {
+  HoverHandler {
     id: msgHover
-    anchors.fill: parent
-    hoverEnabled: true
-    acceptedButtons: Qt.NoButton
   }
 
   // ---- row 1: buttons, justified toward the inside edge -----------------
   // Fixed row height so showing/hiding the glyphs never shifts layout.
+  // Horizontal alignment via `x` — anchors inside a Column are illegal
+  // ("Column will not function"): left on outgoing, right on received.
   Row {
+    id: msgButtons
     spacing: Style.space(10)
     height: Style.space(14)
-    anchors.left: modelData.outgoing ? parent.left : undefined
-    anchors.right: modelData.outgoing ? undefined : parent.right
+    x: modelData.outgoing ? 0 : chatMessage.width - msgButtons.implicitWidth
 
     // Copy (both voices); flashes a checkmark after copying.
+    // opacity, NOT visible: a fully-hidden Row child makes the Column
+    // treat the whole row as empty (min-repro: probe11) and stack the
+    // bubble on top of the buttons. Opacity keeps the row occupying
+    // its slot; mouse events still need the visible guard.
     Text {
       text: chatMessage.copied ? "\u2713" : "\uF0C5"
       color: chatMessage.copied ? Color.accent : Color.popups.text
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
-      visible: chatMessage.hovered || chatMessage.copied
-      opacity: chatMessage.copied ? 1.0 : 0.85
+      opacity: (chatMessage.hovered || chatMessage.copied) ? (chatMessage.copied ? 1.0 : 0.85) : 0.0
 
       MouseArea {
         anchors.fill: parent
+        enabled: chatMessage.hovered || chatMessage.copied
         onClicked: {
           chatMessage.copyRequested(modelData.text)
           chatMessage.copied = true
@@ -79,17 +83,17 @@ Column {
       }
     }
 
-    // Edit (outgoing only, on hover).
+    // Edit (outgoing only, on hover). Same opacity trick.
     Text {
-      visible: modelData.outgoing && (chatMessage.hovered || chatMessage.editingMid === modelData.mid)
       text: "\uF040"
       color: Color.popups.text
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
-      opacity: 0.85
+      opacity: (modelData.outgoing && (chatMessage.hovered || chatMessage.editingMid === modelData.mid)) ? 0.85 : 0.0
 
       MouseArea {
         anchors.fill: parent
+        enabled: modelData.outgoing && (chatMessage.hovered || chatMessage.editingMid === modelData.mid)
         onClicked: chatMessage.editRequested(modelData.mid, modelData.text)
       }
     }
@@ -115,8 +119,10 @@ Column {
     width: Math.min(bubbleMaxWidth, messageText.implicitWidth + bubblePaddingX * 2 + Style.space(20))
     height: messageText.implicitHeight + bubblePaddingY * 2
     radius: Math.max(Style.cornerRadius, Style.space(6))
-    anchors.left: modelData.outgoing ? undefined : parent.left
-    anchors.right: modelData.outgoing ? parent.right : undefined
+    // Horizontal alignment via x — anchors (even left/right-only) on a
+    // Column child disable the whole positioner ("Column will not
+    // function"): left on outgoing, right on received.
+    x: modelData.outgoing ? 0 : chatMessage.width - width
     border.width: modelData.outgoing ? 0 : 1
     border.color: Style.normalBorderColor
     color: modelData.outgoing
@@ -151,8 +157,7 @@ Column {
 
   // ---- row 3: timestamp, justified to the same inside edge --------------
   Text {
-    anchors.left: modelData.outgoing ? parent.left : undefined
-    anchors.right: modelData.outgoing ? undefined : parent.right
+    x: modelData.outgoing ? 0 : chatMessage.width - implicitWidth
     text: chatMessage.timeLine
     color: Color.popups.text
     opacity: 0.7
