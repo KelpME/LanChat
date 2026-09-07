@@ -253,8 +253,13 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   lost/rolled-back lanchat.json), the friend is automatically restored at the
 #   next start — nobody has to re-add anyone manually. A deliberate unfriend
 #   removes the fingerprint from the ledger so it can't resurrect.
+#  1.5.56 — auto-check for updates at startup: the app runs the read-only
+#   git HEAD comparison (the same check the refresh button triggers) as soon as
+#   it opens, so the update badge/button already reflects whether a new version
+#   is available without a manual click. Re-entry guarded so a startup check
+#   never stacks with a manual one; a plain CURRENT is a no-op.
 
-VERSION = "1.5.55"
+VERSION = "1.5.56"
 def _git_version() -> str:
     try:
         import subprocess as _sp

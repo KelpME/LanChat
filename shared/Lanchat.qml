@@ -185,6 +185,7 @@ QtObject {
   // Compare local HEAD vs remote HEAD (read-only). Runs in a background
   // Process so the UI never blocks; tolerant of an offline machine.
   function checkForUpdate() {
+    if (lanchat.updateChecking) return  // already checking (startup + click)
     var dir = lanchat.pluginDir()
     if (!dir) { lanchat.updateError = "unknown plugin directory"; return }
     lanchat.updateChecking = true
@@ -1338,5 +1339,15 @@ QtObject {
     id: restartProc
   }
 
-  Component.onCompleted: lanchat.startDaemon()
+  Component.onCompleted: {
+    lanchat.startDaemon()
+    // Silently check for updates at startup so the update button already
+    // reflects "update available" without a click. Uses only the small
+    // git ls-remote comparison (no restart, no reset); CURRENT is a no-op.
+    // A short delay lets the daemon + UI settle first and avoids racing any
+    // fresh-app action.
+    Qt.callLater(function() {
+      if (!lanchat.updateChecking) lanchat.checkForUpdate()
+    })
+  }
 }
