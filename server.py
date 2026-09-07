@@ -264,8 +264,13 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   badge and the collapse ▾/▸ button are now Color.accent (bold badge), and
 #   the leave ✕ is Color.urgent, so all three read clearly instead of
 #   low-contrast muted.
+#  1.5.58 — peers list header: the "N peers online" count now sits on the
+#   header row itself, right next to the peer-list count ("Peers ▾ (n)") and
+#   the collapse chevron, instead of on its own line below. Colors unchanged
+#   (accent when peers are online / muted at zero / urgent when the daemon is
+#   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.57"
+VERSION = "1.5.58"
 def _git_version() -> str:
     try:
         import subprocess as _sp

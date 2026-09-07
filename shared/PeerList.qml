@@ -455,6 +455,7 @@ Item {
     }
 
     Text {
+      id: peersHeaderLabel
       anchors.left: parent.left
       anchors.leftMargin: Style.spacing.sm
       anchors.verticalCenter: parent.verticalCenter
@@ -465,24 +466,18 @@ Item {
       font.pixelSize: Style.font.caption
       font.weight: Font.Bold
     }
-  }
 
-  // ---- peers online: pinned under the header ----------------
-  Column {
-    id: peersOnlineBar
-    width: parent.width
-    anchors.left: parent.left
-    anchors.right: parent.right
-    anchors.top: peersHeader.bottom
-    anchors.topMargin: Style.spacing.xs
-    spacing: Style.space(3)
-
+    // Peer-online count, moved up onto the header row (next to the peer-list
+    // count and the collapse chevron) instead of a line below it. Colors
+    // unchanged: accent when peers online, muted at zero, urgent when down.
     Text {
       id: daemonStatusText
-      width: parent.width
-      leftPadding: Style.spacing.sm
-      rightPadding: Style.spacing.sm
-      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+      anchors.left: peersHeaderLabel.right
+      anchors.leftMargin: Style.spacing.md
+      anchors.right: parent.right
+      anchors.rightMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      elide: Text.ElideRight
       text: Lanchat.daemonState === "running"
         ? ((Lanchat.onlineCount === 1 ? "1 peer" : Lanchat.onlineCount + " peers") + " online")
         : (Lanchat.daemonState === "starting"
@@ -494,6 +489,17 @@ Item {
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
+  }
+
+  // ---- pinned status line below the header (firewall alert) ----
+  Column {
+    id: peersOnlineBar
+    width: parent.width
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: peersHeader.bottom
+    anchors.topMargin: Style.spacing.xs
+    spacing: Style.space(3)
 
     // Firewall warning: the daemon is up but port 4812 is
     // blocked, so LAN peers can't reach us. Persistent (unlike
