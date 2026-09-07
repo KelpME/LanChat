@@ -51,10 +51,7 @@ Column {
     property bool copied: false
 
     width: Math.min(bubbleMaxWidth, messageText.implicitWidth + bubblePaddingX * 2 + Style.space(20))
-    // Height: text + vertical padding + the top clearance strip the text
-    // now reserves against the corner glyphs (time sits under the copy
-    // glyph, so the strip is glyph + gap + one caption line).
-    height: messageText.implicitHeight + bubblePaddingY * 2 + Style.space(16)
+    height: messageText.implicitHeight + bubblePaddingY * 2
     radius: Math.max(Style.cornerRadius, Style.space(6))
     anchors.left: modelData.outgoing ? undefined : parent.left
     anchors.right: modelData.outgoing ? parent.right : undefined
@@ -87,9 +84,6 @@ Column {
       font.family: Style.font.family
       font.pixelSize: Style.font.body
       wrapMode: Text.Wrap
-      // Keep the first line clear of the corner glyphs (copy/edit/time
-      // overlay the bubble's top strip).
-      anchors.topMargin: Style.space(10)
     }
 
     // Edit button (outgoing only, on hover) — mirrors to the top-LEFT so
@@ -150,22 +144,20 @@ Column {
       interval: 1500
       onTriggered: bubble.copied = false
     }
+  }
 
-    // Message time under the copy glyph, same ink (Color.popups.text);
-    // mirrored: top-left on outgoing, top-right on received — with a
-    // little gap under the glyph (topMargin 18 vs glyph 5+caption).
-    Text {
-      anchors.top: parent.top
-      anchors.left: modelData.outgoing ? parent.left : undefined
-      anchors.right: modelData.outgoing ? undefined : parent.right
-      anchors.topMargin: Style.space(18)
-      anchors.leftMargin: Style.space(6)
-      anchors.rightMargin: Style.space(6)
-      text: chatMessage.timeLine
-      color: Color.popups.text
-      opacity: 0.6
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-    }
+  // Message time BELOW the bubble, aligned to the bubble's side (left on
+  // outgoing, right on received — mirrors the copy glyph). Full text ink
+  // dimmed slightly; the Column's spacing provides the gap from the bubble.
+  Text {
+    anchors.left: modelData.outgoing ? parent.left : undefined
+    anchors.right: modelData.outgoing ? undefined : parent.right
+    anchors.leftMargin: Style.space(4)
+    anchors.rightMargin: Style.space(4)
+    text: chatMessage.timeLine
+    color: Color.popups.text
+    opacity: 0.7
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
   }
 }
