@@ -128,6 +128,14 @@ from naming import _SKATE_TRICKS, _TRICK_MODIFIERS, friendly_name  # noqa: E402
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "omarchy")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "lanchat.json")
+# Fingerprint ledger: an independent, minimal record of every fingerprint we've
+# ever CONFIRMED as a friend, kept in its OWN file (not the config), so a
+# config-save bug or a lost lanchat.json can't cost us a friend. On boot we
+# reconcile: any fingerprint in this ledger missing from the config friends
+# list is re-added as a confirmed friend. Written under the same config_lock.
+FINGERPRINTS_PATH = os.path.join(
+    os.path.expanduser("~"), ".local", "state", "lanchat", "fingerprints.json"
+)
 
 DEFAULT_PORT = 4812
 DEFAULT_HTTP_PORT = 4814
@@ -236,8 +244,17 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   just-persisted friend with a stale config snapshot — a friend added in
 #   memory could vanish from disk. Now every config mutation + disk write is
 #   atomic.
+#  1.5.55 — fingerprint ledger: every CONFIRMED friend's fingerprint (+ last
+#   known name) is also recorded in its own independent file
+#   (~/.local/state/lanchat/fingerprints.json), separate from lanchat.json. On
+#   boot the daemon reconciles: any fingerprint the ledger holds but the config
+#   lacks is re-added as a confirmed friend (logged as friends-recovered). So
+#   even if the config ever drops a friend (the 1.5.54-style save slip, or a
+#   lost/rolled-back lanchat.json), the friend is automatically restored at the
+#   next start — nobody has to re-add anyone manually. A deliberate unfriend
+#   removes the fingerprint from the ledger so it can't resurrect.
 
-VERSION = "1.5.54"
+VERSION = "1.5.55"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -439,6 +456,70 @@ def _save_config() -> None:
             atomic_write(CONFIG_PATH, json.dumps(STATE.config, indent=2) + "\n")
         except OSError:
             pass
+
+
+# ---- fingerprint ledger -------------------------------------------------
+# An independent mirror of every fingerprint we've CONFIRMED as a friend,
+# stored in its own file so a config-save slippage (or a lost lanchat.json)
+# can't permanently cost a friend. Boot reconcile rebuilds config friends
+# from this ledger. Shared namespace keys off the locks we already hold.
+
+def _fingerprints_load() -> dict:
+    """Return {pid: name} from the ledger (empty + resilient on any failure)."""
+    try:
+        with open(FINGERPRINTS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return dict(data or {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _fingerprints_save(ledger: dict) -> None:
+    """Atomically persist the ledger. Never raises — the ledger is best-effort."""
+    try:
+        os.makedirs(os.path.dirname(FINGERPRINTS_PATH), exist_ok=True)
+        atomic_write(FINGERPRINTS_PATH, json.dumps(ledger, indent=2) + "\n")
+    except OSError:
+        pass
+
+
+def _fingerprint_upsert(pid: str, name: str) -> None:
+    """Record a confirmed friend's fingerprint in the ledger (idempotent)."""
+    _ledger_mutate(lambda led: led.update({pid: name}))
+
+
+def _ledger_forget(pid: str) -> None:
+    """Drop a fingerprint from the ledger (on deliberate unfriend)."""
+    _ledger_mutate(lambda led: led.pop(pid, None))
+
+
+def _ledger_mutate(mut) -> None:
+    """Read-modify-write the ledger under config_lock (same discipline as the
+    config; the file is small and this is rare)."""
+    with STATE.config_lock:
+        ledger = _fingerprints_load()
+        mut(ledger)
+        _fingerprints_save(ledger)
+
+
+def reconcile_friends_from_ledger() -> list:
+    """Re-add any fingerprint the ledger has but config lacks, as confirmed
+    friends. Returns the list of recovered ids. Pure local state repair:
+    runs at startup, never unfriends anything."""
+    with STATE.config_lock:
+        current = {f.get("id") for f in STATE.config.get("friends", [])}
+        ledger = _fingerprints_load()
+        recovered = []
+        for pid, name in ledger.items():
+            if pid and pid not in current:
+                friends = STATE.config.get("friends", [])
+                friends.append({"id": pid, "address": "", "name": name or "Unknown",
+                                "confirmed": True})
+                STATE.config["friends"] = friends
+                recovered.append(pid)
+        if recovered:
+            _save_config()
+        return recovered
 
 
 def load_config() -> None:
@@ -768,6 +849,12 @@ def add_friend(pid: str, address: str, name: str, confirmed: bool) -> None:
             friends.append({"id": pid, "address": address, "name": name, "confirmed": confirmed})
         STATE.config["friends"] = friends
         _save_config()
+        # Independent durability mirror: once we CONFIRM a friend, write their
+        # fingerprint to the ledger so a later config write slipping a friend
+        # can't permanently cost it (boot reconcile rebuilds from the ledger).
+        if confirmed:
+            _ledger_forget(pid)  # no-op if absent; drop any stale declining entry
+            _fingerprint_upsert(pid, name)
         _emit({"event": "friends", "friends": friends_list()})
 
 
@@ -779,6 +866,9 @@ def unfriend(pid: str) -> bool:
         friends = [f for f in friends if f.get("id") != pid]
         STATE.config["friends"] = friends
         _save_config()
+        # A deliberate unfriend must also leave the ledger, otherwise boot
+        # reconcile would resurrect someone we intentionally removed.
+        _ledger_forget(pid)
         _emit({"event": "friends", "friends": friends_list()})
         return len(friends) != before
 
@@ -2900,6 +2990,15 @@ def main() -> None:
     load_config()
     load_history()
     rooms.load_rooms()
+    # Recover any friends the config may have lost (a config-save slippage or
+    # a lost lanchat.json) from the independent fingerprint ledger.
+    try:
+        _recovered = reconcile_friends_from_ledger()
+        if _recovered:
+            _diag("friends-recovered-from-ledger", n=len(_recovered),
+                  ids=" ".join(p[:12] for p in _recovered))
+    except Exception as _le:
+        _diag("friends-ledger-reconcile-error", err=str(_le)[:80])
     if args.socket:
         # systemd mode: the control channel is a unix socket, not stdin. Start
         # the socket server first so the ready event below reaches a connected
