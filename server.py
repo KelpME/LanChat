@@ -228,8 +228,16 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   peer (while a group chat is open) now closes the room, and the auto-select
 #   of a first peer is skipped while a room chat is open — so you can never have
 #   a peer and a group open as chats at the same time.
+#  1.5.54 — config-save hardening: serialize all writes to STATE.config /
+#   lanchat.json behind a config_lock (add_friend, unfriend, friend-name sync,
+#   and _save_config itself). Previously these ran lock-free from several
+#   threads (UDP accept, discovery, control) and _save_config serialized then
+#   replaced the file in two steps, so a concurrent writer could overwrite a
+#   just-persisted friend with a stale config snapshot — a friend added in
+#   memory could vanish from disk. Now every config mutation + disk write is
+#   atomic.
 
-VERSION = "1.5.53"
+VERSION = "1.5.54"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -287,6 +295,14 @@ class State:
         self.pending_lock = threading.Lock()
         self.att_lock = threading.Lock()
         self.dl_lock = threading.Lock()
+        # Serializes ALL writes to STATE.config + the on-disk config file.
+        # _save_config dumps STATE.config then atomically replaces the file in
+        # TWO steps; without this lock a concurrent writer can land a stale
+        # dump (captured before a just-persisted friend append) AFTER the newer
+        # one, silently dropping the friend from disk while it stays in memory.
+        # add_friend / unfriend / _sync_friend_name acquire it around their
+        # read-modify-write + save so a friend accept is never lost.
+        self.config_lock = threading.RLock()
 STATE = State()
 
 
@@ -418,10 +434,11 @@ def _diag(msg: str, **fields) -> None:
 
 
 def _save_config() -> None:
-    try:
-        atomic_write(CONFIG_PATH, json.dumps(STATE.config, indent=2) + "\n")
-    except OSError:
-        pass
+    with STATE.config_lock:
+        try:
+            atomic_write(CONFIG_PATH, json.dumps(STATE.config, indent=2) + "\n")
+        except OSError:
+            pass
 
 
 def load_config() -> None:
@@ -673,17 +690,18 @@ def upsert_peer(pid: str, name: str, address: str, pport: int, phttp: object = N
 
 def _sync_friend_name(pid: str, name: str) -> None:
     """Update a confirmed friend's stored name if we now know a real one."""
-    friends = STATE.config.get("friends", [])
-    changed = False
-    for f in friends:
-        if f.get("id") == pid and (not f.get("name") or f.get("name") == "Unknown"):
-            f["name"] = name
-            changed = True
-            break
-    if changed:
-        STATE.config["friends"] = friends
-        _save_config()
-        _emit({"event": "friends", "friends": friends_list()})
+    with STATE.config_lock:
+        friends = STATE.config.get("friends", [])
+        changed = False
+        for f in friends:
+            if f.get("id") == pid and (not f.get("name") or f.get("name") == "Unknown"):
+                f["name"] = name
+                changed = True
+                break
+        if changed:
+            STATE.config["friends"] = friends
+            _save_config()
+            _emit({"event": "friends", "friends": friends_list()})
 
 
 def expire_peers() -> None:
@@ -738,29 +756,31 @@ def is_online() -> bool:
 
 
 def add_friend(pid: str, address: str, name: str, confirmed: bool) -> None:
-    friends = STATE.config.get("friends", [])
-    for f in friends:
-        if f.get("id") == pid:
-            f["address"] = address
-            f["name"] = name
-            f["confirmed"] = confirmed
-            break
-    else:
-        friends.append({"id": pid, "address": address, "name": name, "confirmed": confirmed})
-    STATE.config["friends"] = friends
-    _save_config()
-    _emit({"event": "friends", "friends": friends_list()})
+    with STATE.config_lock:
+        friends = STATE.config.get("friends", [])
+        for f in friends:
+            if f.get("id") == pid:
+                f["address"] = address
+                f["name"] = name
+                f["confirmed"] = confirmed
+                break
+        else:
+            friends.append({"id": pid, "address": address, "name": name, "confirmed": confirmed})
+        STATE.config["friends"] = friends
+        _save_config()
+        _emit({"event": "friends", "friends": friends_list()})
 
 
 def unfriend(pid: str) -> bool:
     """Remove a peer from friends (unfriend). Returns True if they were removed."""
-    friends = STATE.config.get("friends", [])
-    before = len(friends)
-    friends = [f for f in friends if f.get("id") != pid]
-    STATE.config["friends"] = friends
-    _save_config()
-    _emit({"event": "friends", "friends": friends_list()})
-    return len(friends) != before
+    with STATE.config_lock:
+        friends = STATE.config.get("friends", [])
+        before = len(friends)
+        friends = [f for f in friends if f.get("id") != pid]
+        STATE.config["friends"] = friends
+        _save_config()
+        _emit({"event": "friends", "friends": friends_list()})
+        return len(friends) != before
 
 
 def _do_unfriend(pid: str) -> bool:
