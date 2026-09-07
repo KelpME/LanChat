@@ -119,6 +119,12 @@ Item {
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.bottom: parent.bottom
+    // Clip the body to this Column's animating height so settings rows are
+    // only revealed inside the already-expanded area (like PeerList's
+    // listClip). Without clip the full-height settingsBody paints the instant
+    // `expanded` flips while the drawer is still ~header-tall and growing —
+    // contents appear before the area has opened. Clip reveals progressively.
+    clip: true
               // Cap height so the expanded body stops at the bottom of the
               // pinned alert stack (notifBanner) — settings can never grow
               // into/over the always-visible alerts, so expanding it only

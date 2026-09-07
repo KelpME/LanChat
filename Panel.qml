@@ -799,6 +799,8 @@ Panel {
 
                 peerRowH: root.peerRowH
                 animateSections: root.animateSections
+                hostHeight: parent.height
+                alertStackBottom: peerListPanel.alertStackBottom
                 settingsCol: settings
                 amRoomOwnerOfFn: root.amRoomOwnerOf
                 selectRoomFn: root.selectRoom

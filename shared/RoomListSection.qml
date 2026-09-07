@@ -16,7 +16,13 @@ Column {
   anchors.right: parent.right
   // NOTE: anchors.bottom (settings.top) is set at the Panel.qml call site —
   // the `settings` id is file-local to Panel.qml and not visible from here.
-  height: roomsHeader.height + (roomsSection.expanded ? roomsListCol.height : 0)
+  height: roomsHeader.height + (roomsSection.expanded ? roomsBodyFlick.height : 0)
+  // Clip the body to this section's animating height so the room rows are
+  // only ever revealed inside the already-expanded area (like PeerList's
+  // listClip). Without clip the full body paints the instant `expanded`
+  // flips, while the drawer is still ~header-tall and growing — contents
+  // appear before the area has opened. Clip reveals them progressively.
+  clip: true
   // Smooth expand/collapse; the body stays visible during the slide, so
   // rows scroll under the header edge instead of popping in/out.
   // animateSections=false is the bench/reduced-motion switch (asserts read
@@ -29,6 +35,13 @@ Column {
 
   // ---- inputs from the host panel ----
   property real peerRowH
+  // Height of the host left-column and the bottom of the pinned alert
+  // stack: bounds the flickable rooms body at the space actually left
+  // between the header and the settings section (settings can never be
+  // pushed off the panel). Cap is OFF while hostHeight is unset (0) —
+  // bench shells and standalone use size to content as before.
+  property real hostHeight: 0
+  property real alertStackBottom: 0
   // The settings section lives in Panel.qml's scope (ids are file-local):
   // the two sections are mutually exclusive, so expanding this one must
   // collapse settings. Wired at the call site.
@@ -97,12 +110,32 @@ Column {
     }
   }
 
-  // body: room rows (only when expanded; a room click opens it)
-  Column {
-    id: roomsListCol
-    visible: roomsSection.expanded
+  // body: room rows (only when expanded; a room click opens them).
+  // Flickable: a long room list scrolls instead of growing past the
+  // panel; capped at the space between this header and the bottom of
+  // the pinned alert stack so Settings always stays reachable. With
+  // hostHeight unset (bench/standalone) it sizes to content.
+  Flickable {
+    id: roomsBodyFlick
     width: parent.width
-    spacing: Style.spacing.xs
+    height: roomsSection.expanded
+      ? (roomsSection.hostHeight > 0
+         ? Math.max(0, Math.min(roomsListCol.implicitHeight,
+                                Math.max(Style.space(26),
+                                         roomsSection.hostHeight - roomsSection.alertStackBottom - roomsHeader.height - Style.space(12))))
+         : roomsListCol.implicitHeight)
+      : 0
+    contentWidth: width
+    contentHeight: roomsListCol.implicitHeight
+    clip: true
+    boundsBehavior: Flickable.StopAtBounds
+    interactive: contentHeight > height
+
+    Column {
+      id: roomsListCol
+      visible: roomsSection.expanded
+      width: roomsBodyFlick.width
+      spacing: Style.spacing.xs
 
     // Unaccepted invites first (Accept opens + joins the room).
     Repeater {
@@ -383,5 +416,6 @@ Column {
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
+  }
   }
 }
