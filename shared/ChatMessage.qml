@@ -86,7 +86,12 @@ Column {
       // Fills the bubble's content box; the bubble width is driven by
       // messageText's NATURAL width (implicitWidth — the unwrapped line),
       // so this never feeds back into the text's wrapping decision.
-      width: bubble.width - bubble.bubblePaddingX * 2 - Style.space(6)
+      // Max() with the overlay rows' natural widths: for very short
+      // messages ("ok") the buttons/time rows are WIDER than the text —
+      // without this they'd be x-negative and clipped by the bubble.
+      width: Math.max(bubble.width - bubble.bubblePaddingX * 2 - bubble.bubbleExtra,
+                      btnRow.implicitWidth,
+                      timeText.implicitWidth)
       spacing: Style.space(2)
 
       // ---- row 1: hover buttons, toward the inside edge ------------------
@@ -154,6 +159,7 @@ Column {
 
       // ---- row 3: timestamp, same inside edge ------------------------------
       Text {
+        id: timeText
         x: modelData.outgoing ? innerCol.width - implicitWidth : 0
         text: chatMessage.timeLine
         color: Color.popups.text
