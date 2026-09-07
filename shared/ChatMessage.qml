@@ -28,17 +28,12 @@ Column {
   width: maxWidth / 0.8
   spacing: Style.spacing.xs
 
-  // Meta row: who + when (+ edited marker + read state)
-  Text {
-    anchors.left: modelData.outgoing ? undefined : parent.left
-    anchors.right: modelData.outgoing ? parent.right : undefined
-    text: (modelData.outgoing ? "You · " : modelData.fromName + " · ") + chatMessage.timeLabel(modelData.ts)
-      + (modelData.edited ? " (edited)" : "")
-      + (modelData.outgoing && modelData.mid && Lanchat.readReceipts[modelData.mid] ? " · ✓" : "")
-    color: Color.muted
-    font.family: Style.font.family
-    font.pixelSize: Style.font.caption
-  }
+  // Sender name now lives on the voice-change dividers (ChatThread); the
+  // per-message time rides the bubble's top-right under the copy glyph,
+  // in the same ink. (Edited marker + read ✓ keep riding the time line.)
+  readonly property string timeLine: chatMessage.timeLabel(modelData.ts)
+    + (modelData.edited ? " (edited)" : "")
+    + (modelData.outgoing && modelData.mid && Lanchat.readReceipts[modelData.mid] ? " ✓" : "")
 
   // Message bubble. The text anchors to fill the bubble with a
   // set padding; the bubble grows with the text (no circular
@@ -142,6 +137,20 @@ Column {
       id: copyReset
       interval: 1500
       onTriggered: bubble.copied = false
+    }
+
+    // Message time under the copy glyph, same ink (Color.popups.text);
+    // rides the bubble's top-right corner on every message.
+    Text {
+      anchors.top: parent.top
+      anchors.right: parent.right
+      anchors.topMargin: Style.space(18)
+      anchors.rightMargin: Style.space(6)
+      text: chatMessage.timeLine
+      color: Color.popups.text
+      opacity: 0.6
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
     }
   }
 }

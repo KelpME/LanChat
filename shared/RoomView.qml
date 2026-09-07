@@ -42,16 +42,39 @@ Item {
         width: roomList.width
         spacing: Style.spacing.xs
 
-        // Voice-change divider: a thin rule whenever the sender differs
-        // from the previous message (compared by `from`; outgoing is
+        // Voice-change divider: sender name of the run above, a thin rule,
+        // sender name of the run below (compared by `from`; outgoing is
         // derived per-peer so `from` is the stable identity here).
-        Rectangle {
+        Column {
           visible: roomMsgDelegate.index > 0
                    && !!roomView.roomThread[roomMsgDelegate.index - 1]
                    && roomView.roomThread[roomMsgDelegate.index - 1].from !== roomMsgDelegate.modelData.from
           width: parent.width
-          height: 1
-          color: Color.popups.border
+          spacing: Style.space(3)
+
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: roomMsgDelegate.index > 0 && roomView.roomThread[roomMsgDelegate.index - 1]
+                  ? (roomView.roomThread[roomMsgDelegate.index - 1].outgoing ? "You" : (roomView.roomThread[roomMsgDelegate.index - 1].fromName || "them"))
+                  : ""
+            color: Color.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
+          Rectangle {
+            width: parent.width
+            height: 1
+            color: Color.popups.border
+          }
+
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: roomMsgDelegate.modelData.outgoing ? "You" : (roomMsgDelegate.modelData.fromName || "them")
+            color: Color.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
         }
 
         RoomMessage {

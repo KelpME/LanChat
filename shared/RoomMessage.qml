@@ -31,18 +31,9 @@ Column {
   width: maxWidth / 0.8
   spacing: Style.spacing.xs
 
-  // Meta row: sender + time, tinted with the sender's
-  // member color when the room's colors are enabled.
-  Text {
-    anchors.left: modelData.outgoing ? undefined : parent.left
-    anchors.right: modelData.outgoing ? parent.right : undefined
-    text: (modelData.outgoing ? "You · " : modelData.fromName + " · ")
-          + roomMessage.timeLabel(modelData.ts)
-    // Name stays neutral: the room color now lives on the bubble.
-    color: Color.muted
-    font.family: Style.font.family
-    font.pixelSize: Style.font.caption
-  }
+  // Sender name now lives on the voice-change dividers (RoomView); the
+  // per-message time rides the bubble's top-right in the same ink.
+  readonly property string timeLine: roomMessage.timeLabel(modelData.ts)
 
   // Text bubble: member color tints the bubble; the INK is
   // derived from the bubble background's luminance so text
@@ -97,6 +88,20 @@ Column {
       font.family: Style.font.family
       font.pixelSize: Style.font.body
       wrapMode: Text.Wrap
+    }
+
+    // Message time under where the copy glyph sits (rooms don't have a
+    // copy button here; the time takes that top-right slot), bubble ink.
+    Text {
+      anchors.top: parent.top
+      anchors.right: parent.right
+      anchors.topMargin: Style.space(5)
+      anchors.rightMargin: Style.space(6)
+      text: roomMessage.timeLine
+      color: parent.ink
+      opacity: 0.6
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
     }
   }
 
