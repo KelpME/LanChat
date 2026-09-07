@@ -429,13 +429,44 @@ Item {
     }
   }
 
+  // ---- app title bar: name on the left, your display name on the right --
+  // Sits above the Peers/Rooms/Settings stack, always visible.
+  Item {
+    id: appTitleBar
+    width: parent.width
+    height: Style.space(26)
+
+    Text {
+      anchors.left: parent.left
+      anchors.leftMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      text: "LanChat"
+      color: Color.accent
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.weight: Font.Bold
+    }
+
+    Text {
+      anchors.right: parent.right
+      anchors.rightMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      text: Lanchat.myName || ""
+      color: Color.popups.text
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideRight
+    }
+  }
+
   // ---- section header: "Peers ▾ (n)" toggle, same visual language ------
-  // as the Rooms and Settings headers. Sits above the status bar; the
+  // as the Rooms and Settings headers. Sits under the app title bar; the
   // status/alerts stay visible even when the list is collapsed. Opening
   // the peers list collapses Settings only (Rooms may stay open).
   Item {
     id: peersHeader
     width: parent.width
+    anchors.top: appTitleBar.bottom
     height: Style.space(26)
 
     Rectangle {
