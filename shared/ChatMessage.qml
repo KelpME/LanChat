@@ -28,16 +28,80 @@ Column {
   width: maxWidth / 0.8
   spacing: Style.spacing.xs
 
-  // Sender name now lives on the voice-change dividers (ChatThread); the
-  // per-message time rides the bubble's top-right under the copy glyph,
-  // in the same ink. (Edited marker + read ✓ keep riding the time line.)
+  // Layout (1.5.70): ONE column, three rows —
+  //   1. hover buttons row (copy, edit), justified toward the conversation
+  //      INSIDE edge: left on outgoing, right on received (mirror)
+  //   2. the bubble (message contents)
+  //   3. the timestamp row, justified to the same inside edge
+  // No overlays — nothing floats over the bubble, so no crowding or
+  // contrast fights with the fill. Sender name lives on the dividers;
+  // edited marker + read ✓ ride the timestamp row.
   readonly property string timeLine: chatMessage.timeLabel(modelData.ts)
     + (modelData.edited ? " (edited)" : "")
     + (modelData.outgoing && modelData.mid && Lanchat.readReceipts[modelData.mid] ? " ✓" : "")
+  // Hover state lives on the root now (covers the buttons row too).
+  readonly property bool hovered: msgHover.containsMouse
+  property bool copied: false
 
-  // Message bubble. The text anchors to fill the bubble with a
-  // set padding; the bubble grows with the text (no circular
-  // width dependency that used to clip long messages).
+  // Whole-delegate hover probe (buttons only, NoButton — never steals
+  // clicks from the bubble or its children).
+  MouseArea {
+    id: msgHover
+    anchors.fill: parent
+    hoverEnabled: true
+    acceptedButtons: Qt.NoButton
+  }
+
+  // ---- row 1: buttons, justified toward the inside edge -----------------
+  // Fixed row height so showing/hiding the glyphs never shifts layout.
+  Row {
+    spacing: Style.space(10)
+    height: Style.space(14)
+    anchors.left: modelData.outgoing ? parent.left : undefined
+    anchors.right: modelData.outgoing ? undefined : parent.right
+
+    // Copy (both voices); flashes a checkmark after copying.
+    Text {
+      text: chatMessage.copied ? "\u2713" : "\uF0C5"
+      color: chatMessage.copied ? Color.accent : Color.popups.text
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      visible: chatMessage.hovered || chatMessage.copied
+      opacity: chatMessage.copied ? 1.0 : 0.85
+
+      MouseArea {
+        anchors.fill: parent
+        onClicked: {
+          chatMessage.copyRequested(modelData.text)
+          chatMessage.copied = true
+          copyReset.restart()
+        }
+      }
+    }
+
+    // Edit (outgoing only, on hover).
+    Text {
+      visible: modelData.outgoing && (chatMessage.hovered || chatMessage.editingMid === modelData.mid)
+      text: "\uF040"
+      color: Color.popups.text
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      opacity: 0.85
+
+      MouseArea {
+        anchors.fill: parent
+        onClicked: chatMessage.editRequested(modelData.mid, modelData.text)
+      }
+    }
+  }
+
+  Timer {
+    id: copyReset
+    interval: 1500
+    onTriggered: chatMessage.copied = false
+  }
+
+  // ---- row 2: the bubble (message contents) -----------------------------
   Rectangle {
     id: bubble
     // A held handshake request shows as a banner, not a text
@@ -47,8 +111,6 @@ Column {
     readonly property real bubbleMaxWidth: chatMessage.maxWidth
     readonly property real bubblePaddingX: Style.space(14)
     readonly property real bubblePaddingY: Style.space(9)
-    readonly property bool hovered: bubbleMouse.containsMouse
-    property bool copied: false
 
     width: Math.min(bubbleMaxWidth, messageText.implicitWidth + bubblePaddingX * 2 + Style.space(20))
     height: messageText.implicitHeight + bubblePaddingY * 2
@@ -85,75 +147,12 @@ Column {
       font.pixelSize: Style.font.body
       wrapMode: Text.Wrap
     }
-
-    // Edit button (outgoing only, on hover) — mirrors to the top-LEFT so
-    // it sits beside the copy glyph; received bubbles have no edit.
-    Text {
-      visible: modelData.outgoing && (parent.hovered || chatMessage.editingMid === modelData.mid)
-      anchors.top: parent.top
-      anchors.left: parent.left
-      anchors.topMargin: Style.space(5)
-      anchors.leftMargin: Style.space(22)
-      text: "\uF040"
-      // Same contrast fix as the copy glyph: muted vanishes on the bubble
-      // fill; popups.text is the message-body ink and always reads.
-      color: Color.popups.text
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      opacity: 0.85
-      MouseArea {
-        anchors.fill: parent
-        onClicked: chatMessage.editRequested(modelData.mid, modelData.text)
-      }
-    }
-
-    // Copy button: mirrored to the TOP-LEFT on outgoing messages so sent
-    // and received bubbles mirror each other (received keeps it top-right).
-    // Revealed on hover; flashes a checkmark after copying.
-    Text {
-      anchors.top: parent.top
-      anchors.left: modelData.outgoing ? parent.left : undefined
-      anchors.right: modelData.outgoing ? undefined : parent.right
-      anchors.topMargin: Style.space(5)
-      anchors.leftMargin: Style.space(5)
-      anchors.rightMargin: Style.space(5)
-      text: parent.copied ? "\u2713" : "\uF0C5"
-      // Contrast: the copy glyph sits on the bubble fill (normalFill /
-      // selectedAccentFill), not the panel — Color.muted is tuned for the
-      // panel background and disappears on the bubble. popups.text is the
-      // same ink the message body uses, so the icon always reads; the
-      // checkmark stays accent for the copied confirmation.
-      color: parent.copied ? Color.accent : Color.popups.text
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-      visible: parent.hovered || parent.copied
-      opacity: parent.copied ? 1.0 : 0.85
-
-      MouseArea {
-        anchors.fill: parent
-        onClicked: {
-          chatMessage.copyRequested(modelData.text)
-          bubble.copied = true
-          copyReset.restart()
-        }
-      }
-    }
-
-    Timer {
-      id: copyReset
-      interval: 1500
-      onTriggered: bubble.copied = false
-    }
   }
 
-  // Message time BELOW the bubble, aligned to the bubble's side (left on
-  // outgoing, right on received — mirrors the copy glyph). Full text ink
-  // dimmed slightly; the Column's spacing provides the gap from the bubble.
+  // ---- row 3: timestamp, justified to the same inside edge --------------
   Text {
     anchors.left: modelData.outgoing ? parent.left : undefined
     anchors.right: modelData.outgoing ? undefined : parent.right
-    anchors.leftMargin: Style.space(4)
-    anchors.rightMargin: Style.space(4)
     text: chatMessage.timeLine
     color: Color.popups.text
     opacity: 0.7
