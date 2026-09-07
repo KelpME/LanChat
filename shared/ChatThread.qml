@@ -55,8 +55,20 @@ ListView {
     delegate: Column {
       id: msgDelegate
       required property var modelData
+      required property int index
       width: chatThread.width
       spacing: Style.spacing.xs
+
+      // Voice-change divider: a thin rule whenever the sender differs
+      // from the previous message, so conversation turns read at a glance.
+      Rectangle {
+        visible: msgDelegate.index > 0
+                 && !!chatThread.thread[msgDelegate.index - 1]
+                 && chatThread.thread[msgDelegate.index - 1].outgoing !== msgDelegate.modelData.outgoing
+        width: parent.width
+        height: 1
+        color: Color.popups.border
+      }
 
       ChatMessage {
         id: chatMsg

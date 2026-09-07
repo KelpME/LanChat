@@ -38,8 +38,21 @@ Item {
       delegate: Column {
         id: roomMsgDelegate
         required property var modelData
+        required property int index
         width: roomList.width
         spacing: Style.spacing.xs
+
+        // Voice-change divider: a thin rule whenever the sender differs
+        // from the previous message (compared by `from`; outgoing is
+        // derived per-peer so `from` is the stable identity here).
+        Rectangle {
+          visible: roomMsgDelegate.index > 0
+                   && !!roomView.roomThread[roomMsgDelegate.index - 1]
+                   && roomView.roomThread[roomMsgDelegate.index - 1].from !== roomMsgDelegate.modelData.from
+          width: parent.width
+          height: 1
+          color: Color.popups.border
+        }
 
         RoomMessage {
           id: roomMsg
