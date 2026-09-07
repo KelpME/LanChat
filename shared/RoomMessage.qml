@@ -16,6 +16,7 @@ import qs.Ui
 // delegate called before the extraction).
 Column {
   id: roomMessage
+  width: parent.width
 
   // The message object from the room model (same shape Panel passed before).
   required property var modelData
@@ -28,7 +29,7 @@ Column {
   // the inline delegate called before the extraction).
   property var timeLabel: function(ts) { return "" }
 
-  width: maxWidth / 0.8
+
   spacing: Style.spacing.xs
 
   // Sender name now lives on the voice-change dividers (RoomView); the

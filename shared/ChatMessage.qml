@@ -30,7 +30,7 @@ Column {
   signal editRequested(string mid, string text)
   signal copyRequested(string text)
 
-  width: maxWidth / 0.8
+  width: parent.width
 
   readonly property string timeLine: chatMessage.timeLabel(modelData.ts)
     + (modelData.edited ? " (edited)" : "")
