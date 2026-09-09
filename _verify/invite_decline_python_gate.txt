@@ -1,0 +1,9 @@
+PASS decline: room created 
+PASS decline: first invite reaches invitee 
+PASS decline: roomForget removes the invite stub from room-list 
+PASS decline: re-invite delivers a second room-invite for the same room 
+PASS decline: join after re-invite confirmed (member in room-state) 
+ALL GROUPS TESTS PASSED
+
+Command: python3 test_groups.py  (from repo root, branch fix/invite-decline-and-join-clear)
+Full output: /tmp/groups_out.txt; new checks all PASS, ALL GROUPS TESTS PASSED, exit 0

@@ -162,7 +162,7 @@ Column {
           spacing: Style.spacing.sm
 
           Text {
-            width: parent.width - Style.space(80)
+            width: parent.width - Style.space(130)
             anchors.verticalCenter: parent.verticalCenter
             text: (modelData.fromName || "Someone") + " invited you to " + (modelData.name || "a room")
             color: Color.popups.text
@@ -178,6 +178,14 @@ Column {
               Lanchat.roomJoin(modelData.roomId)
               roomsSection.selectRoomFn(modelData.roomId)
             }
+          }
+          Button {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "✕"
+            fontSize: Style.font.caption
+            foreground: Color.urgent
+            tooltipText: "Decline this invite"
+            onClicked: Lanchat.dismissRoomInvite(modelData.roomId)
           }
         }
       }

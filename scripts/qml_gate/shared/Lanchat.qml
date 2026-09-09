@@ -44,6 +44,24 @@ QtObject {
   function roomRemove(roomId, peerId) { console.log("stub roomRemove") }
   function roomLeave(roomId) { console.log("stub roomLeave") }
   function roomJoin(roomId) { console.log("stub roomJoin") }
+  // decline-verification counters (shell5 step 10)
+  property int forgetCount: 0
+  property string lastForgotten: ""
+  function roomForget(roomId) {
+    console.log("stub roomForget", roomId)
+    forgetCount++
+    lastForgotten = roomId
+  }
+  // Mirror the real Lanchat invite helpers so bench shells can drive the
+  // invite row's Decline/Join-confirm behavior without a daemon.
+  function pruneRoomInvite(roomId) {
+    var next = lanchat.roomInvites.filter(function(inv) { return inv.roomId !== roomId })
+    if (next.length !== lanchat.roomInvites.length) lanchat.roomInvites = next
+  }
+  function dismissRoomInvite(roomId) {
+    lanchat.roomInvites = lanchat.roomInvites.filter(function(inv) { return inv.roomId !== roomId })
+    lanchat.roomForget(roomId)
+  }
   function selectRoom(roomId) { console.log("stub selectRoom", roomId) }
   function sendTypingStopped(peerId) { console.log("stub typingStopped") }
   function loadOlder(peerId) { console.log("stub loadOlder", peerId) }

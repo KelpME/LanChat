@@ -1,0 +1,18 @@
+=== /tmp/qsgate/benchshell/shell5.qml ===
+      1  DEBUG qml: BENCH-OK-ROOM-SELECTED room-1
+      1  DEBUG qml: BENCH-OK-ROOM-ROWS leave+canadd present
+      1  DEBUG qml: BENCH-OK-LEAVE-SIGNAL
+      1  DEBUG qml: BENCH-OK-JOIN-CONFIRMED-PRUNE
+      1  DEBUG qml: BENCH-OK-INVITE-BUTTONS
+      1  DEBUG qml: BENCH-OK-DECLINE-CLEARS-ROW + roomForget sent
+      1  DEBUG qml: BENCH-OK-CREATE-SIGNAL
+      1  DEBUG qml: BENCH-OK-CREATE-BTN (rooms header visible: section height 35)
+      1  DEBUG qml: BENCH-OK-COLLAPSE 35
+      1  DEBUG qml: BENCH-OK-A6 flick capped: h=70 contentH=70 cap=549 interactive=false
+=== /tmp/qsgate/benchshell/shell6.qml ===
+      1  DEBUG qml: BENCH-OK-THREAD-SIZE w=400 h=500
+      1  DEBUG qml: BENCH-OK-THREAD-SIGNALS
+      1  DEBUG qml: BENCH-OK-THREAD-DELEGATE cols=4
+
+Command: bash scripts/qml_gate/run.sh  (all benches; no BENCH-FAIL lines in full output)
+Full output: /tmp/qml_gate_out.txt

@@ -94,6 +94,52 @@ def start_beats(daemons_ports):
     threading.Thread(target=_beat, daemon=True).start()
 
 
+def test_invite_decline(oo, aa, ido, ida, check, wait_for):
+    """Regression for the invite Decline button (UI: Lanchat.dismissRoomInvite
+    drops the row and sends cmd roomForget for the invite-seeded stub).
+    Declining must (1) remove the stub from the invitee's room-list, (2) NOT
+    poison the room — the owner can re-invite, a SECOND room-invite for the
+    same roomId arrives, and the invitee can still join (room-state proof).
+
+    Roles: oo = owner, aa = invitee (use daemon b here, like test_forget, so
+    unconsumed room-invite events never pollute a's queue that
+    test_member_leave's wait_event reads)."""
+
+    oo.cmd(cmd="createRoom", name="DeclineRoom")
+    created = oo.wait_event("room-created", timeout=6)
+    rid = (created or {}).get("roomId", "")
+    check("decline: room created", bool(rid))
+    oo.cmd(cmd="roomInvite", roomId=rid, peer=ida)
+    inv = wait_for(lambda: [e for e in aa.events_of("room-invite")
+                            if e.get("roomId") == rid], 6)
+    check("decline: first invite reaches invitee", bool(inv))
+
+    # Decline = roomForget on the stub (exactly what the UI's ✕ does).
+    # Window on events AFTER the forget so an all-history scan can't pass
+    # vacuously on a not-yet-arrived list.
+    n_list = len(aa.events_of("room-list"))
+    aa.cmd(cmd="roomForget", roomId=rid)
+    gone = wait_for(lambda: [e for e in aa.events_of("room-list")[n_list:]
+                             if all(r.get("roomId") != rid
+                                    for r in e.get("rooms", []))], 6)
+    check("decline: roomForget removes the invite stub from room-list", bool(gone))
+
+    # Owner re-invites the same room: a SECOND room-invite must arrive.
+    n_inv = len(aa.events_of("room-invite"))
+    oo.cmd(cmd="roomInvite", roomId=rid, peer=ida)
+    inv2 = wait_for(lambda: [e for e in aa.events_of("room-invite")[n_inv:]
+                             if e.get("roomId") == rid], 6)
+    check("decline: re-invite delivers a second room-invite for the same room",
+          bool(inv2))
+
+    # Join after the decline/re-invite cycle, confirmed by room-state membership.
+    aa.cmd(cmd="roomJoin", roomId=rid)
+    got = wait_for(lambda: [s for s in aa.events_of("room-state")
+                            if s.get("room", {}).get("roomId") == rid
+                            and ida in s.get("room", {}).get("members", {})], 8)
+    check("decline: join after re-invite confirmed (member in room-state)", bool(got))
+
+
 def test_member_leave(oo, aa, ido, ida, check, wait_for):
     """Regression for 'leave this room' (rooms.member_leave): a member's
     roomLeave must (1) drop the room from the LEAVER's own list, (2) reach
@@ -393,6 +439,10 @@ def main():
         # Uses daemon b + room rid so the unconsumed room-invite event lands in
         # b's queue, never polluting a's queue that test_member_leave reads.)
         test_forget(o, b, ido, idb, rid, check, wait_for)
+
+        # ---- 8b2. invite decline + re-invite (also on daemon b — its
+        # room-invite queue is never read by wait_event downstream)
+        test_invite_decline(o, b, ido, idb, check, wait_for)
 
         # ---- 8c. member leave regression (needs live owner; step 9 stops it)
         test_member_leave(o, a, ido, ida, check, wait_for)

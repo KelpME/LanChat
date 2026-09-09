@@ -452,6 +452,23 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "roomForget", roomId: roomId }) + "\n")
   }
 
+  function pruneRoomInvite(roomId) {
+    // Remove the invite row for a room we now provably belong to (or own).
+    // Called from the room-state handler, not the Join click: join may fail
+    // (host offline), so the invite must survive until the room-state
+    // snapshot proves membership.
+    var next = lanchat.roomInvites.filter(function(inv) { return inv.roomId !== roomId })
+    if (next.length !== lanchat.roomInvites.length) lanchat.roomInvites = next
+  }
+
+  function dismissRoomInvite(roomId) {
+    // Decline: drop the row locally AND tell the daemon to forget the
+    // cache-only room stub the invite seeded (server refuses roomForget if
+    // we own/belong, which is the correct no-op).
+    lanchat.roomInvites = lanchat.roomInvites.filter(function(inv) { return inv.roomId !== roomId })
+    lanchat.roomForget(roomId)
+  }
+
   function roomRemove(roomId, peerId) {
     daemon.write(JSON.stringify({ cmd: "roomRemove", roomId: roomId, peer: peerId }) + "\n")
   }
@@ -1103,6 +1120,12 @@ QtObject {
       // socket to them (the daemon drops peers when they vanish) or we ARE
       // the owner. The frozen banner reads this, never a session-local bool.
       if (lanchat.myId && snap.owner === lanchat.myId) lanchat.roomHostOnline = true
+      // Join confirmation: once the snapshot proves we own or belong to the
+      // room, the invite row is stale — prune it (evidence-based, survives a
+      // failed join because no snapshot arrives then).
+      if (lanchat.myId && (snap.owner === lanchat.myId ||
+          (snap.members && snap.members[lanchat.myId])))
+        lanchat.pruneRoomInvite(snap.roomId)
       break
     }
 

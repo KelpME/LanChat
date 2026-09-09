@@ -155,7 +155,52 @@ Item {
             if (roomListSection.height !== Style.space(26)) return fail("collapsed height " + roomListSection.height + " != header 26sp")
             if (roomListSection.sectionHeight !== roomListSection.height) return fail("sectionHeight mismatch after collapse")
             console.log("BENCH-OK-COLLAPSE " + roomListSection.height)
-            Qt.exit(0)
+
+            // 9) invite row: populate an invite, expect Join + Decline ✕
+            Lanchat.roomInvites = [{ roomId: "room-inv", name: "invroom",
+              from: "peer-7", fromName: "Bob" }]
+            Lanchat.rooms = Lanchat.rooms.concat([])
+            roomListSection.expand()
+            Qt.callLater(function() {
+              btns = []
+              collectBtns(roomListSection)
+              var joinBtn = btns.find(function(b) { return b.text === "Join" })
+              var declineBtn = btns.find(function(b) {
+                return b.text === "\u2715" && b.tooltipText === "Decline this invite" })
+              if (!joinBtn) return fail("invite Join button missing")
+              if (!declineBtn) return fail("invite Decline button missing; btns="
+                + JSON.stringify(btns.map(function(b){return b.text + "/" + (b.tooltipText || "")})))
+              console.log("BENCH-OK-INVITE-BUTTONS")
+
+              // 10) decline removes the row and calls roomForget
+              declineBtn.clicked()
+              if (Lanchat.roomInvites.length !== 0)
+                return fail("decline left invite rows: " + JSON.stringify(Lanchat.roomInvites))
+              // decline must have sent the daemon cmd too (stub mirrors it)
+              if (Lanchat.forgetCount !== 1 || Lanchat.lastForgotten !== "room-inv")
+                return fail("decline did not call roomForget(room-inv): count="
+                            + Lanchat.forgetCount + " last=" + Lanchat.lastForgotten)
+              console.log("BENCH-OK-DECLINE-CLEARS-ROW + roomForget sent")
+
+              // 11) join-confirmed prune: re-add invite, then a room-state
+              // snapshot that proves membership must prune it. Drive the
+              // prune path directly (the room-state wire handler lives in
+              // the real singleton, not this stub): same function the
+              // handler calls, with the same membership evidence.
+              Lanchat.roomInvites = [{ roomId: "room-inv", name: "invroom",
+                from: "peer-7", fromName: "Bob" }]
+              Lanchat.pruneRoomInvite("room-inv")
+              if (Lanchat.roomInvites.length !== 0)
+                return fail("pruneRoomInvite did not clear confirmed invite")
+              // pruneRoomInvite must NOT touch other rooms' invites
+              Lanchat.roomInvites = [{ roomId: "room-a", name: "a", from: "p", fromName: "A" },
+                                     { roomId: "room-b", name: "b", from: "p", fromName: "B" }]
+              Lanchat.pruneRoomInvite("room-a")
+              if (Lanchat.roomInvites.length !== 1 || Lanchat.roomInvites[0].roomId !== "room-b")
+                return fail("pruneRoomInvite removed wrong rows: " + JSON.stringify(Lanchat.roomInvites))
+              console.log("BENCH-OK-JOIN-CONFIRMED-PRUNE")
+              Qt.exit(0)
+            })
           })
         })
       })
