@@ -2,16 +2,18 @@ import QtQuick
 import qs.Commons
 
 // The chat bubble shared by 1:1 (ChatMessage) and rooms (RoomMessage):
-// one Column inside the bubble Rectangle, three rows —
-//   1. hover buttons row (copy, edit), justified toward the conversation
-//      INSIDE edge: left on outgoing, right on received (mirror)
-//   2. the message text
-//   3. the timestamp row, justified to the same inside edge
-// The bubble sizes to its content Column. 1:1 defaults are the verbatim
-// ChatMessage styling; rooms pass bubbleColorOverride / textColor / timeInk
-// for the member-color bubble (bubbleColorOverride "transparent" is the
-// sentinel meaning "use the 1:1 fills"). Read ✓ is NOT appended here —
-// callers bake it into the timeLine string.
+// one Column inside the bubble Rectangle, two rows —
+//   1. the message text
+//   2. the footer row: hover buttons (copy, edit) on one edge, the
+//      timestamp on the opposite edge — justified away from each other.
+// The bubble sizes to its content Column; the width hug formula takes the
+// MAX of the text's natural width and the footer's combined width (buttons
+// + gap + timestamp), so a short message's bubble still fits both on the
+// footer line. 1:1 defaults are the verbatim ChatMessage styling; rooms
+// pass bubbleColorOverride / textColor / timeInk for the member-color
+// bubble (bubbleColorOverride "transparent" is the sentinel meaning "use
+// the 1:1 fills"). Read ✓ is NOT appended here — callers bake it into the
+// timeLine string.
 Item {
   id: messageBubble
 
@@ -24,11 +26,11 @@ Item {
   // pass false so no paperclip line is composed here.
   property bool showAttachmentInline: true
   // Sentinel fill override: anything but the STRING "transparent" IS the
-  // bubble fill (border.width keeps the outgoing rule). Must be `var`, not
-  // `color`: a color-typed property coerces the sentinel string into a
-  // transparent QColor before the comparison, and a color OBJECT never ===
-  // the string "transparent" (journal-proven trap) — the sentinel could
-  // never be detected and the bubble would paint #00000000.
+  // bubble fill (border rules unchanged). Must be `var`, not `color`: a
+  // color-typed property coerces the sentinel string into a transparent
+  // QColor before the comparison, and a color OBJECT never === the string
+  // "transparent" (journal-proven trap) — the sentinel could never be
+  // detected and the bubble would paint #00000000.
   property var bubbleColorOverride: "transparent"
   property color textColor: Color.popups.text
   property color timeInk: textColor
@@ -62,7 +64,7 @@ Item {
     onTriggered: messageBubble.copied = false
   }
 
-  // ---- the bubble: one Column, three rows inside -------------------------
+  // ---- the bubble: one Column, two rows inside ----------------------------
   Rectangle {
     id: bubble
     visible: messageBubble.bubbleVisible
@@ -71,12 +73,19 @@ Item {
     readonly property real bubblePaddingX: Style.space(10)
     readonly property real bubblePaddingY: Style.space(6)
     readonly property real bubbleExtra: Style.space(6)
+    // Gap between the footer's two justified clusters (buttons | time).
+    readonly property real footerGap: Style.space(8)
 
-    // Hug the text: bubble = text's natural (unwrapped) width + padding,
-    // capped. implicitWidth is wrap-independent, so there is no cycle —
-    // short messages shrink the bubble, long ones grow to the cap and wrap.
+    // Hug the content: bubble = max(text natural width, footer combined
+    // width) + padding, capped. implicitWidth is wrap-independent, so there
+    // is no cycle — short messages shrink the bubble, long ones grow to the
+    // cap and wrap. The footer term (buttons implicitWidth + gap + time
+    // implicitWidth) IS the Operator's min-width requirement: the bubble is
+    // never narrower than what fits buttons and timestamp on one line.
     width: Math.min(bubbleMaxWidth,
-                    messageText.implicitWidth + bubblePaddingX * 2 + bubbleExtra)
+                    Math.max(messageText.implicitWidth,
+                             btnRow.implicitWidth + bubble.footerGap + timeText.implicitWidth)
+                    + bubblePaddingX * 2 + bubbleExtra)
     height: innerCol.childrenRect.height + bubblePaddingY * 2
     radius: Math.max(Style.cornerRadius, Style.space(6))
     // Horizontal alignment via x — anchors on a Column child disable the
@@ -95,66 +104,16 @@ Item {
       id: innerCol
       x: bubble.bubblePaddingX
       y: bubble.bubblePaddingY
-      // Fills the bubble's content box; the bubble width is driven by
-      // messageText's NATURAL width (implicitWidth — the unwrapped line),
-      // so this never feeds back into the text's wrapping decision.
-      // Max() with the overlay rows' natural widths: for very short
-      // messages ("ok") the buttons/time rows are WIDER than the text —
-      // without this they'd be x-negative and clipped by the bubble.
-      width: Math.max(bubble.width - bubble.bubblePaddingX * 2 - bubble.bubbleExtra,
-                      btnRow.implicitWidth,
-                      timeText.implicitWidth)
+      // Fills the bubble's content box; the bubble width is driven by the
+      // hug formula above (text natural width vs footer, MAXed) — the text
+      // never constrains itself through its own rendered width, so wrapping
+      // behaves exactly like any chat app: grow to cap, then wrap. The
+      // footer row's own natural width can never exceed innerCol.width
+      // because the hug formula guarantees the combined footer fits.
+      width: bubble.width - bubble.bubblePaddingX * 2 - bubble.bubbleExtra
       spacing: Style.space(2)
 
-      // ---- row 1: hover buttons, toward the inside edge ------------------
-      // opacity (not visible) on the glyphs: a Row whose children are all
-      // invisible is treated as EMPTY by the Column, which then stacks the
-      // following rows over it (the 1.5.71 blank-message bug). MouseAreas
-      // carry enabled guards so hidden glyphs stay unclickable.
-      Row {
-        id: btnRow
-        spacing: Style.space(8)
-        height: Style.space(13)
-        x: modelData.outgoing ? innerCol.width - btnRow.implicitWidth : 0
-
-        // Outgoing row order (Operator request): edit ✎ FIRST, then copy.
-        Text {
-          text: "\uF040"
-          color: messageBubble.textColor
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          readonly property bool showEdit: messageBubble.editEnabled
-            && modelData.outgoing
-            && (messageBubble.hovered || messageBubble.editingMid === modelData.mid)
-          opacity: showEdit ? 0.85 : 0.0
-
-          MouseArea {
-            anchors.fill: parent
-            enabled: parent.showEdit
-            onClicked: messageBubble.editRequested(modelData.mid, modelData.text)
-          }
-        }
-
-        Text {
-          text: messageBubble.copied ? "\u2713" : "\uF0C5"
-          color: messageBubble.copied ? Color.accent : messageBubble.textColor
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          opacity: (messageBubble.hovered || messageBubble.copied) ? (messageBubble.copied ? 1.0 : 0.85) : 0.0
-
-          MouseArea {
-            anchors.fill: parent
-            enabled: messageBubble.hovered || messageBubble.copied
-            onClicked: {
-              messageBubble.copyRequested(modelData.text)
-              messageBubble.copied = true
-              copyReset.restart()
-            }
-          }
-        }
-      }
-
-      // ---- row 2: the message text ----------------------------------------
+      // ---- row 1: the message text ----------------------------------------
       // Fill the inner width; the BUBBLE decides the width from the text's
       // natural implicitWidth (capped) — the text never constrains itself
       // through its own rendered width, so wrapping behaves exactly like
@@ -177,18 +136,77 @@ Item {
         wrapMode: Text.Wrap
       }
 
-      // ---- row 3: timestamp, same inside edge ------------------------------
-      // Same opacity on both sides (Operator request: the sent time row must
-      // match the received one). The room call site passes its luminance-
-      // derived ink via timeInk; 1:1 keeps the body ink on both sides.
-      Text {
-        id: timeText
-        x: modelData.outgoing ? innerCol.width - implicitWidth : 0
-        text: messageBubble.timeLine
-        color: messageBubble.timeInk
-        opacity: 0.7
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
+      // ---- row 2: the footer — buttons justified OPPOSITE the timestamp --
+      // Buttons sit on the inside edge (left on received, right on sent);
+      // the timestamp hugs the other edge. Both clusters coexist on one
+      // line; the bubble's hug formula guarantees room for both.
+      // opacity (not visible) on the glyphs: a Row whose children are all
+      // invisible is treated as EMPTY by the Column, which then stacks the
+      // following rows over it (the 1.5.71 blank-message bug). MouseAreas
+      // carry enabled guards so hidden glyphs stay unclickable.
+      Row {
+        id: footerRow
+        width: innerCol.width
+        spacing: Style.space(8)
+        height: Style.space(13)
+
+        // The glyph cluster: absolute x so the timestamp can own the other
+        // edge (a Row child's x wouldn't survive the positioner otherwise).
+        Row {
+          id: btnRow
+          objectName: "btnRow"
+          spacing: Style.space(8)
+          height: Style.space(13)
+          x: modelData.outgoing ? footerRow.width - btnRow.implicitWidth : 0
+
+          // Outgoing order: edit ✎ first (rightmost edge on sent bubbles),
+          // then copy.
+          Text {
+            text: "\uF040"
+            color: messageBubble.textColor
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            readonly property bool showEdit: messageBubble.editEnabled
+              && modelData.outgoing
+              && (messageBubble.hovered || messageBubble.editingMid === modelData.mid)
+            opacity: showEdit ? 0.85 : 0.0
+
+            MouseArea {
+              anchors.fill: parent
+              enabled: parent.showEdit
+              onClicked: messageBubble.editRequested(modelData.mid, modelData.text)
+            }
+          }
+
+          Text {
+            text: messageBubble.copied ? "\u2713" : "\uF0C5"
+            color: messageBubble.copied ? Color.accent : messageBubble.textColor
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            opacity: (messageBubble.hovered || messageBubble.copied) ? (messageBubble.copied ? 1.0 : 0.85) : 0.0
+
+            MouseArea {
+              anchors.fill: parent
+              enabled: messageBubble.hovered || messageBubble.copied
+              onClicked: {
+                messageBubble.copyRequested(modelData.text)
+                messageBubble.copied = true
+                copyReset.restart()
+              }
+            }
+          }
+        }
+
+        // Timestamp: hugs the edge OPPOSITE the buttons.
+        Text {
+          id: timeText
+          x: modelData.outgoing ? 0 : footerRow.width - implicitWidth
+          text: messageBubble.timeLine
+          color: messageBubble.timeInk
+          opacity: 0.7
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+        }
       }
     }
   }

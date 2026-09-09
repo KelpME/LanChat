@@ -63,11 +63,16 @@ Item {
     lv.model = [
       { mid: "m1", outgoing: false, from: "peer-9", fromName: "Carol",
         ts: 0, text: "hello room", edited: false, attachment: null,
+        friendRequest: false, held: false },
+      { mid: "m2", outgoing: false, from: "peer-9", fromName: "Carol",
+        ts: 0, text: "ok", edited: false, attachment: null,
         friendRequest: false, held: false }
     ]
     Qt.callLater(verify)
   }
 
+  // All RoomMessage instances (root Column: maxWidth + selectedRoom) with
+  // their MessageBubble child, sorted by mid.
   function collect() {
     var msgs = []
     function walkMsgs(n) {
@@ -81,36 +86,64 @@ Item {
       if (res) for (var j = 0; j < res.length; j++) walkMsgs(res[j])
     }
     walkMsgs(lv.contentItem)
-    if (msgs.length !== 1) return null
-    var rm = msgs[0]
-    for (var i = 0; i < rm.children.length; i++) {
-      if (rm.children[i].bubbleRect !== undefined) return rm.children[i]
+    var out = []
+    for (var i = 0; i < msgs.length; i++) {
+      var rm = msgs[i]
+      for (var k = 0; k < rm.children.length; k++) {
+        if (rm.children[k].bubbleRect !== undefined) {
+          out.push({ mid: rm.modelData.mid, mb: rm.children[k] })
+          break
+        }
+      }
     }
-    return null
+    out.sort(function(a, b) { return a.mid < b.mid ? -1 : 1 })
+    return out
   }
 
   function verify() {
-    var mb = collect()
+    var recs = collect()
+    if (!recs || recs.length !== 2)
+      return fail("R1 expected 2 MessageBubbles, got " + (recs ? recs.length : 0))
+    var mb = recs[0].mb
     if (!mb) return fail("R1 MessageBubble not found inside RoomMessage")
     console.log("BENCH-ROOMFMT-OK-R1 bubble reachable")
 
-    // R2: copy glyph present.
+    // R2-F4: locate footer elements. innerCol children = [messageText,
+    // footerRow]; footerRow children = [btnRow, timeText].
     var innerCol = mb.bubbleRect.children[0]
     var copyGlyph = null, editGlyph = null, timeGlyph = null, textItem = null
+    var footerRow = null, btnRow = null
     for (var i = 0; i < innerCol.children.length; i++) {
       var el = innerCol.children[i]
-      if (el instanceof Row) {
-        for (var k = 0; k < el.children.length; k++) {
-          var g = el.children[k]
-          if (g.text === "\uF0C5" || g.text === "\u2713") copyGlyph = g
-          if (g.text === "\uF040") editGlyph = g
-        }
-      }
-      if (el.text === "12:34") timeGlyph = el
       if (el.text === "hello room") textItem = el
+      if (el.children && el.children.length === 2 && el.children[1].text === "12:34")
+        footerRow = el
+    }
+    if (!footerRow) return fail("R2 footer row not found (time not in footer?)")
+    for (var f = 0; f < footerRow.children.length; f++) {
+      var fc = footerRow.children[f]
+      if (fc.objectName === "btnRow") btnRow = fc
+      else if (fc.text === "12:34") timeGlyph = fc
+    }
+    if (!btnRow) return fail("R2 btnRow not found in footer")
+    for (var b = 0; b < btnRow.children.length; b++) {
+      var g = btnRow.children[b]
+      if (g.text === "\uF0C5" || g.text === "\u2713") copyGlyph = g
+      if (g.text === "\uF040") editGlyph = g
     }
     if (!copyGlyph) return fail("R2 copy glyph missing")
-    console.log("BENCH-ROOMFMT-OK-R2 copy glyph present")
+    console.log("BENCH-ROOMFMT-OK-R2 copy glyph in footer")
+
+    // F1: buttons and timestamp share ONE row (footerRow), justified to
+    // OPPOSITE edges. Received message (outgoing=false): buttons LEFT
+    // (x≈0), time RIGHT (x = footer width - implicitWidth).
+    if (timeGlyph.parent !== btnRow.parent)
+      return fail("F1 time and buttons not on the same row")
+    if (Math.abs(btnRow.x) > 0.5)
+      return fail("F1 received: buttons not at left edge (x=" + btnRow.x + ")")
+    if (Math.abs(timeGlyph.x - (footerRow.width - timeGlyph.implicitWidth)) > 0.5)
+      return fail("F1 received: time not at right edge")
+    console.log("BENCH-ROOMFMT-OK-F1 footer justified opposite edges")
 
     // R3: edit glyph must exist in the shared layout but be inert.
     if (!editGlyph) return fail("R3 edit glyph element missing (layout changed?)")
@@ -121,6 +154,17 @@ Item {
     // R4: timestamp row present with the stub timeLabel output.
     if (!timeGlyph) return fail("R4 time row text missing")
     console.log("BENCH-ROOMFMT-OK-R4 time row present")
+
+    // F2: min-width — the bubble must fit buttons + gap + timestamp on the
+    // footer line even when the text is shorter. recs[1] is the "ok"
+    // message: its text natural width is far below the footer need, so the
+    // hug formula's footer term decides.
+    var shortB = recs[1].mb
+    var shortInner = shortB.bubbleRect.children[0].width
+    var need = btnRow.implicitWidth + Style.space(8) + timeGlyph.implicitWidth
+    if (shortInner + 0.5 < need)
+      return fail("F2 short-msg bubble inner width " + shortInner + " < footer need " + need)
+    console.log("BENCH-ROOMFMT-OK-F2 min width fits footer (inner=" + Math.round(shortInner) + " need=" + Math.round(need) + ")")
 
     // R5: member color fills the bubble.
     if (norm(mb.bubbleRect.color) !== "#3366aa")
@@ -136,8 +180,9 @@ Item {
     benchRoom = ({ roomId: "room-bench", colorsEnabled: false,
                    members: benchRoot.benchRoom.members })
     Qt.callLater(function() {
-      var mb2 = collect()
-      if (!mb2) return fail("R7 MessageBubble not found after reassign")
+      var recs2 = collect()
+      if (!recs2 || !recs2[0].mb) return fail("R7 MessageBubble not found after reassign")
+      var mb2 = recs2[0].mb
       if (norm(mb2.bubbleRect.color) !== norm(Style.normalFill))
         return fail("R7 bubble " + norm(mb2.bubbleRect.color)
                     + " != base normalFill after colorsEnabled=false")
