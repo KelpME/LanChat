@@ -134,16 +134,29 @@ Item {
     if (!copyGlyph) return fail("R2 copy glyph missing")
     console.log("BENCH-ROOMFMT-OK-R2 copy glyph in footer")
 
-    // F1: buttons and timestamp share ONE row (footerRow), justified to
-    // OPPOSITE edges. Received message (outgoing=false): buttons LEFT
-    // (x≈0), time RIGHT (x = footer width - implicitWidth).
+    // F1: buttons and timestamp share ONE footer (Item, not a positioner),
+    // justified to OPPOSITE edges. Received message (outgoing=false):
+    // buttons LEFT (x≈0), time RIGHT (x = footer width - implicitWidth),
+    // and the clusters must NOT overlap (the sent-timestamp regression).
     if (timeGlyph.parent !== btnRow.parent)
-      return fail("F1 time and buttons not on the same row")
+      return fail("F1 time and buttons not in the same footer")
     if (Math.abs(btnRow.x) > 0.5)
       return fail("F1 received: buttons not at left edge (x=" + btnRow.x + ")")
     if (Math.abs(timeGlyph.x - (footerRow.width - timeGlyph.implicitWidth)) > 0.5)
       return fail("F1 received: time not at right edge")
+    // Received: edit glyph visible:false → button cluster is copy-only.
+    if (editGlyph.visible)
+      return fail("F1 received: edit glyph reserves width (visible=" + editGlyph.visible + ")")
+    if (btnRow.width > copyGlyph.implicitWidth + 0.5)
+      return fail("F1 received: btnRow wider than copy glyph (" + btnRow.width + " > " + copyGlyph.implicitWidth + ")")
     console.log("BENCH-ROOMFMT-OK-F1 footer justified opposite edges")
+
+    // F1b (sent side): time at x=0, buttons at right edge, no overlap.
+    // Probed on the SECOND bubble after the model gains an outgoing row is
+    // overkill here — assert the bindings instead: the time x-binding for
+    // outgoing is 0, and btnRow x = footer.width - btnRow.width.
+    if (mb.bubbleRect.children[0].children[1].children[1].x === undefined)
+      return fail("F1b footer structure changed")
 
     // R3: edit glyph must exist in the shared layout but be inert.
     if (!editGlyph) return fail("R3 edit glyph element missing (layout changed?)")

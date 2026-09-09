@@ -1,0 +1,123 @@
+=== /tmp/qsgate/benchshell/shell10.qml ===
+      1  DEBUG qml: BENCH-ROOMFMT-OK-R7 base fill fallback
+      1  DEBUG qml: BENCH-ROOMFMT-OK-R6 luminance ink intact
+      1  DEBUG qml: BENCH-ROOMFMT-OK-R5 member color fills
+      1  DEBUG qml: BENCH-ROOMFMT-OK-R4 time row present
+      1  DEBUG qml: BENCH-ROOMFMT-OK-R3 edit glyph inert
+      1  DEBUG qml: BENCH-ROOMFMT-OK-R2 copy glyph in footer
+      1  DEBUG qml: BENCH-ROOMFMT-OK-R1 bubble reachable
+      1  DEBUG qml: BENCH-ROOMFMT-OK-F2 min width fits footer (inner=58 need=58)
+      1  DEBUG qml: BENCH-ROOMFMT-OK-F1 footer justified opposite edges
+=== /tmp/qsgate/benchshell/shell3.qml ===
+      1  DEBUG qml: BENCH-OK-TYPING start=1 stop=1
+      1  DEBUG qml: BENCH-OK-STAGED-HEIGHT 211
+      1  DEBUG qml: BENCH-OK-SIGNALS attach=2 send=1 cancel=1 remove=1
+      1  DEBUG qml: BENCH-OK-INPUT-ACCESS
+      1  DEBUG qml: BENCH-OK-EMPTY-HEIGHT 77
+=== /tmp/qsgate/benchshell/shell4.qml ===
+      2   WARN scene: @shared/PeerList.qml[166:-1]: TypeError: Type error
+      1   WARN scene: @shared/PeerList.qml[423:15]: Unable to assign [undefined] to QColor
+      1  DEBUG qml: BENCH-OK-ROWS 2
+      1  DEBUG qml: BENCH-OK-PEER-SELECTED peer-1
+      1  DEBUG qml: BENCH-OK-NOTIF-EXPANDED 120
+      1  DEBUG qml: BENCH-OK-NOTIF-COLLAPSED 32
+      1  DEBUG qml: BENCH-OK-FW-INPUT
+      1  DEBUG qml: BENCH-OK-FRIEND-SIGNALS accept=1 reject=1 cancel=1
+      1  DEBUG qml: BENCH-OK-CHAT-CLOSED
+=== /tmp/qsgate/benchshell/shell5.qml ===
+      1  DEBUG qml: BENCH-OK-ROOM-SELECTED room-1
+      1  DEBUG qml: BENCH-OK-ROOM-ROWS leave+canadd present
+      1  DEBUG qml: BENCH-OK-LEAVE-SIGNAL
+      1  DEBUG qml: BENCH-OK-JOIN-CONFIRMED-PRUNE
+      1  DEBUG qml: BENCH-OK-INVITE-BUTTONS
+      1  DEBUG qml: BENCH-OK-DECLINE-CLEARS-ROW + roomForget sent
+      1  DEBUG qml: BENCH-OK-CREATE-SIGNAL
+      1  DEBUG qml: BENCH-OK-CREATE-BTN (rooms header visible: section height 35)
+      1  DEBUG qml: BENCH-OK-COLLAPSE 35
+      1  DEBUG qml: BENCH-OK-A6 flick capped: h=70 contentH=70 cap=549 interactive=false
+=== /tmp/qsgate/benchshell/shell6.qml ===
+      1  DEBUG qml: BENCH-OK-THREAD-SIZE w=400 h=500
+      1  DEBUG qml: BENCH-OK-THREAD-SIGNALS
+      1  DEBUG qml: BENCH-OK-THREAD-DELEGATE cols=5
+      1  DEBUG qml: BENCH-OK-ROOM-SIZE
+      1  DEBUG qml: BENCH-OK-ROOM-DELEGATE n=1 h=58
+      1  DEBUG qml: BENCH-OK-INPUTS
+      1  DEBUG qml: BENCH-OK-EMPTY-STATE
+      1  DEBUG qml: BENCH-NOTE bubbleMaxWidth=undefined
+=== /tmp/qsgate/benchshell/shell7.qml ===
+      1  DEBUG qml: BENCH-PASS
+      1  DEBUG qml: BENCH-OK expanded height grows: 675
+      1  DEBUG qml: BENCH-OK confirm timers auto-disarm
+      1  DEBUG qml: BENCH-OK confirm flags armed
+      1  DEBUG qml: BENCH-OK collapse restores collapsed height
+      1  DEBUG qml: BENCH-OK collapsed height == settingsHeader height (35)
+      1  DEBUG qml: BENCH-OK all 9 signals fired with correct args
+=== /tmp/qsgate/benchshell/shell8.qml ===
+      2   WARN scene: @shared/PeerList.qml[166:-1]: TypeError: Type error
+      1  DEBUG qml: BENCH-UNREAD-OK-U6c room cleared
+      1  DEBUG qml: BENCH-UNREAD-OK-U6b room selected
+      1  DEBUG qml: BENCH-UNREAD-OK-U6a room tint
+      1  DEBUG qml: BENCH-UNREAD-OK-U5 cleared
+      1  DEBUG qml: BENCH-UNREAD-OK-U4 tint restored
+      1  DEBUG qml: BENCH-UNREAD-OK-U3 selection wins
+      1  DEBUG qml: BENCH-UNREAD-OK-U2 peer-2 accent tint
+      1  DEBUG qml: BENCH-UNREAD-OK-U1 peer-1 transparent
+=== /tmp/qsgate/benchshell/shell9.qml ===
+      1  DEBUG qml: BENCH-LU-OK-RC4 gated on panelOpen
+      1  DEBUG qml: BENCH-LU-OK-RC3 dedupe holds
+      1  DEBUG qml: BENCH-LU-OK-RC2 room catch-up exact
+      1  DEBUG qml: BENCH-LU-OK-RC1 on-screen 1:1 catch-up exact
+      1  DEBUG qml: BENCH-LU-OK-L9
+      1  DEBUG qml: BENCH-LU-OK-L8
+      1  DEBUG qml: BENCH-LU-OK-L7
+      1  DEBUG qml: BENCH-LU-OK-L6
+      1  DEBUG qml: BENCH-LU-OK-L5
+      1  DEBUG qml: BENCH-LU-OK-L4
+      1  DEBUG qml: BENCH-LU-OK-L3
+      1  DEBUG qml: BENCH-LU-OK-L2
+=== /tmp/qsgate/benchshell/shell.qml ===
+      4   WARN scene: @shared/MessageBubble.qml[94:5]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/MessageBubble.qml[208:11]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/MessageBubble.qml[176:-1]: TypeError: Cannot read property 'mid' of undefined
+      4   WARN scene: @shared/MessageBubble.qml[171:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/MessageBubble.qml[162:11]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/MessageBubble.qml[129:-1]: TypeError: Cannot read property 'attachment' of undefined
+      4   WARN scene: @shared/MessageBubble.qml[101:-1]: TypeError: Cannot read property 'outgoing' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[38:-1]: TypeError: Cannot read property 'friendRequest' of undefined
+      4   WARN scene: @shared/ChatMessage.qml[30:-1]: TypeError: Cannot read property 'ts' of undefined
+      1  DEBUG qml: BENCH-OK delegates=4 edits=1 copies=1
+=== /tmp/qsgate/benchshell/panelbench.qml ===
+      1  DEBUG qml: BENCH-PANEL-SKIP swatch MouseArea not found (settings body may be collapsed)
+      1  DEBUG qml: BENCH-PANEL-PASS
+      1  DEBUG qml: BENCH-PANEL-OK settings expand/collapse cycle completed (collapsed height restored: 35)
+      1  DEBUG qml: BENCH-PANEL-OK send() text path completed (stub send side-effect logged above)
+      1  DEBUG qml: BENCH-PANEL-OK send() empty-input guard no-op completed
+      1  DEBUG qml: BENCH-PANEL-OK selectPeer(test-peer-1) selectedPeerId=test-peer-1
+      1  DEBUG qml: BENCH-PANEL-OK roomListSection.sectionHeight=35
+      1  DEBUG qml: BENCH-PANEL-OK PeerList sized 280x864
+      1  DEBUG qml: BENCH-PANEL-OK parent chain sized, depth=8 (host layer not checked: (no parent))
+      1  DEBUG qml: BENCH-PANEL-OK header title 'TestPeer's chat' centered (cx=691 mid=691)
+      1  DEBUG qml: BENCH-PANEL-INFO settings expand (bench-env limited): 35 -> 35 (expanded=true hostHeight=864 contentHeight=0)
+=== /tmp/qsgate/benchshell/sectionbench.qml ===
+      1  DEBUG qml: BENCH-SECT-PASS
+      1  DEBUG qml: BENCH-SECT-OK A5b peers click leaves rooms alone
+      1  DEBUG qml: BENCH-SECT-OK A5a rooms click closes settings, leaves peers alone
+      1  DEBUG qml: BENCH-SECT-OK A4 peers and rooms open simultaneously
+      1  DEBUG qml: BENCH-SECT-OK A3 settings header click collapses peers AND rooms
+      1  DEBUG qml: BENCH-SECT-OK A2b peers body re-expanded to 738; mid-flight samples=426.65625,645.75,726.46875,738,738,738,738,738
+      1  DEBUG qml: BENCH-SECT-OK A2a peers body collapsed to 0 (settled); mid-flight samples=323.1357536315918,95.74392700195312,11.96799087524414,0,0,0,0,0
+      1  DEBUG qml: BENCH-SECT-OK A1 peers section present, default expanded=true
+      1  DEBUG qml: BENCH-SECT-OK A1b peer ListView width=270
+=== /tmp/qsgate/benchshell/bubblebench.qml ===
+      1  DEBUG qml: BENCH-BUBBLE-OK text resolved: 'ping'
+      1  DEBUG qml: BENCH-BUBBLE delegate modelData = {"attachment":null,"edited":false,"friendRequest":false,"fromName":"Peer","held":false,"mid":"m1","outgoing":false,"text":"ping","ts":0}
+=== /tmp/qsgate/benchshell/friendbadgebench.qml ===
+      1  DEBUG qml: BENCH-PASS-NAME-CLEARS-BADGE nameRight=298.625 badgeLeft=306.625
+      1  DEBUG qml: BENCH-PASS-FRIEND-LABEL-FITS label=62.375 badgeW=78.375
+      1  DEBUG qml: BENCH-OK-PLUS-BUTTON-SIZE 32
+      1  DEBUG qml: BENCH-OK-BADGE-WIDTH 78.375
+=== /tmp/qsgate/benchshell/roomcolorbench.qml ===
+      1  DEBUG qml: BENCH-ROOMCOLOR-OK p1 ink != p2 ink (luminance flip works at full opacity)
+      1  DEBUG qml: BENCH-ROOMCOLOR-OK m2 bubble is #1A3A6B
+      1  DEBUG qml: BENCH-ROOMCOLOR-OK m1 bubble is #D35F5F
+      1  DEBUG qml: BENCH-ROOMCOLOR-OK both bubbles fell back to the base fill (no member hex)

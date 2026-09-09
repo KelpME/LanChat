@@ -137,37 +137,42 @@ Item {
       }
 
       // ---- row 2: the footer — buttons justified OPPOSITE the timestamp --
-      // Buttons sit on the inside edge (left on received, right on sent);
-      // the timestamp hugs the other edge. Both clusters coexist on one
-      // line; the bubble's hug formula guarantees room for both.
+      // Plain Item, NOT a Row: Row is a positioner and owns its children's
+      // x, so the absolute x bindings below would fight it (observed: the
+      // sent timestamp shoved under the button cluster). Item + bindings =
+      // authoritative edges. Buttons sit on the inside edge (left on
+      // received, right on sent); the timestamp hugs the other edge. The
+      // bubble's hug formula guarantees room for both.
       // opacity (not visible) on the glyphs: a Row whose children are all
-      // invisible is treated as EMPTY by the Column, which then stacks the
-      // following rows over it (the 1.5.71 blank-message bug). MouseAreas
-      // carry enabled guards so hidden glyphs stay unclickable.
-      Row {
+      // invisible is treated as EMPTY by a positioner, which then stacks
+      // the following rows over it (the 1.5.71 blank-message bug).
+      // MouseAreas carry enabled guards so hidden glyphs stay unclickable.
+      Item {
         id: footerRow
         width: innerCol.width
-        spacing: Style.space(8)
         height: Style.space(13)
 
         // The glyph cluster: absolute x so the timestamp can own the other
-        // edge (a Row child's x wouldn't survive the positioner otherwise).
+        // edge.
         Row {
           id: btnRow
           objectName: "btnRow"
           spacing: Style.space(8)
           height: Style.space(13)
-          x: modelData.outgoing ? footerRow.width - btnRow.implicitWidth : 0
+          x: modelData.outgoing ? footerRow.width - btnRow.width : 0
 
           // Outgoing order: edit ✎ first (rightmost edge on sent bubbles),
-          // then copy.
+          // then copy. The edit glyph is visible:false on received messages
+          // so it takes ZERO width there (an opacity-0 glyph still reserves
+          // its slot — that phantom gap next to the copy button was the
+          // Operator's second report).
           Text {
             text: "\uF040"
+            visible: modelData.outgoing && messageBubble.editEnabled
             color: messageBubble.textColor
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
-            readonly property bool showEdit: messageBubble.editEnabled
-              && modelData.outgoing
+            readonly property bool showEdit: visible
               && (messageBubble.hovered || messageBubble.editingMid === modelData.mid)
             opacity: showEdit ? 0.85 : 0.0
 
