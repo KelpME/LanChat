@@ -305,6 +305,13 @@ class State:
         self.conns = {}
         self.pending_sent = {}
         self.pending_first = {}
+        # Outbound friend-request intents: peers WE have sent a request to and
+        # are waiting on. When one of them requests us back, the handshake
+        # completes automatically on both sides (mutual auto-accept) without
+        # either user clicking Accept. Guarded by pending_lock; every path
+        # that ends the request (accept/reject/cancel/unfriend) discards the
+        # entry so a stale intent can never auto-accept a future request.
+        self.request_outgoing = set()
         self.udp_sock = None
         self.stdout = sys.stdout
         self.socket_clients = set()
@@ -885,6 +892,10 @@ def unfriend(pid: str) -> bool:
         # A deliberate unfriend must also leave the ledger, otherwise boot
         # reconcile would resurrect someone we intentionally removed.
         _ledger_forget(pid)
+        # And clear any outbound request intent: a stale intent here would
+        # ghost auto-accept a FUTURE request from a re-added peer.
+        with STATE.pending_lock:
+            STATE.request_outgoing.discard(pid)
         _emit({"event": "friends", "friends": friends_list()})
         return len(friends) != before
 
@@ -1124,6 +1135,24 @@ def _handle_udp_friend_request(sock: socket.socket, pkt: dict, addr: str) -> Non
     if not accept_requests():
         _diag("udp-friend-request-rejected", from_id=claimed[:12], reason="requests-disabled")
         return
+    # Mutual auto-accept: if WE have an outstanding request to this peer, they
+    # requesting us back completes the handshake on both sides — confirm them
+    # locally, reveal any held messages, and notify them so their side confirms
+    # too. Neither user clicks Accept; the request banner is NOT surfaced.
+    with STATE.pending_lock:
+        mutual = claimed in STATE.request_outgoing
+        if mutual:
+            STATE.request_outgoing.discard(claimed)
+            held = STATE.pending_sent.pop(claimed, [])
+    if mutual:
+        upsert_peer(claimed, name, addr, pport)
+        pname = name
+        add_friend(claimed, addr, pname, confirmed=True)
+        _emit({"event": "friend-accepted", "id": claimed, "name": pname})
+        _notify_accept(claimed)
+        _diag("udp-friend-request-mutual-accept", peer=claimed[:12], name=pname, revealed=len(held))
+        _reveal(held)
+        return
     # Register the peer (so we know their address) and surface the request with
     # the VERIFIED fingerprint — the same verified-request UI as the TCP path.
     upsert_peer(claimed, name, addr, pport)
@@ -1197,9 +1226,11 @@ def _handle_udp_friend_accept(sock: socket.socket, pkt: dict, addr: str) -> None
     peer = find_peer(claimed)
     pname = (peer or {}).get("name") or name
     add_friend(claimed, addr, pname, confirmed=True)
-    _emit({"event": "friend-accepted", "id": claimed, "name": pname})
+    # The handshake completed: our outbound intent is no longer outstanding.
     with STATE.pending_lock:
+        STATE.request_outgoing.discard(claimed)
         held = STATE.pending_sent.pop(claimed, [])
+    _emit({"event": "friend-accepted", "id": claimed, "name": pname})
     _diag("udp-friend-accepted", peer=claimed[:12], name=pname, revealed=len(held))
     _reveal(held)
 
@@ -1377,6 +1408,7 @@ def _handle_udp_friend_reject(sock: socket.socket, pkt: dict, addr: str) -> None
     # or confirm them as a friend.
     with STATE.pending_lock:
         STATE.pending_sent.pop(claimed, None)
+        STATE.request_outgoing.discard(claimed)
     _unfriend_if_unconfirmed(claimed)
     _emit({"event": "friend-rejected", "id": claimed, "name": name})
     _diag("udp-friend-rejected", peer=claimed[:12], name=name)
@@ -2015,6 +2047,7 @@ def _handle_incoming(msg: dict, addr) -> None:
         # (unconfirmed) record so we never treat them as a friend.
         with STATE.pending_lock:
             STATE.pending_sent.pop(pid, None)
+            STATE.request_outgoing.discard(pid)
         _unfriend_if_unconfirmed(pid)
         _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
         _diag("inbound-friend-reject", peer=pid[:12])
@@ -2142,11 +2175,27 @@ def _handle_incoming(msg: dict, addr) -> None:
     # non-confirmed peer (not just the first) so content never surfaces until
     # they're accepted.
     if msg.get("friendRequest") and not is_friend(pid):
-        # (1.3) Request gating: when the user has disabled accepting friend
+        # Request gating: when the user has disabled accepting friend
         # requests, a stranger's request is silently dropped. The requester is
         # never added as pending, so they can't even get a trust foothold.
         if not accept_requests():
             _log("inbound-friend-request-rejected from=%s reason=requests-disabled" % pid[:12])
+            return
+        # Mutual auto-accept: if WE have an outstanding request to this peer,
+        # their request back completes the handshake — confirm them, notify
+        # them (their side confirms via the normal accept path), surface
+        # friend-accepted, and do NOT show the request banner. (1.3)
+        with STATE.pending_lock:
+            mutual = pid in STATE.request_outgoing
+            if mutual:
+                STATE.request_outgoing.discard(pid)
+                held = STATE.pending_sent.pop(pid, [])
+        if mutual:
+            add_friend(pid, addr[0], from_name, confirmed=True)
+            _emit({"event": "friend-accepted", "id": pid, "name": from_name})
+            _notify_accept(pid)
+            _diag("inbound-friend-request-mutual-accept", peer=pid[:12], name=from_name, revealed=len(held))
+            _reveal(held)
             return
         if not is_pending(pid):
             add_friend(pid, addr[0], from_name, confirmed=False)
@@ -2381,6 +2430,10 @@ def handle_command(cmd: dict) -> None:
         if to and STATE.udp_sock is not None:
             sent = _send_udp_friend_request(STATE.udp_sock, to)
             if sent:
+                # Record the outbound intent: if they request us back, the
+                # mutual auto-accept completes the handshake on both sides.
+                with STATE.pending_lock:
+                    STATE.request_outgoing.add(to)
                 _emit({"event": "friend-request", "outgoing": True, "to": to,
                        "toName": str(cmd.get("name") or friendly_name(to)),
                        "text": "wants to add you as a friend"})
@@ -2396,6 +2449,7 @@ def handle_command(cmd: dict) -> None:
         if pid and not is_friend(pid):
             with STATE.pending_lock:
                 STATE.pending_sent.pop(pid, None)
+                STATE.request_outgoing.discard(pid)
             if STATE.udp_sock is not None:
                 _send_udp_friend_cancel(STATE.udp_sock, pid)
         if pid:

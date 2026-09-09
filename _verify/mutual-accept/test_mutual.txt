@@ -1,0 +1,18 @@
+OK   M1a A->B request arrives at B (banner event)
+OK   M1b B auto-accepted A (friend-accepted on B)
+OK   M1c A confirmed via the accept notify (friend-accepted on A)
+OK   M1d A's friends list shows B confirmed
+OK   M1e B's friends list shows A confirmed
+OK   M2a one-way request still surfaces the banner event
+OK   M2b no friend-accepted on D (no ghost accept)
+OK   M2c D's friends list does NOT show C confirmed
+OK   M3a first request surfaces at F
+OK   M3b mutual accept fired
+OK   M3b2 F actually confirmed as E's friend
+OK   M3c E actually removed F (friend-removed)
+OK   M3d after unfriend, re-request surfaces as a banner (no ghost accept)
+OK   M3e no friend-accepted on E after re-request
+OK   M4a crossed requests: G confirmed with H
+OK   M4b crossed requests: H confirmed with G
+
+ALL MUTUAL-REQUEST TESTS PASSED (16 checks)
