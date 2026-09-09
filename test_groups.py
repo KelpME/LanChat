@@ -140,6 +140,60 @@ def test_invite_decline(oo, aa, ido, ida, check, wait_for):
     check("decline: join after re-invite confirmed (member in room-state)", bool(got))
 
 
+def test_unfriend_leave(o, b, ido, idb, check, wait_for):
+    """Regression for 'leave a room whose owner I am no longer friends with'.
+
+    A member's roomLeave rides a roomLeave envelope to the OWNER's socket;
+    after an unfriend that socket can never exist, so pre-fix the leave froze
+    forever ("host offline — changes frozen"). Post-fix (rooms.py
+    member_leave): when the owner is not a trusted peer the leaver takes the
+    LOCAL path — the room drops from their list and the leave SUCCEEDS.
+    (Trusted-but-offline freeze is covered by test_member_leave.)
+
+    Roles: o = owner, b = member (b's queues are not read by wait_event
+    downstream). Must run before test_member_leave stops o. Own room ids.
+    """
+
+    o.cmd(cmd="createRoom", name="UFRoom")
+    created = o.wait_event("room-created", timeout=6)
+    rid = (created or {}).get("roomId", "")
+    check("unfriend-leave: room created", bool(rid))
+    o.cmd(cmd="roomInvite", roomId=rid, peer=idb)
+    # Count-window, not wait_event: b's queue holds a STALE room-invite from
+    # test_forget's room, and wait_event pops the first match (test_forget's
+    # docstring warns exactly this). Compare only events arriving after now.
+    n_inv = len(b.events_of("room-invite"))
+    o.cmd(cmd="roomInvite", roomId=rid, peer=idb)
+    inv = wait_for(lambda: [e for e in b.events_of("room-invite")[n_inv:]
+                            if e.get("roomId") == rid], 6)
+    check("unfriend-leave: invite reaches B", bool(inv))
+    b.cmd(cmd="roomJoin", roomId=rid)
+    got = wait_for(lambda: [s for s in b.events_of("room-state")
+                            if s.get("room", {}).get("roomId") == rid
+                            and idb in s.get("room", {}).get("members", {})], 8)
+    check("unfriend-leave: B joined (member in room-state)", bool(got))
+
+    # B unfriends O (the local unfriend notifies O via signed UDP / TCP so
+    # BOTH sides drop the link). Wait for the friend-removed event on B.
+    n_err = len(b.events_of("error"))
+    b.cmd(cmd="unfriend", id=ido)
+    unf_done = wait_for(lambda: any(e.get("id") == ido
+                                    for e in b.events_of("friend-removed")), 6)
+    check("unfriend-leave: B unfriended O (friend-removed seen)", unf_done is not None)
+
+    # Leave must now SUCCEED via the local path: room-list event after the
+    # leave no longer contains the room, and no 'frozen' error fired.
+    n_blist = len(b.events_of("room-list"))
+    b.cmd(cmd="roomLeave", roomId=rid)
+    gone = wait_for(lambda: [e for e in b.events_of("room-list")[n_blist:]
+                             if all(r.get("roomId") != rid
+                                    for r in e.get("rooms", []))], 6)
+    check("unfriend-leave: room gone from leaver's list after unfriend", bool(gone))
+    no_frozen = not any("frozen" in (e.get("message") or "")
+                        for e in b.events_of("error")[n_err:])
+    check("unfriend-leave: no 'frozen' error during the unfriend leave", no_frozen)
+
+
 def test_member_leave(oo, aa, ido, ida, check, wait_for):
     """Regression for 'leave this room' (rooms.member_leave): a member's
     roomLeave must (1) drop the room from the LEAVER's own list, (2) reach
@@ -443,6 +497,10 @@ def main():
         # ---- 8b2. invite decline + re-invite (also on daemon b — its
         # room-invite queue is never read by wait_event downstream)
         test_invite_decline(o, b, ido, idb, check, wait_for)
+
+        # ---- 8b3. unfriend-proof leave (owner stays live; must run before
+        # test_member_leave / step 9 which rely on o)
+        test_unfriend_leave(o, b, ido, idb, check, wait_for)
 
         # ---- 8c. member leave regression (needs live owner; step 9 stops it)
         test_member_leave(o, a, ido, ida, check, wait_for)
