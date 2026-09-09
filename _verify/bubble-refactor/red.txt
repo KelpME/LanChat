@@ -1,0 +1,1 @@
+RED: shell10 against pre-refactor RoomMessage (stash test): BENCH-ROOMFMT-FAIL R1 MessageBubble not found inside RoomMessage

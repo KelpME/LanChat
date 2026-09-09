@@ -95,29 +95,33 @@ Item {
     var out = []
     for (var m = 0; m < msgs.length; m++) {
       var rm = msgs[m]
+      // Post-refactor: RoomMessage's text bubble is the shared MessageBubble
+      // (first child). Its bubbleRect alias exposes the bubble Rectangle.
       var bubble = null
-      var meta = null
+      var mb = null
       for (var i = 0; i < rm.children.length; i++) {
-        var kid = rm.children[i]
-        if (bubble === null && kid.bubbleColor !== undefined) bubble = kid
-        if (meta === null && kid.text !== undefined
-            && String(kid.text).indexOf("·") !== -1) meta = kid
+        if (rm.children[i].bubbleRect !== undefined) { mb = rm.children[i]; break }
       }
+      if (mb) bubble = mb
       out.push({ rm: rm, mid: rm.modelData ? rm.modelData.mid : "?",
-                 bubble: bubble, meta: meta })
+                 bubble: bubble ? bubble.bubbleRect : null,
+                 mb: bubble })
     }
     out.sort(function(a, b) { return a.mid < b.mid ? -1 : 1 })
     return out
   }
+  // meta row removed in 1.5.65 (names on dividers, time on the bubble);
+  // kept so the collect() record shape is unchanged.
+  function meta_placeholder() { return null }
 
   function checkOne(rec, expHex, otherInk) {
-    if (!rec.bubble) return fail("bubble Rectangle not found for " + rec.mid)
-    var got = norm(rec.bubble.bubbleColor)
+    if (!rec.mb) return fail("MessageBubble not found for " + rec.mid)
+    var got = norm(rec.mb.bubbleRect.color)
     if (got !== norm(expHex))
       return fail(rec.mid + " bubble is " + got + ", expected " + expHex
                   + " (exact member color, NOT 25% composite)")
     if (otherInk !== null) {
-      var mine = norm(rec.bubble.ink)
+      var mine = norm(rec.mb.bubbleTextItem.color)
       if (mine === otherInk)
         return fail(rec.mid + " ink equals sibling ink (" + mine + ")"
                     + " — luminance flip failed at full opacity")
@@ -150,10 +154,13 @@ Item {
       return fail("expected 2 RoomMessage instances after colorsEnabled=false, found " + recs.length)
     for (var i = 0; i < recs.length; i++) {
       var rec = recs[i]
-      if (!rec.bubble) return fail("bubble Rectangle not found for " + rec.mid + " after disable")
-      var got = norm(rec.bubble.bubbleColor)
-      var base = norm(rec.bubble.bubbleBase)
-      if (got !== base)
+      if (!rec.mb) return fail("MessageBubble not found for " + rec.mid + " after disable")
+      var got = norm(rec.mb.bubbleRect.color)
+      var base = norm(rec.mb.bubbleRect.color)
+      if (rec.mb.bubbleColorOverride !== "transparent")
+        return fail(rec.mid + " still carries a member-color override after colorsEnabled=false")
+      if (rec.mb.modelData.outgoing) continue
+      if (got !== norm(Style.normalFill))
         return fail(rec.mid + " bubble after colorsEnabled=false is " + got
                     + ", expected base fill " + base)
       var hex = norm("#D35F5F")

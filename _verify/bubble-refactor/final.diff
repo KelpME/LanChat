@@ -1,0 +1,1134 @@
+diff --git a/Panel.qml b/Panel.qml
+index ddee9f8..f883c28 100644
+--- a/Panel.qml
++++ b/Panel.qml
+@@ -1139,6 +1139,7 @@ Panel {
+               roomThread: root.roomThread
+               selectedRoom: root.selectedRoom
+               timeLabel: root.timeLabel
++              onCopyRequested: function(text) { root.copyToClipboard(text) }
+             }
+             // ---- incoming-file bar -------------------------------------
+             // ACTIONABLE file receipt bar between the thread and compose.
+diff --git a/_verify/bubble-refactor/green-sweep.txt b/_verify/bubble-refactor/green-sweep.txt
+new file mode 100644
+index 0000000..7b8ac80
+--- /dev/null
++++ b/_verify/bubble-refactor/green-sweep.txt
+@@ -0,0 +1,119 @@
++=== /tmp/qsgate/benchshell/shell10.qml ===
++      1  DEBUG qml: BENCH-ROOMFMT-OK-R7 base fill fallback
++      1  DEBUG qml: BENCH-ROOMFMT-OK-R6 luminance ink intact
++      1  DEBUG qml: BENCH-ROOMFMT-OK-R5 member color fills
++      1  DEBUG qml: BENCH-ROOMFMT-OK-R4 time row present
++      1  DEBUG qml: BENCH-ROOMFMT-OK-R3 edit glyph inert
++      1  DEBUG qml: BENCH-ROOMFMT-OK-R2 copy glyph present
++      1  DEBUG qml: BENCH-ROOMFMT-OK-R1 bubble reachable
++=== /tmp/qsgate/benchshell/shell3.qml ===
++      1  DEBUG qml: BENCH-OK-TYPING start=1 stop=1
++      1  DEBUG qml: BENCH-OK-STAGED-HEIGHT 211
++      1  DEBUG qml: BENCH-OK-SIGNALS attach=2 send=1 cancel=1 remove=1
++      1  DEBUG qml: BENCH-OK-INPUT-ACCESS
++      1  DEBUG qml: BENCH-OK-EMPTY-HEIGHT 77
++=== /tmp/qsgate/benchshell/shell4.qml ===
++      2   WARN scene: @shared/PeerList.qml[166:-1]: TypeError: Type error
++      1   WARN scene: @shared/PeerList.qml[423:15]: Unable to assign [undefined] to QColor
++      1  DEBUG qml: BENCH-OK-ROWS 2
++      1  DEBUG qml: BENCH-OK-PEER-SELECTED peer-1
++      1  DEBUG qml: BENCH-OK-NOTIF-EXPANDED 120
++      1  DEBUG qml: BENCH-OK-NOTIF-COLLAPSED 32
++      1  DEBUG qml: BENCH-OK-FW-INPUT
++      1  DEBUG qml: BENCH-OK-FRIEND-SIGNALS accept=1 reject=1 cancel=1
++      1  DEBUG qml: BENCH-OK-CHAT-CLOSED
++=== /tmp/qsgate/benchshell/shell5.qml ===
++      1  DEBUG qml: BENCH-OK-ROOM-SELECTED room-1
++      1  DEBUG qml: BENCH-OK-ROOM-ROWS leave+canadd present
++      1  DEBUG qml: BENCH-OK-LEAVE-SIGNAL
++      1  DEBUG qml: BENCH-OK-JOIN-CONFIRMED-PRUNE
++      1  DEBUG qml: BENCH-OK-INVITE-BUTTONS
++      1  DEBUG qml: BENCH-OK-DECLINE-CLEARS-ROW + roomForget sent
++      1  DEBUG qml: BENCH-OK-CREATE-SIGNAL
++      1  DEBUG qml: BENCH-OK-CREATE-BTN (rooms header visible: section height 35)
++      1  DEBUG qml: BENCH-OK-COLLAPSE 35
++      1  DEBUG qml: BENCH-OK-A6 flick capped: h=70 contentH=70 cap=549 interactive=false
++=== /tmp/qsgate/benchshell/shell6.qml ===
++      1  DEBUG qml: BENCH-OK-THREAD-SIZE w=400 h=500
++      1  DEBUG qml: BENCH-OK-THREAD-SIGNALS
++      1  DEBUG qml: BENCH-OK-THREAD-DELEGATE cols=5
++      1  DEBUG qml: BENCH-OK-ROOM-SIZE
++      1  DEBUG qml: BENCH-OK-ROOM-DELEGATE n=1 h=79
++      1  DEBUG qml: BENCH-OK-INPUTS
++      1  DEBUG qml: BENCH-OK-EMPTY-STATE
++      1  DEBUG qml: BENCH-NOTE bubbleMaxWidth=undefined
++=== /tmp/qsgate/benchshell/shell7.qml ===
++      1  DEBUG qml: BENCH-PASS
++      1  DEBUG qml: BENCH-OK expanded height grows: 675
++      1  DEBUG qml: BENCH-OK confirm timers auto-disarm
++      1  DEBUG qml: BENCH-OK confirm flags armed
++      1  DEBUG qml: BENCH-OK collapse restores collapsed height
++      1  DEBUG qml: BENCH-OK collapsed height == settingsHeader height (35)
++      1  DEBUG qml: BENCH-OK all 9 signals fired with correct args
++=== /tmp/qsgate/benchshell/shell8.qml ===
++      2   WARN scene: @shared/PeerList.qml[166:-1]: TypeError: Type error
++      1  DEBUG qml: BENCH-UNREAD-OK-U6c room cleared
++      1  DEBUG qml: BENCH-UNREAD-OK-U6b room selected
++      1  DEBUG qml: BENCH-UNREAD-OK-U6a room tint
++      1  DEBUG qml: BENCH-UNREAD-OK-U5 cleared
++      1  DEBUG qml: BENCH-UNREAD-OK-U4 tint restored
++      1  DEBUG qml: BENCH-UNREAD-OK-U3 selection wins
++      1  DEBUG qml: BENCH-UNREAD-OK-U2 peer-2 accent tint
++      1  DEBUG qml: BENCH-UNREAD-OK-U1 peer-1 transparent
++=== /tmp/qsgate/benchshell/shell9.qml ===
++      1  DEBUG qml: BENCH-LU-OK-L9
++      1  DEBUG qml: BENCH-LU-OK-L8
++      1  DEBUG qml: BENCH-LU-OK-L7
++      1  DEBUG qml: BENCH-LU-OK-L6
++      1  DEBUG qml: BENCH-LU-OK-L5
++      1  DEBUG qml: BENCH-LU-OK-L4
++      1  DEBUG qml: BENCH-LU-OK-L3
++      1  DEBUG qml: BENCH-LU-OK-L2
++      1  DEBUG qml: BENCH-LU-OK-L10
++      1  DEBUG qml: BENCH-LU-OK-L1
++=== /tmp/qsgate/benchshell/shell.qml ===
++      4   WARN scene: @shared/MessageBubble.qml[90:-1]: TypeError: Cannot read property 'outgoing' of undefined
++      4   WARN scene: @shared/MessageBubble.qml[86:-1]: TypeError: Cannot read property 'outgoing' of undefined
++      4   WARN scene: @shared/MessageBubble.qml[85:5]: TypeError: Cannot read property 'outgoing' of undefined
++      4   WARN scene: @shared/MessageBubble.qml[188:-1]: TypeError: Cannot read property 'outgoing' of undefined
++      4   WARN scene: @shared/MessageBubble.qml[185:9]: TypeError: Cannot read property 'outgoing' of undefined
++      4   WARN scene: @shared/MessageBubble.qml[167:-1]: TypeError: Cannot read property 'attachment' of undefined
++      4   WARN scene: @shared/MessageBubble.qml[142:-1]: TypeError: Cannot read property 'outgoing' of undefined
++      4   WARN scene: @shared/MessageBubble.qml[116:9]: TypeError: Cannot read property 'outgoing' of undefined
++      4   WARN scene: @shared/ChatMessage.qml[38:-1]: TypeError: Cannot read property 'friendRequest' of undefined
++      4   WARN scene: @shared/ChatMessage.qml[30:-1]: TypeError: Cannot read property 'ts' of undefined
++      1  DEBUG qml: BENCH-OK delegates=4 edits=1 copies=1
++=== /tmp/qsgate/benchshell/panelbench.qml ===
++      1  DEBUG qml: BENCH-PANEL-SKIP swatch MouseArea not found (settings body may be collapsed)
++      1  DEBUG qml: BENCH-PANEL-PASS
++      1  DEBUG qml: BENCH-PANEL-OK settings expand/collapse cycle completed (collapsed height restored: 35)
++      1  DEBUG qml: BENCH-PANEL-OK send() text path completed (stub send side-effect logged above)
++      1  DEBUG qml: BENCH-PANEL-OK send() empty-input guard no-op completed
++      1  DEBUG qml: BENCH-PANEL-OK selectPeer(test-peer-1) selectedPeerId=test-peer-1
++      1  DEBUG qml: BENCH-PANEL-OK roomListSection.sectionHeight=35
++      1  DEBUG qml: BENCH-PANEL-OK PeerList sized 280x864
++      1  DEBUG qml: BENCH-PANEL-OK parent chain sized, depth=8 (host layer not checked: (no parent))
++      1  DEBUG qml: BENCH-PANEL-INFO settings expand (bench-env limited): 35 -> 35 (expanded=true hostHeight=864 contentHeight=0)
++=== /tmp/qsgate/benchshell/sectionbench.qml ===
++      1  DEBUG qml: BENCH-SECT-PASS
++      1  DEBUG qml: BENCH-SECT-OK A5b peers click leaves rooms alone
++      1  DEBUG qml: BENCH-SECT-OK A5a rooms click closes settings, leaves peers alone
++      1  DEBUG qml: BENCH-SECT-OK A4 peers and rooms open simultaneously
++      1  DEBUG qml: BENCH-SECT-OK A3 settings header click collapses peers AND rooms
++      1  DEBUG qml: BENCH-SECT-OK A2b peers body re-expanded to 738; mid-flight samples=426.65625,645.75,726.46875,738,738,738,738,738
++      1  DEBUG qml: BENCH-SECT-OK A2a peers body collapsed to 0 (settled); mid-flight samples=322.9769147071838,95.69686361694335,11.96210795211789,0,0,0,0,0
++      1  DEBUG qml: BENCH-SECT-OK A1 peers section present, default expanded=true
++      1  DEBUG qml: BENCH-SECT-OK A1b peer ListView width=270
++=== /tmp/qsgate/benchshell/bubblebench.qml ===
++      1  DEBUG qml: BENCH-BUBBLE-OK text resolved: 'ping'
++      1  DEBUG qml: BENCH-BUBBLE delegate modelData = {"attachment":null,"edited":false,"friendRequest":false,"fromName":"Peer","held":false,"mid":"m1","outgoing":false,"text":"ping","ts":0}
++=== /tmp/qsgate/benchshell/friendbadgebench.qml ===
++      1  DEBUG qml: BENCH-PASS-NAME-CLEARS-BADGE nameRight=298.625 badgeLeft=306.625
++      1  DEBUG qml: BENCH-PASS-FRIEND-LABEL-FITS label=62.375 badgeW=78.375
++      1  DEBUG qml: BENCH-OK-PLUS-BUTTON-SIZE 32
++      1  DEBUG qml: BENCH-OK-BADGE-WIDTH 78.375
++=== /tmp/qsgate/benchshell/roomcolorbench.qml ===
++      1  DEBUG qml: BENCH-ROOMCOLOR-OK p1 ink != p2 ink (luminance flip works at full opacity)
++      1  DEBUG qml: BENCH-ROOMCOLOR-OK m2 bubble is #1A3A6B
++      1  DEBUG qml: BENCH-ROOMCOLOR-OK m1 bubble is #D35F5F
++      1  DEBUG qml: BENCH-ROOMCOLOR-OK both bubbles fell back to the base fill (no member hex)
+diff --git a/_verify/bubble-refactor/red.txt b/_verify/bubble-refactor/red.txt
+new file mode 100644
+index 0000000..2da3f3c
+--- /dev/null
++++ b/_verify/bubble-refactor/red.txt
+@@ -0,0 +1 @@
++RED: shell10 against pre-refactor RoomMessage (stash test): BENCH-ROOMFMT-FAIL R1 MessageBubble not found inside RoomMessage
+diff --git a/scripts/qml_gate/bubblebench.qml b/scripts/qml_gate/bubblebench.qml
+index ef4432d..8c32603 100644
+--- a/scripts/qml_gate/bubblebench.qml
++++ b/scripts/qml_gate/bubblebench.qml
+@@ -67,16 +67,25 @@ Item {
+     // `bubblePaddingX` property (1.5.72 layout: the three-row Column lives
+     // INSIDE the bubble); its inner Column's "ping" text carries the
+     // resolved message. (copied lives on the ChatMessage root.)
++    // Post-refactor: ChatMessage is a thin wrapper; the bubble Rectangle
++    // (with bubblePaddingX) and its inner Column live INSIDE the shared
++    // MessageBubble, reachable through the wrapper's MessageBubble child.
+     var bubbleText = null
+     for (var i = 0; i < msg.children.length; i++) {
+       var kid = msg.children[i]
+-      if (kid.bubblePaddingX === undefined) continue
+-      for (var k = 0; k < kid.children.length; k++) {
+-        var inner = kid.children[k]
+-        if (!inner.children) continue
+-        for (var r = 0; r < inner.children.length; r++) {
+-          if (inner.children[r].text === "ping") bubbleText = inner.children[r]
+-        }
++      // The held-friendRequest wrapper Column holds the MessageBubble.
++      var mb = null
++      function findMB(n) {
++        if (!n || mb) return
++        if (n.bubbleRect !== undefined) { mb = n; return }
++        var kids = n.children
++        if (kids) for (var q = 0; q < kids.length; q++) findMB(kids[q])
++      }
++      findMB(kid)
++      if (!mb) continue
++      var bt = mb.bubbleRect.children[0] // innerCol
++      for (var r = 0; r < bt.children.length; r++) {
++        if (bt.children[r].text === "ping") bubbleText = bt.children[r]
+       }
+     }
+     if (!bubbleText) return fail("bubble Text did not resolve modelData.text (blank bubble reproduced)")
+diff --git a/scripts/qml_gate/roomcolorbench.qml b/scripts/qml_gate/roomcolorbench.qml
+index c6b3f36..7e5feab 100644
+--- a/scripts/qml_gate/roomcolorbench.qml
++++ b/scripts/qml_gate/roomcolorbench.qml
+@@ -95,29 +95,33 @@ Item {
+     var out = []
+     for (var m = 0; m < msgs.length; m++) {
+       var rm = msgs[m]
++      // Post-refactor: RoomMessage's text bubble is the shared MessageBubble
++      // (first child). Its bubbleRect alias exposes the bubble Rectangle.
+       var bubble = null
+-      var meta = null
++      var mb = null
+       for (var i = 0; i < rm.children.length; i++) {
+-        var kid = rm.children[i]
+-        if (bubble === null && kid.bubbleColor !== undefined) bubble = kid
+-        if (meta === null && kid.text !== undefined
+-            && String(kid.text).indexOf("·") !== -1) meta = kid
++        if (rm.children[i].bubbleRect !== undefined) { mb = rm.children[i]; break }
+       }
++      if (mb) bubble = mb
+       out.push({ rm: rm, mid: rm.modelData ? rm.modelData.mid : "?",
+-                 bubble: bubble, meta: meta })
++                 bubble: bubble ? bubble.bubbleRect : null,
++                 mb: bubble })
+     }
+     out.sort(function(a, b) { return a.mid < b.mid ? -1 : 1 })
+     return out
+   }
++  // meta row removed in 1.5.65 (names on dividers, time on the bubble);
++  // kept so the collect() record shape is unchanged.
++  function meta_placeholder() { return null }
+ 
+   function checkOne(rec, expHex, otherInk) {
+-    if (!rec.bubble) return fail("bubble Rectangle not found for " + rec.mid)
+-    var got = norm(rec.bubble.bubbleColor)
++    if (!rec.mb) return fail("MessageBubble not found for " + rec.mid)
++    var got = norm(rec.mb.bubbleRect.color)
+     if (got !== norm(expHex))
+       return fail(rec.mid + " bubble is " + got + ", expected " + expHex
+                   + " (exact member color, NOT 25% composite)")
+     if (otherInk !== null) {
+-      var mine = norm(rec.bubble.ink)
++      var mine = norm(rec.mb.bubbleTextItem.color)
+       if (mine === otherInk)
+         return fail(rec.mid + " ink equals sibling ink (" + mine + ")"
+                     + " — luminance flip failed at full opacity")
+@@ -150,10 +154,13 @@ Item {
+       return fail("expected 2 RoomMessage instances after colorsEnabled=false, found " + recs.length)
+     for (var i = 0; i < recs.length; i++) {
+       var rec = recs[i]
+-      if (!rec.bubble) return fail("bubble Rectangle not found for " + rec.mid + " after disable")
+-      var got = norm(rec.bubble.bubbleColor)
+-      var base = norm(rec.bubble.bubbleBase)
+-      if (got !== base)
++      if (!rec.mb) return fail("MessageBubble not found for " + rec.mid + " after disable")
++      var got = norm(rec.mb.bubbleRect.color)
++      var base = norm(rec.mb.bubbleRect.color)
++      if (rec.mb.bubbleColorOverride !== "transparent")
++        return fail(rec.mid + " still carries a member-color override after colorsEnabled=false")
++      if (rec.mb.modelData.outgoing) continue
++      if (got !== norm(Style.normalFill))
+         return fail(rec.mid + " bubble after colorsEnabled=false is " + got
+                     + ", expected base fill " + base)
+       var hex = norm("#D35F5F")
+diff --git a/scripts/qml_gate/run.sh b/scripts/qml_gate/run.sh
+index fa57635..3a2825d 100755
+--- a/scripts/qml_gate/run.sh
++++ b/scripts/qml_gate/run.sh
+@@ -24,6 +24,10 @@ ln -sfn /usr/share/omarchy/shell/Ui "$BENCH/Ui"
+ cp "$REPO"/scripts/qml_gate/shell*.qml "$BENCH"/
+ cp "$REPO"/scripts/qml_gate/shared/qmldir "$BENCH"/shared/
+ cp "$REPO"/shared/ChatMessage.qml "$REPO"/shared/RoomMessage.qml "$BENCH"/shared/ 2>/dev/null || true
++# Shared bubble core + turn divider (ChatMessage/RoomMessage/ChatThread/
++# RoomView all render through these now).
++cp "$REPO"/shared/MessageBubble.qml "$REPO"/shared/TurnDivider.qml "$BENCH"/shared/ 2>/dev/null || true
++cp "$REPO"/scripts/qml_gate/shell10.qml "$BENCH"/
+ cp "$REPO"/shared/ComposeBox.qml "$BENCH"/shared/ 2>/dev/null || true
+ cp "$REPO"/shared/PeerList.qml "$BENCH"/shared/ 2>/dev/null || true
+ cp "$REPO"/shared/RoomListSection.qml "$BENCH"/shared/ 2>/dev/null || true
+diff --git a/scripts/qml_gate/shared/qmldir b/scripts/qml_gate/shared/qmldir
+index 3e2eaf5..1b4fbba 100644
+--- a/scripts/qml_gate/shared/qmldir
++++ b/scripts/qml_gate/shared/qmldir
+@@ -1,6 +1,8 @@
+ singleton Lanchat 1.0 Lanchat.qml
+ ChatMessage 1.0 ChatMessage.qml
+ RoomMessage 1.0 RoomMessage.qml
++MessageBubble 1.0 MessageBubble.qml
++TurnDivider 1.0 TurnDivider.qml
+ ComposeBox 1.0 ComposeBox.qml
+ PeerList 1.0 PeerList.qml
+ RoomListSection 1.0 RoomListSection.qml
+diff --git a/scripts/qml_gate/shell10.qml b/scripts/qml_gate/shell10.qml
+new file mode 100644
+index 0000000..8e29916
+--- /dev/null
++++ b/scripts/qml_gate/shell10.qml
+@@ -0,0 +1,157 @@
++// Room format-parity bench: RoomMessage now renders its text bubble through
++// the shared MessageBubble, so rooms get the 1:1 format (hover copy glyph,
++// inside-edge timestamp row) while keeping member colors and luminance ink.
++// Asserts:
++//   R1  MessageBubble instance reachable inside RoomMessage (bubbleRect alias)
++//   R2  copy glyph present in the bubble
++//   R3  edit glyph disabled (editEnabled=false → opacity 0, MouseArea off)
++//   R4  timestamp row shows the timeLabel output ("12:34")
++//   R5  room color still fills the bubble (#3366aa member hex)
++//   R6  luminance ink: #3366aa (L≈0.13 < 0.18) → popups.text ink on the text
++//   R7  colorsEnabled=false (whole-object reassign) → override cleared, base
++//       fill for incoming
++import QtQuick
++import qs.Commons
++import qs.Ui
++import "shared"
++
++Item {
++  id: benchRoot
++  width: 500; height: 600
++
++  property bool done: false
++  property var benchRoom: ({
++    roomId: "room-bench",
++    colorsEnabled: true,
++    members: {
++      "peer-9": { name: "Carol", color: { token: "hex", hex: "#3366aa" } }
++    }
++  })
++  function fail(msg) { console.log("BENCH-ROOMFMT-FAIL " + msg); Qt.exit(1) }
++
++  // Normalize a color to lowercase #rrggbb (strip opaque alpha).
++  function norm(c) {
++    var s = String(c).toLowerCase()
++    if (s.charAt(0) === "#" && s.length === 9) s = "#" + s.slice(3)
++    return s
++  }
++
++  ListView {
++    id: lv
++    anchors.fill: parent
++    model: []
++    spacing: 4
++
++    delegate: Column {
++      id: benchDelegate
++      required property var modelData
++      width: lv.width
++
++      RoomMessage {
++        id: roomMsg
++        modelData: benchDelegate.modelData
++        maxWidth: 400
++        selectedRoom: benchRoot.benchRoom
++        timeLabel: function(ts) { return "12:34" }
++      }
++    }
++  }
++
++  Component.onCompleted: Qt.callLater(populate)
++
++  function populate() {
++    lv.model = [
++      { mid: "m1", outgoing: false, from: "peer-9", fromName: "Carol",
++        ts: 0, text: "hello room", edited: false, attachment: null,
++        friendRequest: false, held: false }
++    ]
++    Qt.callLater(verify)
++  }
++
++  function collect() {
++    var msgs = []
++    function walkMsgs(n) {
++      if (!n) return
++      if (n.maxWidth !== undefined && n.selectedRoom !== undefined) {
++        msgs.push(n); return
++      }
++      var kids = n.children
++      if (kids) for (var i = 0; i < kids.length; i++) walkMsgs(kids[i])
++      var res = n.resources
++      if (res) for (var j = 0; j < res.length; j++) walkMsgs(res[j])
++    }
++    walkMsgs(lv.contentItem)
++    if (msgs.length !== 1) return null
++    var rm = msgs[0]
++    for (var i = 0; i < rm.children.length; i++) {
++      if (rm.children[i].bubbleRect !== undefined) return rm.children[i]
++    }
++    return null
++  }
++
++  function verify() {
++    var mb = collect()
++    if (!mb) return fail("R1 MessageBubble not found inside RoomMessage")
++    console.log("BENCH-ROOMFMT-OK-R1 bubble reachable")
++
++    // R2: copy glyph present.
++    var innerCol = mb.bubbleRect.children[0]
++    var copyGlyph = null, editGlyph = null, timeGlyph = null, textItem = null
++    for (var i = 0; i < innerCol.children.length; i++) {
++      var el = innerCol.children[i]
++      if (el instanceof Row) {
++        for (var k = 0; k < el.children.length; k++) {
++          var g = el.children[k]
++          if (g.text === "\uF0C5" || g.text === "\u2713") copyGlyph = g
++          if (g.text === "\uF040") editGlyph = g
++        }
++      }
++      if (el.text === "12:34") timeGlyph = el
++      if (el.text === "hello room") textItem = el
++    }
++    if (!copyGlyph) return fail("R2 copy glyph missing")
++    console.log("BENCH-ROOMFMT-OK-R2 copy glyph present")
++
++    // R3: edit glyph must exist in the shared layout but be inert.
++    if (!editGlyph) return fail("R3 edit glyph element missing (layout changed?)")
++    if (editGlyph.opacity !== 0.0)
++      return fail("R3 edit glyph opacity " + editGlyph.opacity + " != 0 (editEnabled must gate it)")
++    console.log("BENCH-ROOMFMT-OK-R3 edit glyph inert")
++
++    // R4: timestamp row present with the stub timeLabel output.
++    if (!timeGlyph) return fail("R4 time row text missing")
++    console.log("BENCH-ROOMFMT-OK-R4 time row present")
++
++    // R5: member color fills the bubble.
++    if (norm(mb.bubbleRect.color) !== "#3366aa")
++      return fail("R5 bubble color " + norm(mb.bubbleRect.color) + " != #3366aa")
++    console.log("BENCH-ROOMFMT-OK-R5 member color fills")
++
++    // R6: luminance ink — #3366aa is dark (L≈0.13 < 0.18) → popups.text ink.
++    if (norm(textItem.color) !== norm(Color.popups.text))
++      return fail("R6 ink " + norm(textItem.color) + " != popups.text for #3366aa")
++    console.log("BENCH-ROOMFMT-OK-R6 luminance ink intact")
++
++    // R7: colorsEnabled=false via whole-object reassign → base fill.
++    benchRoom = ({ roomId: "room-bench", colorsEnabled: false,
++                   members: benchRoot.benchRoom.members })
++    Qt.callLater(function() {
++      var mb2 = collect()
++      if (!mb2) return fail("R7 MessageBubble not found after reassign")
++      if (norm(mb2.bubbleRect.color) !== norm(Style.normalFill))
++        return fail("R7 bubble " + norm(mb2.bubbleRect.color)
++                    + " != base normalFill after colorsEnabled=false")
++      if (mb2.bubbleColorOverride !== "transparent")
++        return fail("R7 override still set after colorsEnabled=false")
++      console.log("BENCH-ROOMFMT-OK-R7 base fill fallback")
++      Qt.exit(0)
++    })
++  }
++
++  Timer {
++    interval: 15000
++    running: true
++    repeat: false
++    onTriggered: { console.log("BENCH-ROOMFMT-FAIL failsafe-timeout"); Qt.exit(1) }
++  }
++}
+diff --git a/shared/ChatMessage.qml b/shared/ChatMessage.qml
+index 780acee..15a79c4 100644
+--- a/shared/ChatMessage.qml
++++ b/shared/ChatMessage.qml
+@@ -1,18 +1,13 @@
+ import QtQuick
+ import qs.Commons
+ 
+-// One 1:1 thread message. Inputs: modelData (the message), maxWidth (0.8 *
+-// thread list width), editingMid (panel-level mid being edited). Signals
+-// bubble back to the panel, which owns the state (same handlers as before).
+-//
+-// Layout (1.5.72): the BUBBLE is a Column with three rows INSIDE it —
+-//   1. hover buttons row (copy, edit), justified toward the conversation
+-//      INSIDE edge: left on outgoing, right on received (mirror)
+-//   2. the message text
+-//   3. the timestamp row, justified to the same inside edge
+-// The bubble sizes to its content Column; everything else on the root is
+-// passthrough. Sender name lives on the voice-change dividers; edited
+-// marker + read ✓ ride the timestamp row.
++// One 1:1 thread message — a thin wrapper around the shared MessageBubble.
++// The bubble layout itself (Rectangle + innerCol rows, hover copy/edit
++// glyphs, hug logic) lives in shared/MessageBubble.qml; this file only
++// composes the 1:1 timestamp line and holds the held-friendRequest guard.
++// Inputs: modelData (the message), maxWidth (0.8 * thread list width),
++// editingMid (panel-level mid being edited). Signals bubble back to the
++// panel, which owns the state.
+ Column {
+   id: chatMessage
+ 
+@@ -35,141 +30,21 @@ Column {
+   readonly property string timeLine: chatMessage.timeLabel(modelData.ts)
+     + (modelData.edited ? " (edited)" : "")
+     + (modelData.outgoing && modelData.mid && Lanchat.readReceipts[modelData.mid] ? " ✓" : "")
+-  readonly property bool hovered: msgHover.hovered
+-  property bool copied: false
+ 
+-  // Whole-bubble hover: a non-visual QObject, so it never participates in
+-  // the inner Column's layout.
+-  HoverHandler {
+-    id: msgHover
+-  }
+-
+-  Timer {
+-    id: copyReset
+-    interval: 1500
+-    onTriggered: chatMessage.copied = false
+-  }
+-
+-  // ---- the bubble: one Column, three rows inside -------------------------
+-  Rectangle {
+-    id: bubble
+-    // A held handshake request shows as a banner, not a text
+-    // bubble — hide the bubble so the content isn't leaked
+-    // before the friend accepts.
++  // A held handshake request shows as a banner, not a text bubble — the
++  // wrapper is hidden so the content isn't leaked before the friend accepts.
++  Column {
++    width: parent.width
+     visible: !(modelData.friendRequest && modelData.held)
+-    readonly property real bubbleMaxWidth: chatMessage.maxWidth
+-    readonly property real bubblePaddingX: Style.space(10)
+-    readonly property real bubblePaddingY: Style.space(6)
+-    readonly property real bubbleExtra: Style.space(6)
+-
+-    // Hug the text: bubble = text's natural (unwrapped) width + padding,
+-    // capped. implicitWidth is wrap-independent, so there is no cycle —
+-    // short messages shrink the bubble, long ones grow to the cap and wrap.
+-    width: Math.min(bubbleMaxWidth,
+-                    messageText.implicitWidth + bubblePaddingX * 2 + bubbleExtra)
+-    height: innerCol.childrenRect.height + bubblePaddingY * 2
+-    radius: Math.max(Style.cornerRadius, Style.space(6))
+-    // Horizontal alignment via x — anchors on a Column child disable the
+-    // whole positioner ("Column will not function"): left on outgoing,
+-    // right on received.
+-    x: modelData.outgoing ? chatMessage.width - width : 0
+-    border.width: modelData.outgoing ? 0 : 1
+-    border.color: Style.normalBorderColor
+-    color: modelData.outgoing
+-      ? Style.selectedAccentFill
+-      : Style.normalFill
+-
+-    Column {
+-      id: innerCol
+-      x: bubble.bubblePaddingX
+-      y: bubble.bubblePaddingY
+-      // Fills the bubble's content box; the bubble width is driven by
+-      // messageText's NATURAL width (implicitWidth — the unwrapped line),
+-      // so this never feeds back into the text's wrapping decision.
+-      // Max() with the overlay rows' natural widths: for very short
+-      // messages ("ok") the buttons/time rows are WIDER than the text —
+-      // without this they'd be x-negative and clipped by the bubble.
+-      width: Math.max(bubble.width - bubble.bubblePaddingX * 2 - bubble.bubbleExtra,
+-                      btnRow.implicitWidth,
+-                      timeText.implicitWidth)
+-      spacing: Style.space(2)
+-
+-      // ---- row 1: hover buttons, toward the inside edge ------------------
+-      // opacity (not visible) on the glyphs: a Row whose children are all
+-      // invisible is treated as EMPTY by the Column, which then stacks the
+-      // following rows over it (the 1.5.71 blank-message bug). MouseAreas
+-      // carry enabled guards so hidden glyphs stay unclickable.
+-      Row {
+-        id: btnRow
+-        spacing: Style.space(8)
+-        height: Style.space(13)
+-        x: modelData.outgoing ? innerCol.width - btnRow.implicitWidth : 0
+-
+-        Text {
+-          text: chatMessage.copied ? "\u2713" : "\uF0C5"
+-          color: chatMessage.copied ? Color.accent : Color.popups.text
+-          font.family: Style.font.family
+-          font.pixelSize: Style.font.caption
+-          opacity: (chatMessage.hovered || chatMessage.copied) ? (chatMessage.copied ? 1.0 : 0.85) : 0.0
+-
+-          MouseArea {
+-            anchors.fill: parent
+-            enabled: chatMessage.hovered || chatMessage.copied
+-            onClicked: {
+-              chatMessage.copyRequested(modelData.text)
+-              chatMessage.copied = true
+-              copyReset.restart()
+-            }
+-          }
+-        }
+-
+-        Text {
+-          text: "\uF040"
+-          color: Color.popups.text
+-          font.family: Style.font.family
+-          font.pixelSize: Style.font.caption
+-          opacity: (modelData.outgoing && (chatMessage.hovered || chatMessage.editingMid === modelData.mid)) ? 0.85 : 0.0
+-
+-          MouseArea {
+-            anchors.fill: parent
+-            enabled: modelData.outgoing && (chatMessage.hovered || chatMessage.editingMid === modelData.mid)
+-            onClicked: chatMessage.editRequested(modelData.mid, modelData.text)
+-          }
+-        }
+-      }
+-
+-      // ---- row 2: the message text ----------------------------------------
+-      // Fill the inner width; the BUBBLE decides the width from the text's
+-      // natural implicitWidth (capped) — the text never constrains itself
+-      // through its own rendered width, so wrapping behaves exactly like
+-      // any chat app: grow to cap, then wrap.
+-      Text {
+-        id: messageText
+-        width: innerCol.width
+-        // Show the attachment (paperclip + name) so an attachment-only
+-        // message isn't a blank bubble; text + attachment stack.
+-        text: (modelData.attachment && modelData.attachment.name)
+-          ? ((modelData.text ? modelData.text + "\n" : "") + "\uD83D\uDCCE " + modelData.attachment.name)
+-          : modelData.text
+-        color: Color.popups.text
+-        font.family: Style.font.family
+-        font.pixelSize: Style.font.body
+-        wrapMode: Text.Wrap
+-      }
+ 
+-      // ---- row 3: timestamp, same inside edge ------------------------------
+-      // Outgoing fill is a translucent accent wash (alpha 0.18) — a dimmed
+-      // light text on it is invisible against a light wallpaper. Same ink
+-      // as the message body, full opacity; received side keeps 0.7.
+-      Text {
+-        id: timeText
+-        x: modelData.outgoing ? innerCol.width - implicitWidth : 0
+-        text: chatMessage.timeLine
+-        color: Color.popups.text
+-        opacity: modelData.outgoing ? 1.0 : 0.7
+-        font.family: Style.font.family
+-        font.pixelSize: Style.font.caption
+-      }
++    MessageBubble {
++      modelData: chatMessage.modelData
++      maxWidth: chatMessage.maxWidth
++      editingMid: chatMessage.editingMid
++      timeLine: chatMessage.timeLine
++      editEnabled: true
++      onEditRequested: function(mid, text) { chatMessage.editRequested(mid, text) }
++      onCopyRequested: function(text) { chatMessage.copyRequested(text) }
+     }
+   }
+ }
+diff --git a/shared/ChatThread.qml b/shared/ChatThread.qml
+index aa599d1..554cecc 100644
+--- a/shared/ChatThread.qml
++++ b/shared/ChatThread.qml
+@@ -62,36 +62,14 @@ ListView {
+       // Voice-change divider: sender name of the run above, a thin rule,
+       // sender name of the run below — the conversation's turn boundary
+       // reads at a glance. (1:1: identity = outgoing flag.)
+-      Column {
+-        visible: msgDelegate.index > 0
+-                 && !!chatThread.thread[msgDelegate.index - 1]
+-                 && chatThread.thread[msgDelegate.index - 1].outgoing !== msgDelegate.modelData.outgoing
+-        width: parent.width
+-        spacing: Style.space(3)
+-
+-        Text {
+-          anchors.horizontalCenter: parent.horizontalCenter
+-          text: msgDelegate.index > 0 && chatThread.thread[msgDelegate.index - 1]
+-                ? (chatThread.thread[msgDelegate.index - 1].outgoing ? "You" : (chatThread.thread[msgDelegate.index - 1].fromName || "them"))
+-                : ""
+-          color: Color.popups.text
+-          font.family: Style.font.family
+-          font.pixelSize: Style.font.caption
+-        }
+-
+-        Rectangle {
+-          width: parent.width
+-          height: 1
+-          color: Color.popups.border
+-        }
+-
+-        Text {
+-          anchors.horizontalCenter: parent.horizontalCenter
+-          text: msgDelegate.modelData.outgoing ? "You" : (msgDelegate.modelData.fromName || "them")
+-          color: Color.popups.text
+-          font.family: Style.font.family
+-          font.pixelSize: Style.font.caption
+-        }
++      TurnDivider {
++        showDivider: msgDelegate.index > 0
++                     && !!chatThread.thread[msgDelegate.index - 1]
++                     && chatThread.thread[msgDelegate.index - 1].outgoing !== msgDelegate.modelData.outgoing
++        topLabel: msgDelegate.index > 0 && chatThread.thread[msgDelegate.index - 1]
++                  ? (chatThread.thread[msgDelegate.index - 1].outgoing ? "You" : (chatThread.thread[msgDelegate.index - 1].fromName || "them"))
++                  : ""
++        bottomLabel: msgDelegate.modelData.outgoing ? "You" : (msgDelegate.modelData.fromName || "them")
+       }
+ 
+       ChatMessage {
+diff --git a/shared/MessageBubble.qml b/shared/MessageBubble.qml
+new file mode 100644
+index 0000000..a4d46bd
+--- /dev/null
++++ b/shared/MessageBubble.qml
+@@ -0,0 +1,194 @@
++import QtQuick
++import qs.Commons
++
++// The chat bubble shared by 1:1 (ChatMessage) and rooms (RoomMessage):
++// one Column inside the bubble Rectangle, three rows —
++//   1. hover buttons row (copy, edit), justified toward the conversation
++//      INSIDE edge: left on outgoing, right on received (mirror)
++//   2. the message text
++//   3. the timestamp row, justified to the same inside edge
++// The bubble sizes to its content Column. 1:1 defaults are the verbatim
++// ChatMessage styling; rooms pass bubbleColorOverride / textColor / timeInk
++// for the member-color bubble (bubbleColorOverride "transparent" is the
++// sentinel meaning "use the 1:1 fills"). Read ✓ is NOT appended here —
++// callers bake it into the timeLine string.
++Item {
++  id: messageBubble
++
++  required property var modelData
++  property real maxWidth: 400
++  property string editingMid: ""
++  property string timeLine: ""
++  property bool editEnabled: false
++  // Room call sites render attachments as the separate file bubble and
++  // pass false so no paperclip line is composed here.
++  property bool showAttachmentInline: true
++  // Sentinel fill override: anything but the STRING "transparent" IS the
++  // bubble fill (border.width keeps the outgoing rule). Must be `var`, not
++  // `color`: a color-typed property coerces the sentinel string into a
++  // transparent QColor before the comparison, and a color OBJECT never ===
++  // the string "transparent" (journal-proven trap) — the sentinel could
++  // never be detected and the bubble would paint #00000000.
++  property var bubbleColorOverride: "transparent"
++  property color textColor: Color.popups.text
++  property color timeInk: textColor
++  // Room call sites hide the text bubble entirely when the message has no
++  // text or carries an attachment (the file bubble renders instead).
++  property bool bubbleVisible: true
++
++  signal editRequested(string mid, string text)
++  signal copyRequested(string text)
++
++  // Read-only handles for benches and callers: the bubble Rectangle
++  // (fill color, border) and the message Text (ink).
++  readonly property alias bubbleRect: bubble
++  readonly property alias bubbleTextItem: messageText
++
++  width: parent ? parent.width : 0
++  height: bubble.visible ? bubble.height : 0
++
++  readonly property bool hovered: msgHover.hovered
++  property bool copied: false
++
++  // Whole-bubble hover: a non-visual QObject, so it never participates in
++  // the inner Column's layout.
++  HoverHandler {
++    id: msgHover
++  }
++
++  Timer {
++    id: copyReset
++    interval: 1500
++    onTriggered: messageBubble.copied = false
++  }
++
++  // ---- the bubble: one Column, three rows inside -------------------------
++  Rectangle {
++    id: bubble
++    visible: messageBubble.bubbleVisible
++    readonly property bool overrideFill: messageBubble.bubbleColorOverride !== "transparent"
++    readonly property real bubbleMaxWidth: messageBubble.maxWidth
++    readonly property real bubblePaddingX: Style.space(10)
++    readonly property real bubblePaddingY: Style.space(6)
++    readonly property real bubbleExtra: Style.space(6)
++
++    // Hug the text: bubble = text's natural (unwrapped) width + padding,
++    // capped. implicitWidth is wrap-independent, so there is no cycle —
++    // short messages shrink the bubble, long ones grow to the cap and wrap.
++    width: Math.min(bubbleMaxWidth,
++                    messageText.implicitWidth + bubblePaddingX * 2 + bubbleExtra)
++    height: innerCol.childrenRect.height + bubblePaddingY * 2
++    radius: Math.max(Style.cornerRadius, Style.space(6))
++    // Horizontal alignment via x — anchors on a Column child disable the
++    // whole positioner ("Column will not function"): left on outgoing,
++    // right on received.
++    x: modelData.outgoing ? messageBubble.width - width : 0
++    border.width: modelData.outgoing ? 0 : 1
++    border.color: Style.normalBorderColor
++    color: overrideFill
++      ? messageBubble.bubbleColorOverride
++      : (modelData.outgoing ? Style.selectedAccentFill : Style.normalFill)
++
++    Column {
++      id: innerCol
++      x: bubble.bubblePaddingX
++      y: bubble.bubblePaddingY
++      // Fills the bubble's content box; the bubble width is driven by
++      // messageText's NATURAL width (implicitWidth — the unwrapped line),
++      // so this never feeds back into the text's wrapping decision.
++      // Max() with the overlay rows' natural widths: for very short
++      // messages ("ok") the buttons/time rows are WIDER than the text —
++      // without this they'd be x-negative and clipped by the bubble.
++      width: Math.max(bubble.width - bubble.bubblePaddingX * 2 - bubble.bubbleExtra,
++                      btnRow.implicitWidth,
++                      timeText.implicitWidth)
++      spacing: Style.space(2)
++
++      // ---- row 1: hover buttons, toward the inside edge ------------------
++      // opacity (not visible) on the glyphs: a Row whose children are all
++      // invisible is treated as EMPTY by the Column, which then stacks the
++      // following rows over it (the 1.5.71 blank-message bug). MouseAreas
++      // carry enabled guards so hidden glyphs stay unclickable.
++      Row {
++        id: btnRow
++        spacing: Style.space(8)
++        height: Style.space(13)
++        x: modelData.outgoing ? innerCol.width - btnRow.implicitWidth : 0
++
++        Text {
++          text: messageBubble.copied ? "\u2713" : "\uF0C5"
++          color: messageBubble.copied ? Color.accent : messageBubble.textColor
++          font.family: Style.font.family
++          font.pixelSize: Style.font.caption
++          opacity: (messageBubble.hovered || messageBubble.copied) ? (messageBubble.copied ? 1.0 : 0.85) : 0.0
++
++          MouseArea {
++            anchors.fill: parent
++            enabled: messageBubble.hovered || messageBubble.copied
++            onClicked: {
++              messageBubble.copyRequested(modelData.text)
++              messageBubble.copied = true
++              copyReset.restart()
++            }
++          }
++        }
++
++        Text {
++          text: "\uF040"
++          color: messageBubble.textColor
++          font.family: Style.font.family
++          font.pixelSize: Style.font.caption
++          readonly property bool showEdit: messageBubble.editEnabled
++            && modelData.outgoing
++            && (messageBubble.hovered || messageBubble.editingMid === modelData.mid)
++          opacity: showEdit ? 0.85 : 0.0
++
++          MouseArea {
++            anchors.fill: parent
++            enabled: parent.showEdit
++            onClicked: messageBubble.editRequested(modelData.mid, modelData.text)
++          }
++        }
++      }
++
++      // ---- row 2: the message text ----------------------------------------
++      // Fill the inner width; the BUBBLE decides the width from the text's
++      // natural implicitWidth (capped) — the text never constrains itself
++      // through its own rendered width, so wrapping behaves exactly like
++      // any chat app: grow to cap, then wrap.
++      Text {
++        id: messageText
++        width: innerCol.width
++        // Show the attachment (paperclip + name) so an attachment-only
++        // message isn't a blank bubble; text + attachment stack.
++        // Rooms compose the paperclip line inside their file bubble
++        // instead, so the inline composition is switchable.
++        text: messageBubble.showAttachmentInline
++          ? ((modelData.attachment && modelData.attachment.name)
++             ? ((modelData.text ? modelData.text + "\n" : "") + "\uD83D\uDCCE " + modelData.attachment.name)
++             : modelData.text)
++          : (modelData.text || "")
++        color: messageBubble.textColor
++        font.family: Style.font.family
++        font.pixelSize: Style.font.body
++        wrapMode: Text.Wrap
++      }
++
++      // ---- row 3: timestamp, same inside edge ------------------------------
++      // Outgoing fill is a translucent accent wash (alpha 0.18) — a dimmed
++      // light text on it is invisible against a light wallpaper. The room
++      // call site passes its luminance-derived ink via timeInk; 1:1 keeps
++      // the body ink (timeInk defaults to textColor) at full opacity on
++      // outgoing; received side keeps 0.7.
++      Text {
++        id: timeText
++        x: modelData.outgoing ? innerCol.width - implicitWidth : 0
++        text: messageBubble.timeLine
++        color: messageBubble.timeInk
++        opacity: modelData.outgoing ? 1.0 : 0.7
++        font.family: Style.font.family
++        font.pixelSize: Style.font.caption
++      }
++    }
++  }
++}
+diff --git a/shared/RoomMessage.qml b/shared/RoomMessage.qml
+index c8af6be..731591e 100644
+--- a/shared/RoomMessage.qml
++++ b/shared/RoomMessage.qml
+@@ -5,15 +5,12 @@ import qs.Commons
+ // Ui override — the extracted file must import it itself (move artifact).
+ import qs.Ui
+ 
+-// One room message: meta row (sender + time), the
+-// member-colored text bubble with luminance-derived ink, and the room-file
+-// bubble with per-member status chips and the Save/befriend row. Extracted
+-// verbatim from Panel.qml's roomList delegate (zero behavior change) — the
+-// delegate wrapper stays in Panel.qml so the ListView contract (required
+-// modelData, roomList.width) is unchanged. Inputs: modelData (the message),
+-// maxWidth (0.8 * room list width), selectedRoom (panel-level room state).
+-// The panel-provided timeLabel helper is passed in (same function the inline
+-// delegate called before the extraction).
++// One room message: the member-colored text bubble with luminance-derived
++// ink (rendered by the shared MessageBubble — same layout as the 1:1
++// bubble), and the room-file bubble with per-member status chips and the
++// Save/befriend row. Inputs: modelData (the message), maxWidth (0.8 *
++// room list width), selectedRoom (panel-level room state). The
++// panel-provided timeLabel helper is passed in.
+ Column {
+   id: roomMessage
+   width: parent.width
+@@ -29,81 +26,54 @@ Column {
+   // the inline delegate called before the extraction).
+   property var timeLabel: function(ts) { return "" }
+ 
++  signal copyRequested(string text)
+ 
+   spacing: Style.spacing.xs
+ 
+-  // Sender name now lives on the voice-change dividers (RoomView); the
+-  // per-message time rides the bubble's top-right in the same ink.
+-  readonly property string timeLine: roomMessage.timeLabel(modelData.ts)
+-
+   // Text bubble: member color tints the bubble; the INK is
+   // derived from the bubble background's luminance so text
+   // always passes contrast (the approved mechanism — a
+   // low-contrast color choice yields adapted text, never an
+   // excluded swatch). Same function local and remote.
+-  Rectangle {
+-    readonly property color bubbleBase: modelData.outgoing
+-      ? Style.selectedAccentFill : Style.normalFill
+-    // Full member color fills the bubble ("my room color"
+-    // setting); resolves the raw string here so an unset or
+-    // disabled color falls back to the base fill (a coerced
+-    // color OBJECT never === the string "transparent").
+-    readonly property color bubbleColor: {
+-      if (!roomMessage.selectedRoom || !roomMessage.selectedRoom.colorsEnabled) return bubbleBase
+-      var mem = (roomMessage.selectedRoom.members || {})[modelData.from]
+-      var col = Lanchat.roomMemberColor(mem)
+-      return col !== "" ? col : bubbleBase
+-    }
+-    // Relative luminance (sRGB-linearized) of the bubble
+-    // fill; ink flips dark/light near the equal-contrast
+-    // crossover for full-opacity fills (L 0.18 — the old
+-    // 0.35 was tuned for the 25% composite and left mid-tone
+-    // member colors with ~2.6:1 ink contrast).
+-    function rlin(c) {
+-      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+-    }
+-    readonly property real lum: 0.2126 * rlin(bubbleColor.r)
+-      + 0.7152 * rlin(bubbleColor.g) + 0.0722 * rlin(bubbleColor.b)
+-    readonly property color ink: lum > 0.18 ? Color.background : Color.popups.text
+-
+-    visible: !!(modelData.text !== "") && !(modelData.attachment && modelData.attachment.name)
+-    width: Math.min(roomMessage.maxWidth,
+-                    roomMsgText.implicitWidth + Style.space(28) + Style.space(20))
+-    height: roomMsgText.implicitHeight + Style.space(18)
+-    radius: Math.max(Style.cornerRadius, Style.space(6))
+-    anchors.left: modelData.outgoing ? undefined : parent.left
+-    anchors.right: modelData.outgoing ? parent.right : undefined
+-    border.width: modelData.outgoing ? 0 : 1
+-    border.color: Style.normalBorderColor
+-    color: bubbleColor
+-
+-    Text {
+-      id: roomMsgText
+-      anchors.left: parent.left
+-      anchors.right: parent.right
+-      anchors.verticalCenter: parent.verticalCenter
+-      anchors.leftMargin: Style.space(14)
+-      anchors.rightMargin: Style.space(14)
+-      text: modelData.text
+-      color: parent.ink
+-      font.family: Style.font.family
+-      font.pixelSize: Style.font.body
+-      wrapMode: Text.Wrap
+-    }
+-
+-    // Message time under where the copy glyph sits (rooms don't have a
+-    // copy button here; the time takes that top-right slot), bubble ink.
+-    Text {
+-      anchors.top: parent.top
+-      anchors.right: parent.right
+-      anchors.topMargin: Style.space(5)
+-      anchors.rightMargin: Style.space(6)
+-      text: roomMessage.timeLine
+-      color: parent.ink
+-      opacity: 0.6
+-      font.family: Style.font.family
+-      font.pixelSize: Style.font.caption
+-    }
++  readonly property bool memberColorResolved: {
++    if (!roomMessage.selectedRoom || !roomMessage.selectedRoom.colorsEnabled) return false
++    var mem = (roomMessage.selectedRoom.members || {})[modelData.from]
++    var col = Lanchat.roomMemberColor(mem)
++    return col !== ""
++  }
++  readonly property color memberColor: {
++    if (!roomMessage.selectedRoom || !roomMessage.selectedRoom.colorsEnabled) return "transparent"
++    var mem = (roomMessage.selectedRoom.members || {})[modelData.from]
++    var col = Lanchat.roomMemberColor(mem)
++    return col !== "" ? col : "transparent"
++  }
++  // Relative luminance (sRGB-linearized) of the member bubble
++  // fill; ink flips dark/light near the equal-contrast
++  // crossover for full-opacity fills (L 0.18 — the old
++  // 0.35 was tuned for the 25% composite and left mid-tone
++  // member colors with ~2.6:1 ink contrast).
++  function rlin(c) {
++    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
++  }
++  readonly property real memberLum: 0.2126 * rlin(memberColor.r)
++    + 0.7152 * rlin(memberColor.g) + 0.0722 * rlin(memberColor.b)
++  readonly property color memberInk: memberLum > 0.18 ? Color.background : Color.popups.text
++
++  // Text bubble: MessageBubble renders it (member color fill, luminance
++  // ink, 1:1-style time row). Rooms hide the inline paperclip composition
++  // (the file bubble below owns attachments) and hide the bubble entirely
++  // when there is no text or an attachment is present.
++  MessageBubble {
++    modelData: roomMessage.modelData
++    maxWidth: roomMessage.maxWidth
++    timeLine: roomMessage.timeLabel(roomMessage.modelData.ts)
++    editEnabled: false
++    showAttachmentInline: false
++    bubbleVisible: !!(roomMessage.modelData.text !== "") && !(roomMessage.modelData.attachment && roomMessage.modelData.attachment.name)
++    bubbleColorOverride: roomMessage.memberColorResolved ? roomMessage.memberColor : "transparent"
++    textColor: roomMessage.memberColorResolved ? roomMessage.memberInk : Color.popups.text
++    timeInk: roomMessage.memberColorResolved ? roomMessage.memberInk : Color.popups.text
++    onCopyRequested: function(text) { roomMessage.copyRequested(text) }
+   }
+ 
+   // Room-file bubble: metadata + Save when the sender↔me
+diff --git a/shared/RoomView.qml b/shared/RoomView.qml
+index bb56d80..dc592b6 100644
+--- a/shared/RoomView.qml
++++ b/shared/RoomView.qml
+@@ -20,6 +20,10 @@ Item {
+   property var selectedRoom: null
+   property var timeLabel: function(ts) { return "" }
+ 
++  // Rooms gain hover-copy (the shared MessageBubble provides the glyph);
++  // the panel wires this to its clipboard helper.
++  signal copyRequested(string text)
++
+   visible: inRoom
+   width: parent.width
+ 
+@@ -45,36 +49,14 @@ Item {
+         // Voice-change divider: sender name of the run above, a thin rule,
+         // sender name of the run below (compared by `from`; outgoing is
+         // derived per-peer so `from` is the stable identity here).
+-        Column {
+-          visible: roomMsgDelegate.index > 0
+-                   && !!roomView.roomThread[roomMsgDelegate.index - 1]
+-                   && roomView.roomThread[roomMsgDelegate.index - 1].from !== roomMsgDelegate.modelData.from
+-          width: parent.width
+-          spacing: Style.space(3)
+-
+-          Text {
+-            anchors.horizontalCenter: parent.horizontalCenter
+-            text: roomMsgDelegate.index > 0 && roomView.roomThread[roomMsgDelegate.index - 1]
+-                  ? (roomView.roomThread[roomMsgDelegate.index - 1].outgoing ? "You" : (roomView.roomThread[roomMsgDelegate.index - 1].fromName || "them"))
+-                  : ""
+-            color: Color.popups.text
+-            font.family: Style.font.family
+-            font.pixelSize: Style.font.caption
+-          }
+-
+-          Rectangle {
+-            width: parent.width
+-            height: 1
+-            color: Color.popups.border
+-          }
+-
+-          Text {
+-            anchors.horizontalCenter: parent.horizontalCenter
+-            text: roomMsgDelegate.modelData.outgoing ? "You" : (roomMsgDelegate.modelData.fromName || "them")
+-            color: Color.popups.text
+-            font.family: Style.font.family
+-            font.pixelSize: Style.font.caption
+-          }
++        TurnDivider {
++          showDivider: roomMsgDelegate.index > 0
++                       && !!roomView.roomThread[roomMsgDelegate.index - 1]
++                       && roomView.roomThread[roomMsgDelegate.index - 1].from !== roomMsgDelegate.modelData.from
++          topLabel: roomMsgDelegate.index > 0 && roomView.roomThread[roomMsgDelegate.index - 1]
++                    ? (roomView.roomThread[roomMsgDelegate.index - 1].outgoing ? "You" : (roomView.roomThread[roomMsgDelegate.index - 1].fromName || "them"))
++                    : ""
++          bottomLabel: roomMsgDelegate.modelData.outgoing ? "You" : (roomMsgDelegate.modelData.fromName || "them")
+         }
+ 
+         RoomMessage {
+@@ -83,6 +65,7 @@ Item {
+           maxWidth: roomList.width * 0.8
+           selectedRoom: roomView.selectedRoom
+           timeLabel: roomView.timeLabel
++          onCopyRequested: function(text) { roomView.copyRequested(text) }
+         }
+       }
+     }
+diff --git a/shared/TurnDivider.qml b/shared/TurnDivider.qml
+new file mode 100644
+index 0000000..2e20ee5
+--- /dev/null
++++ b/shared/TurnDivider.qml
+@@ -0,0 +1,42 @@
++import QtQuick
++import qs.Commons
++
++// Voice-change divider: sender name of the run above, a thin rule, sender
++// name of the run below — the conversation's turn boundary reads at a
++// glance. Shared by ChatThread (1:1: identity = outgoing flag) and
++// RoomView (identity = `from`). The caller computes showDivider
++// (index > 0 && the identity differs) and both labels.
++Column {
++  id: turnDivider
++
++  // The caller guards index > 0 and the identity comparison.
++  property bool showDivider: true
++  property string topLabel: ""
++  property string bottomLabel: ""
++
++  width: parent.width
++  spacing: Style.space(3)
++  visible: showDivider
++
++  Text {
++    anchors.horizontalCenter: parent.horizontalCenter
++    text: turnDivider.topLabel
++    color: Color.popups.text
++    font.family: Style.font.family
++    font.pixelSize: Style.font.caption
++  }
++
++  Rectangle {
++    width: parent.width
++    height: 1
++    color: Color.popups.border
++  }
++
++  Text {
++    anchors.horizontalCenter: parent.horizontalCenter
++    text: turnDivider.bottomLabel
++    color: Color.popups.text
++    font.family: Style.font.family
++    font.pixelSize: Style.font.caption
++  }
++}

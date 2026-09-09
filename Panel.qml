@@ -1139,6 +1139,7 @@ Panel {
               roomThread: root.roomThread
               selectedRoom: root.selectedRoom
               timeLabel: root.timeLabel
+              onCopyRequested: function(text) { root.copyToClipboard(text) }
             }
             // ---- incoming-file bar -------------------------------------
             // ACTIONABLE file receipt bar between the thread and compose.

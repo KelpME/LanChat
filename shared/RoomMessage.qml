@@ -5,15 +5,12 @@ import qs.Commons
 // Ui override — the extracted file must import it itself (move artifact).
 import qs.Ui
 
-// One room message: meta row (sender + time), the
-// member-colored text bubble with luminance-derived ink, and the room-file
-// bubble with per-member status chips and the Save/befriend row. Extracted
-// verbatim from Panel.qml's roomList delegate (zero behavior change) — the
-// delegate wrapper stays in Panel.qml so the ListView contract (required
-// modelData, roomList.width) is unchanged. Inputs: modelData (the message),
-// maxWidth (0.8 * room list width), selectedRoom (panel-level room state).
-// The panel-provided timeLabel helper is passed in (same function the inline
-// delegate called before the extraction).
+// One room message: the member-colored text bubble with luminance-derived
+// ink (rendered by the shared MessageBubble — same layout as the 1:1
+// bubble), and the room-file bubble with per-member status chips and the
+// Save/befriend row. Inputs: modelData (the message), maxWidth (0.8 *
+// room list width), selectedRoom (panel-level room state). The
+// panel-provided timeLabel helper is passed in.
 Column {
   id: roomMessage
   width: parent.width
@@ -29,81 +26,54 @@ Column {
   // the inline delegate called before the extraction).
   property var timeLabel: function(ts) { return "" }
 
+  signal copyRequested(string text)
 
   spacing: Style.spacing.xs
-
-  // Sender name now lives on the voice-change dividers (RoomView); the
-  // per-message time rides the bubble's top-right in the same ink.
-  readonly property string timeLine: roomMessage.timeLabel(modelData.ts)
 
   // Text bubble: member color tints the bubble; the INK is
   // derived from the bubble background's luminance so text
   // always passes contrast (the approved mechanism — a
   // low-contrast color choice yields adapted text, never an
   // excluded swatch). Same function local and remote.
-  Rectangle {
-    readonly property color bubbleBase: modelData.outgoing
-      ? Style.selectedAccentFill : Style.normalFill
-    // Full member color fills the bubble ("my room color"
-    // setting); resolves the raw string here so an unset or
-    // disabled color falls back to the base fill (a coerced
-    // color OBJECT never === the string "transparent").
-    readonly property color bubbleColor: {
-      if (!roomMessage.selectedRoom || !roomMessage.selectedRoom.colorsEnabled) return bubbleBase
-      var mem = (roomMessage.selectedRoom.members || {})[modelData.from]
-      var col = Lanchat.roomMemberColor(mem)
-      return col !== "" ? col : bubbleBase
-    }
-    // Relative luminance (sRGB-linearized) of the bubble
-    // fill; ink flips dark/light near the equal-contrast
-    // crossover for full-opacity fills (L 0.18 — the old
-    // 0.35 was tuned for the 25% composite and left mid-tone
-    // member colors with ~2.6:1 ink contrast).
-    function rlin(c) {
-      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
-    }
-    readonly property real lum: 0.2126 * rlin(bubbleColor.r)
-      + 0.7152 * rlin(bubbleColor.g) + 0.0722 * rlin(bubbleColor.b)
-    readonly property color ink: lum > 0.18 ? Color.background : Color.popups.text
+  readonly property bool memberColorResolved: {
+    if (!roomMessage.selectedRoom || !roomMessage.selectedRoom.colorsEnabled) return false
+    var mem = (roomMessage.selectedRoom.members || {})[modelData.from]
+    var col = Lanchat.roomMemberColor(mem)
+    return col !== ""
+  }
+  readonly property color memberColor: {
+    if (!roomMessage.selectedRoom || !roomMessage.selectedRoom.colorsEnabled) return "transparent"
+    var mem = (roomMessage.selectedRoom.members || {})[modelData.from]
+    var col = Lanchat.roomMemberColor(mem)
+    return col !== "" ? col : "transparent"
+  }
+  // Relative luminance (sRGB-linearized) of the member bubble
+  // fill; ink flips dark/light near the equal-contrast
+  // crossover for full-opacity fills (L 0.18 — the old
+  // 0.35 was tuned for the 25% composite and left mid-tone
+  // member colors with ~2.6:1 ink contrast).
+  function rlin(c) {
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  }
+  readonly property real memberLum: 0.2126 * rlin(memberColor.r)
+    + 0.7152 * rlin(memberColor.g) + 0.0722 * rlin(memberColor.b)
+  readonly property color memberInk: memberLum > 0.18 ? Color.background : Color.popups.text
 
-    visible: !!(modelData.text !== "") && !(modelData.attachment && modelData.attachment.name)
-    width: Math.min(roomMessage.maxWidth,
-                    roomMsgText.implicitWidth + Style.space(28) + Style.space(20))
-    height: roomMsgText.implicitHeight + Style.space(18)
-    radius: Math.max(Style.cornerRadius, Style.space(6))
-    anchors.left: modelData.outgoing ? undefined : parent.left
-    anchors.right: modelData.outgoing ? parent.right : undefined
-    border.width: modelData.outgoing ? 0 : 1
-    border.color: Style.normalBorderColor
-    color: bubbleColor
-
-    Text {
-      id: roomMsgText
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(14)
-      anchors.rightMargin: Style.space(14)
-      text: modelData.text
-      color: parent.ink
-      font.family: Style.font.family
-      font.pixelSize: Style.font.body
-      wrapMode: Text.Wrap
-    }
-
-    // Message time under where the copy glyph sits (rooms don't have a
-    // copy button here; the time takes that top-right slot), bubble ink.
-    Text {
-      anchors.top: parent.top
-      anchors.right: parent.right
-      anchors.topMargin: Style.space(5)
-      anchors.rightMargin: Style.space(6)
-      text: roomMessage.timeLine
-      color: parent.ink
-      opacity: 0.6
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-    }
+  // Text bubble: MessageBubble renders it (member color fill, luminance
+  // ink, 1:1-style time row). Rooms hide the inline paperclip composition
+  // (the file bubble below owns attachments) and hide the bubble entirely
+  // when there is no text or an attachment is present.
+  MessageBubble {
+    modelData: roomMessage.modelData
+    maxWidth: roomMessage.maxWidth
+    timeLine: roomMessage.timeLabel(roomMessage.modelData.ts)
+    editEnabled: false
+    showAttachmentInline: false
+    bubbleVisible: !!(roomMessage.modelData.text !== "") && !(roomMessage.modelData.attachment && roomMessage.modelData.attachment.name)
+    bubbleColorOverride: roomMessage.memberColorResolved ? roomMessage.memberColor : "transparent"
+    textColor: roomMessage.memberColorResolved ? roomMessage.memberInk : Color.popups.text
+    timeInk: roomMessage.memberColorResolved ? roomMessage.memberInk : Color.popups.text
+    onCopyRequested: function(text) { roomMessage.copyRequested(text) }
   }
 
   // Room-file bubble: metadata + Save when the sender↔me

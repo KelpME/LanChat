@@ -67,16 +67,25 @@ Item {
     // `bubblePaddingX` property (1.5.72 layout: the three-row Column lives
     // INSIDE the bubble); its inner Column's "ping" text carries the
     // resolved message. (copied lives on the ChatMessage root.)
+    // Post-refactor: ChatMessage is a thin wrapper; the bubble Rectangle
+    // (with bubblePaddingX) and its inner Column live INSIDE the shared
+    // MessageBubble, reachable through the wrapper's MessageBubble child.
     var bubbleText = null
     for (var i = 0; i < msg.children.length; i++) {
       var kid = msg.children[i]
-      if (kid.bubblePaddingX === undefined) continue
-      for (var k = 0; k < kid.children.length; k++) {
-        var inner = kid.children[k]
-        if (!inner.children) continue
-        for (var r = 0; r < inner.children.length; r++) {
-          if (inner.children[r].text === "ping") bubbleText = inner.children[r]
-        }
+      // The held-friendRequest wrapper Column holds the MessageBubble.
+      var mb = null
+      function findMB(n) {
+        if (!n || mb) return
+        if (n.bubbleRect !== undefined) { mb = n; return }
+        var kids = n.children
+        if (kids) for (var q = 0; q < kids.length; q++) findMB(kids[q])
+      }
+      findMB(kid)
+      if (!mb) continue
+      var bt = mb.bubbleRect.children[0] // innerCol
+      for (var r = 0; r < bt.children.length; r++) {
+        if (bt.children[r].text === "ping") bubbleText = bt.children[r]
       }
     }
     if (!bubbleText) return fail("bubble Text did not resolve modelData.text (blank bubble reproduced)")

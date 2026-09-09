@@ -1,6 +1,8 @@
 singleton Lanchat 1.0 Lanchat.qml
 ChatMessage 1.0 ChatMessage.qml
 RoomMessage 1.0 RoomMessage.qml
+MessageBubble 1.0 MessageBubble.qml
+TurnDivider 1.0 TurnDivider.qml
 ComposeBox 1.0 ComposeBox.qml
 PeerList 1.0 PeerList.qml
 RoomListSection 1.0 RoomListSection.qml

@@ -62,36 +62,14 @@ ListView {
       // Voice-change divider: sender name of the run above, a thin rule,
       // sender name of the run below — the conversation's turn boundary
       // reads at a glance. (1:1: identity = outgoing flag.)
-      Column {
-        visible: msgDelegate.index > 0
-                 && !!chatThread.thread[msgDelegate.index - 1]
-                 && chatThread.thread[msgDelegate.index - 1].outgoing !== msgDelegate.modelData.outgoing
-        width: parent.width
-        spacing: Style.space(3)
-
-        Text {
-          anchors.horizontalCenter: parent.horizontalCenter
-          text: msgDelegate.index > 0 && chatThread.thread[msgDelegate.index - 1]
-                ? (chatThread.thread[msgDelegate.index - 1].outgoing ? "You" : (chatThread.thread[msgDelegate.index - 1].fromName || "them"))
-                : ""
-          color: Color.popups.text
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-        }
-
-        Rectangle {
-          width: parent.width
-          height: 1
-          color: Color.popups.border
-        }
-
-        Text {
-          anchors.horizontalCenter: parent.horizontalCenter
-          text: msgDelegate.modelData.outgoing ? "You" : (msgDelegate.modelData.fromName || "them")
-          color: Color.popups.text
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-        }
+      TurnDivider {
+        showDivider: msgDelegate.index > 0
+                     && !!chatThread.thread[msgDelegate.index - 1]
+                     && chatThread.thread[msgDelegate.index - 1].outgoing !== msgDelegate.modelData.outgoing
+        topLabel: msgDelegate.index > 0 && chatThread.thread[msgDelegate.index - 1]
+                  ? (chatThread.thread[msgDelegate.index - 1].outgoing ? "You" : (chatThread.thread[msgDelegate.index - 1].fromName || "them"))
+                  : ""
+        bottomLabel: msgDelegate.modelData.outgoing ? "You" : (msgDelegate.modelData.fromName || "them")
       }
 
       ChatMessage {

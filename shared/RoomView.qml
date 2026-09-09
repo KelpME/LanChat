@@ -20,6 +20,10 @@ Item {
   property var selectedRoom: null
   property var timeLabel: function(ts) { return "" }
 
+  // Rooms gain hover-copy (the shared MessageBubble provides the glyph);
+  // the panel wires this to its clipboard helper.
+  signal copyRequested(string text)
+
   visible: inRoom
   width: parent.width
 
@@ -45,36 +49,14 @@ Item {
         // Voice-change divider: sender name of the run above, a thin rule,
         // sender name of the run below (compared by `from`; outgoing is
         // derived per-peer so `from` is the stable identity here).
-        Column {
-          visible: roomMsgDelegate.index > 0
-                   && !!roomView.roomThread[roomMsgDelegate.index - 1]
-                   && roomView.roomThread[roomMsgDelegate.index - 1].from !== roomMsgDelegate.modelData.from
-          width: parent.width
-          spacing: Style.space(3)
-
-          Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: roomMsgDelegate.index > 0 && roomView.roomThread[roomMsgDelegate.index - 1]
-                  ? (roomView.roomThread[roomMsgDelegate.index - 1].outgoing ? "You" : (roomView.roomThread[roomMsgDelegate.index - 1].fromName || "them"))
-                  : ""
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-          }
-
-          Rectangle {
-            width: parent.width
-            height: 1
-            color: Color.popups.border
-          }
-
-          Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: roomMsgDelegate.modelData.outgoing ? "You" : (roomMsgDelegate.modelData.fromName || "them")
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-          }
+        TurnDivider {
+          showDivider: roomMsgDelegate.index > 0
+                       && !!roomView.roomThread[roomMsgDelegate.index - 1]
+                       && roomView.roomThread[roomMsgDelegate.index - 1].from !== roomMsgDelegate.modelData.from
+          topLabel: roomMsgDelegate.index > 0 && roomView.roomThread[roomMsgDelegate.index - 1]
+                    ? (roomView.roomThread[roomMsgDelegate.index - 1].outgoing ? "You" : (roomView.roomThread[roomMsgDelegate.index - 1].fromName || "them"))
+                    : ""
+          bottomLabel: roomMsgDelegate.modelData.outgoing ? "You" : (roomMsgDelegate.modelData.fromName || "them")
         }
 
         RoomMessage {
@@ -83,6 +65,7 @@ Item {
           maxWidth: roomList.width * 0.8
           selectedRoom: roomView.selectedRoom
           timeLabel: roomView.timeLabel
+          onCopyRequested: function(text) { roomView.copyRequested(text) }
         }
       }
     }
