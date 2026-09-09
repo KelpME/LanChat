@@ -83,7 +83,9 @@ Item {
     // whole positioner ("Column will not function"): left on outgoing,
     // right on received.
     x: modelData.outgoing ? messageBubble.width - width : 0
-    border.width: modelData.outgoing ? 0 : 1
+    // Both sides carry the same 1px border now (Operator request: sent
+    // bubbles get the outline too).
+    border.width: 1
     border.color: Style.normalBorderColor
     color: overrideFill
       ? messageBubble.bubbleColorOverride
@@ -115,6 +117,24 @@ Item {
         height: Style.space(13)
         x: modelData.outgoing ? innerCol.width - btnRow.implicitWidth : 0
 
+        // Outgoing row order (Operator request): edit ✎ FIRST, then copy.
+        Text {
+          text: "\uF040"
+          color: messageBubble.textColor
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          readonly property bool showEdit: messageBubble.editEnabled
+            && modelData.outgoing
+            && (messageBubble.hovered || messageBubble.editingMid === modelData.mid)
+          opacity: showEdit ? 0.85 : 0.0
+
+          MouseArea {
+            anchors.fill: parent
+            enabled: parent.showEdit
+            onClicked: messageBubble.editRequested(modelData.mid, modelData.text)
+          }
+        }
+
         Text {
           text: messageBubble.copied ? "\u2713" : "\uF0C5"
           color: messageBubble.copied ? Color.accent : messageBubble.textColor
@@ -130,23 +150,6 @@ Item {
               messageBubble.copied = true
               copyReset.restart()
             }
-          }
-        }
-
-        Text {
-          text: "\uF040"
-          color: messageBubble.textColor
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          readonly property bool showEdit: messageBubble.editEnabled
-            && modelData.outgoing
-            && (messageBubble.hovered || messageBubble.editingMid === modelData.mid)
-          opacity: showEdit ? 0.85 : 0.0
-
-          MouseArea {
-            anchors.fill: parent
-            enabled: parent.showEdit
-            onClicked: messageBubble.editRequested(modelData.mid, modelData.text)
           }
         }
       }
@@ -175,17 +178,15 @@ Item {
       }
 
       // ---- row 3: timestamp, same inside edge ------------------------------
-      // Outgoing fill is a translucent accent wash (alpha 0.18) — a dimmed
-      // light text on it is invisible against a light wallpaper. The room
-      // call site passes its luminance-derived ink via timeInk; 1:1 keeps
-      // the body ink (timeInk defaults to textColor) at full opacity on
-      // outgoing; received side keeps 0.7.
+      // Same opacity on both sides (Operator request: the sent time row must
+      // match the received one). The room call site passes its luminance-
+      // derived ink via timeInk; 1:1 keeps the body ink on both sides.
       Text {
         id: timeText
         x: modelData.outgoing ? innerCol.width - implicitWidth : 0
         text: messageBubble.timeLine
         color: messageBubble.timeInk
-        opacity: modelData.outgoing ? 1.0 : 0.7
+        opacity: 0.7
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }

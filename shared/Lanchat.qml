@@ -701,6 +701,45 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "readReceipt", to: to, mid: mid }) + "\n")
   }
 
+  // ---- read receipts: session-local dedupe + catch-up ---------------------
+  // mids we've already receipted this session. Guards the catch-up path so
+  // selecting a conversation repeatedly doesn't spam the sender.
+  property var sentReceipts: ({})
+
+  function markReceiptSent(mid) {
+    if (!mid || sentReceipts[mid]) return
+    var s = {}
+    for (var k in sentReceipts) s[k] = true
+    s[mid] = true
+    sentReceipts = s
+  }
+
+  // Catch-up: receipt every incoming message of a conversation that is (or
+  // was) shown but never confirmed — this is what makes the ✓ appear even
+  // when the message was read long after it arrived (panel closed, chat
+  // opened later). Works for 1:1 (messages) and rooms (roomMessages): the
+  // wire target is always the message's sender; the daemon routes a receipt
+  // for a room message back through the room's member sockets.
+  function sendMissingReceipts() {
+    if (!readReceiptsEnabled) return
+    if (!panelOpen) return
+    var all = []
+    var msgs = lanchat.messages
+    for (var i = 0; i < msgs.length; i++) all.push(msgs[i])
+    var rms = lanchat.roomMessages
+    for (var j = 0; j < rms.length; j++) all.push(rms[j])
+    for (var n = 0; n < all.length; n++) {
+      var m = all[n]
+      if (m.outgoing || !m.mid || sentReceipts[m.mid]) continue
+      var onScreen = m.room
+        ? (m.room === lanchat.selectedRoomId)
+        : (m.from === lanchat.selectedPeerId)
+      if (!onScreen) continue
+      markReceiptSent(m.mid)
+      daemon.write(JSON.stringify({ cmd: "readReceipt", to: m.from, mid: m.mid }) + "\n")
+    }
+  }
+
   function setTypingEnabled(on) {
     typingEnabled = on
     daemon.write(JSON.stringify({ cmd: "setTypingEnabled", enabled: on }) + "\n")
@@ -1106,6 +1145,8 @@ QtObject {
     }
 
     case "read-receipt": {
+      // Mid-keyed: room-message mids land here too (the reader receipts the
+      // room message's sender directly), so ONE map lights ✓ in both views.
       var nr = {}
       for (var rk in lanchat.readReceipts) nr[rk] = lanchat.readReceipts[rk]
       if (lanchat.showReadReceipts) nr[obj.mid] = true
@@ -1153,10 +1194,13 @@ QtObject {
       // If the panel is open AND this conversation is on screen, send a read
       // receipt back. Gated on the same on-screen test as the unread tint:
       // a sender must not be told "read" while the row still shows unread.
+      // (Catch-up for anything read late runs on selection — see
+      // sendMissingReceipts, called from Panel.selectPeer/selectRoom.)
       if (lanchat.panelOpen && !msgOut && obj.message.from
           && (obj.message.room
               ? obj.message.room === lanchat.selectedRoomId
               : obj.message.from === lanchat.selectedPeerId)) {
+        lanchat.markReceiptSent(obj.message.mid)
         lanchat.sendReadReceipt(obj.message.from, obj.message.mid)
       }
       break

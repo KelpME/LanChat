@@ -191,6 +191,7 @@ Panel {
     Lanchat.resetHistoryMeta(id)
     Lanchat.refreshHistory(id, 0, 50)
     Lanchat.clearPeerUnread(id)
+    Lanchat.sendMissingReceipts()
     chatThreadView.positionViewAtEnd()
   }
 
@@ -289,6 +290,7 @@ Panel {
     Lanchat.selectRoom(roomId)
     Lanchat.setLastOpen("room", roomId)
     Lanchat.clearRoomUnread(roomId)
+    Lanchat.sendMissingReceipts()
   }
 
   function leaveSelectedRoom() {
@@ -576,6 +578,9 @@ Panel {
       } else {
         Lanchat.clearRoomUnread(Lanchat.selectedRoomId)
       }
+      // The conversation on screen (restored or retained) may hold messages
+      // that arrived while the panel was closed — receipt them now.
+      Lanchat.sendMissingReceipts()
       Qt.callLater(function() { chatThreadView.positionViewAtEnd() })
     }
   }

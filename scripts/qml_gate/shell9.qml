@@ -107,6 +107,44 @@ Item {
     if (mapSize(L.unreadByRoom) !== 0) return fail("L10")
     console.log("BENCH-LU-OK-L10")
 
+    // ---- read-receipt catch-up (RC1-RC4) ----
+    // The real singleton's daemon.write is wired to a Process we can't stub
+    // here, so catch-up is verified at its decision surface: sentReceipts
+    // gains exactly the mids of on-screen incoming messages.
+    L.panelOpen = true
+    L.selectedPeerId = "peer-2"
+    L.selectedRoomId = ""
+    L.markReceiptSent("m1") // pretend m1 was already receipted live
+    L.sendMissingReceipts()
+    if (L.sentReceipts["m2"] !== true) return fail("RC1 m2 not receipted")
+    if (L.sentReceipts["m1"] !== true) return fail("RC1 m1 receipt state lost")
+    if (L.sentReceipts["m3"] !== true) return fail("RC1 m3 (on-screen peer-2) missed")
+    if (L.sentReceipts["m4"] === true) return fail("RC1 m4 belongs to peer-3")
+    if (L.sentReceipts["m5"] === true) return fail("RC1 m5 is a room message")
+    if (L.sentReceipts["m7"] === true) return fail("RC1 m7 is outgoing")
+    console.log("BENCH-LU-OK-RC1 on-screen 1:1 catch-up exact")
+
+    // RC2: room catch-up — select room-1, m5 (room msg) receipts, m3 doesn't.
+    L.selectedRoomId = "room-1"
+    L.selectedPeerId = ""
+    L.sendMissingReceipts()
+    if (L.sentReceipts["m5"] !== true) return fail("RC2 m5 not receipted")
+    if (L.sentReceipts["m4"] === true) return fail("RC2 m4 must stay unreceipted")
+    console.log("BENCH-LU-OK-RC2 room catch-up exact")
+
+    // RC3: no double-send — repeat run changes nothing.
+    var before = mapSize(L.sentReceipts)
+    L.sendMissingReceipts()
+    if (mapSize(L.sentReceipts) !== before) return fail("RC3 re-sent receipts")
+    console.log("BENCH-LU-OK-RC3 dedupe holds")
+
+    // RC4: panel closed → no receipts.
+    L.panelOpen = false
+    L.selectedPeerId = "peer-3"
+    L.sendMissingReceipts()
+    if (L.sentReceipts["m4"] === true) return fail("RC4 receipted while panel closed")
+    console.log("BENCH-LU-OK-RC4 gated on panelOpen")
+
     Qt.exit(0)
   }
 }

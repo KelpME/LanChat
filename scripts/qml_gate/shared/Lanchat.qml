@@ -98,6 +98,11 @@ QtObject {
     for (var j in unreadByRoom) if (j !== roomId) r[j] = unreadByRoom[j]
     unreadByRoom = r
   }
+  // Mirror of the real singleton's receipt catch-up (no-op on the stub —
+  // Panel.selectPeer/selectRoom call it on every selection path).
+  property var sentReceipts: ({})
+  function markReceiptSent(mid) { sentReceipts[mid] = true }
+  function sendMissingReceipts() { }
   property var roomInvites: []
   // ---- settings-panel surface (step 7 bench; mirrors real singleton) ----
   property bool firewall: false
