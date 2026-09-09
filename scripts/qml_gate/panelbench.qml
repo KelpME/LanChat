@@ -80,6 +80,7 @@ Item {
     if (typeName === "peerList" && node.peerRowH !== undefined && node.bottomInset !== undefined && node.showFwAlert !== undefined) { out.found = node; return }
     if (typeName === "roomSection" && node.sectionHeight !== undefined && node.amRoomOwnerOfFn !== undefined) { out.found = node; return }
     if (typeName === "settings" && node.expanded !== undefined && node.hostHeight !== undefined && node.panelW !== undefined) { out.found = node; return }
+    if (typeName === "chatTitle" && node instanceof Text && /'s chat$/.test(String(node.text))) { out.found = node; return }
     // Visual children... (guard: non-Item QtObjects have no children list)
     var kids = node.children
     if (kids) {
@@ -233,6 +234,20 @@ Item {
       if (panel.selectedPeerId !== "test-peer-1") return fail("selectPeer did not set selectedPeerId")
       console.log(p + "-OK selectPeer(test-peer-1) selectedPeerId=" + panel.selectedPeerId)
     } catch (e) { return fail("selectPeer threw: " + e) }
+
+    // ---- assert 3b: centered header title "<peer>'s chat"
+    try {
+      var out3 = { found: null }
+      findByType(panel, "chatTitle", out3)
+      var title = out3.found
+      if (!title) return fail("header title Text not found after selectPeer")
+      if (!title.visible) return fail("header title not visible with a peer selected")
+      if (!/'s chat$/.test(String(title.text))) return fail("title text wrong: " + title.text)
+      var titleCx = title.x + title.width / 2
+      var mid = title.parent.width / 2
+      if (Math.abs(titleCx - mid) > 1.5) return fail("title not centered: cx=" + titleCx + " mid=" + mid)
+      console.log(p + "-OK header title '" + title.text + "' centered (cx=" + Math.round(titleCx) + " mid=" + Math.round(mid) + ")")
+    } catch (e) { return fail("header title probe threw: " + e) }
 
     // send(): text path (selectedPeerId set by selectPeer; text via ComposeBox)
     try {

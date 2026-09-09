@@ -952,6 +952,34 @@ Panel {
                 font.italic: true
               }
 
+              // Centered conversation title: "<name>'s chat" for the open
+              // peer chat OR group room. Sits in the middle of the header
+              // line between the update button (left) and the Close /
+              // Clear-chat / Unfriend cluster (right); elides when the name
+              // is too long for the space between them.
+              Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, parent.width - Style.space(220))
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                visible: root.selectedPeerId !== "" || root.inRoom
+                text: {
+                  if (root.inRoom) {
+                    if (root.selectedRoom && root.selectedRoom.name) return root.selectedRoom.name + "'s chat"
+                    for (var i = 0; i < (Lanchat.rooms || []).length; i++)
+                      if (Lanchat.rooms[i].roomId === Lanchat.selectedRoomId)
+                        return (Lanchat.rooms[i].name || "room") + "'s chat"
+                    return "room's chat"
+                  }
+                  return (root.selectedPeer ? root.selectedPeer.name : root.selectedPeerId) + "'s chat"
+                }
+                color: Color.popups.text
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.weight: Font.DemiBold
+              }
+
               // Per-chat actions only show when they can actually act.
               // "Unfriend" needs a real (confirmed) friend relationship —
               // pointless over a stranger's or a still-pending request's
