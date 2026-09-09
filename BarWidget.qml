@@ -89,10 +89,19 @@ BarWidget {
   // Right-click menu: online/offline toggle + status presets.
   property bool menuOpen: false
 
+  // PopupCard's outside-click dismissal calls owner.close(); root.close() is
+  // the bar-host PANEL contract, so the menu needs its own owner whose
+  // close() only closes the menu — otherwise an outside click closed the
+  // chat panel and left the menu open.
+  QtObject {
+    id: menuOwner
+    function close() { root.menuOpen = false }
+  }
+
   PopupCard {
     id: statusMenu
     anchorItem: button
-    owner: root
+    owner: menuOwner
     bar: root.bar
     open: root.menuOpen
     contentWidth: statusMenu.fittedContentWidth(Style.space(200))
