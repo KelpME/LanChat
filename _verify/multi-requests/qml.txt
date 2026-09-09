@@ -1,0 +1,3 @@
+OK   shared/ChatThread.qml: structural tokens balanced
+OK   shared/RoomView.qml: structural tokens balanced
+OK   shared/SettingsPanel.qml: structural tokens balanced

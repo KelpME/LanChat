@@ -49,9 +49,11 @@ cp "$REPO"/scripts/qml_gate/bubblebench.qml "$BENCH"/
 cp "$REPO"/scripts/qml_gate/roomcolorbench.qml "$BENCH"/
 cp "$REPO"/scripts/qml_gate/friendbadgebench.qml "$BENCH"/
 cp "$REPO"/scripts/qml_gate/notifbench.qml "$BENCH"/
+cp "$REPO"/scripts/qml_gate/roominvitebench.qml "$BENCH"/
+cp "$REPO"/scripts/qml_gate/reconcilebench.qml "$BENCH"/
 cp "$REPO"/Panel.qml "$BENCH"/
 
-for sh in "$BENCH"/shell*.qml "$BENCH"/panelbench.qml "$BENCH"/sectionbench.qml "$BENCH"/bubblebench.qml "$BENCH"/friendbadgebench.qml "$BENCH"/notifbench.qml "$BENCH"/roomcolorbench.qml; do
+for sh in "$BENCH"/shell*.qml "$BENCH"/panelbench.qml "$BENCH"/sectionbench.qml "$BENCH"/bubblebench.qml "$BENCH"/friendbadgebench.qml "$BENCH"/notifbench.qml "$BENCH"/roominvitebench.qml "$BENCH"/reconcilebench.qml "$BENCH"/roomcolorbench.qml; do
   echo "=== $sh ==="
   WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}" \
     timeout 30 quickshell -p "$sh" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | \

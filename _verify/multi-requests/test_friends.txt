@@ -1,0 +1,18 @@
+OK  1. stranger plain message dropped
+OK  2. friend request from stranger held; only request surfaces
+OK  3. message to non-friend without request is dropped by B
+OK  4. A->B friend request over UDP; B got verified request
+OK  5. B accepts -> A friend-accepted over UDP; both confirmed
+OK  6. confirmed friend message delivered
+OK  7. offline peer drops inbound
+OK  8. back online
+OK  9. signed UDP friend request verified + surfaced (no TCP needed)
+OK  10. forged UDP friend request rejected (bad signature)
+OK  11. udpFriendRequest command resolves address + delivers (B got verified request)
+OK  12. two-way UDP handshake: B's accept travels back over UDP and A confirms the friend
+OK  13a. request sent: D received C's friend request
+OK  13b. cancel retracted on both sides; no friendship formed
+OK  14a. request sent: F received E's friend request
+OK  14b. recipient's deny travelled back over UDP; sender banner cleared, no friend
+
+ALL FRIEND TESTS PASSED

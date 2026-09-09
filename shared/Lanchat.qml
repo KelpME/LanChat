@@ -872,18 +872,28 @@ QtObject {
     lanchat.friendRequests = list
   }
 
-  // Drop any notification whose peer is no longer pending (accepted, rejected,
-  // or removed). Called whenever the friend list changes.
+  // Drop any notification whose peer is a CONFIRMED friend (accepted).
+  // Called whenever the friend list changes.
+  //
+  // The rule is inverted from "keep only if the friends list holds an
+  // unconfirmed record": requests arriving via the UDP bootstrap path
+  // (server.py _handle_udp_friend_request) only upsert_peer and NEVER get a
+  // friends entry, so the old rule let any friends event (a second incoming
+  // request, an accept, an unfriend elsewhere) wipe every UDP-path request.
+  // Keep by default; drop only on positive evidence the relationship is
+  // confirmed. Explicit removal paths already exist: the friend-rejected
+  // event filters by peerId directly, and accepting confirms the peer so
+  // this reconcile then drops the row.
   function reconcileFriendRequests() {
     var friends = lanchat.friends
     var kept = []
     for (var i = 0; i < lanchat.friendRequests.length; i++) {
       var r = lanchat.friendRequests[i]
-      var still = false
+      var confirmed = false
       for (var j = 0; j < friends.length; j++) {
-        if (friends[j].id === r.peerId) { still = !friends[j].confirmed; break }
+        if (friends[j].id === r.peerId && friends[j].confirmed === true) { confirmed = true; break }
       }
-      if (still) kept.push(r)
+      if (!confirmed) kept.push(r)
     }
     lanchat.friendRequests = kept
   }
