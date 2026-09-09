@@ -413,7 +413,26 @@ def member_leave(room: dict, peer_id: str) -> bool:
         if peer_id not in room.get("members", {}):
             return False
     if not _is_owner(room, peer_id):
-        if not server._write(room.get("owner", ""),
+        owner_pid = room.get("owner", "")
+        # Read trust BEFORE taking rooms_lock for the mutation (is_trusted
+        # reads STATE.config; keep it outside our lock scope). If the owner
+        # is not even a trusted peer there can never be a socket to them, so
+        # the roomLeave envelope is undeliverable and the member would stay
+        # frozen forever. Take the LOCAL-leave path instead: drop our cached
+        # copy with no wire traffic, like forget_room does for orphans.
+        # KNOWN LIMITATION: the owner's authoritative roster keeps the stale
+        # member — there is no channel to tell them we left.
+        if not server.is_trusted(owner_pid):
+            with rooms_lock():
+                if peer_id not in room.get("members", {}):
+                    return False
+                STATE.rooms_cache.pop(room["roomId"], None)
+                _persist_cache()
+            _emit_room_list()
+            server._diag("room-left-local", roomId=room["roomId"][:12],
+                         peer=peer_id[:12], reason="owner-unfriended")
+            return True
+        if not server._write(owner_pid,
                              {"t": "room", "kind": "roomLeave",
                               "roomId": room["roomId"], "from": server.host_id(),
                               "fromName": server.display_name()}):
