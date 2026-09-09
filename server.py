@@ -2826,7 +2826,28 @@ def handle_command(cmd: dict) -> None:
             if addr:
                 upsert_peer(pid, pname, addr, int(cmd.get("port") or (peer or {}).get("port") or DEFAULT_PORT))
             _emit({"event": "friend-added", "id": pid, "name": pname})
-            _diag("friend-added-by-fingerprint", peer=pid[:12], name=pname, addr=addr)
+            # Adding by fingerprint is one-sided local trust so far — the friend
+            # knows nothing. Push a real SIGNED friend request to them over UDP
+            # (same channel as the manual request): if they also added us by
+            # fingerprint, their inbound request hits our request_outgoing
+            # intent and the mutual auto-accept completes the handshake
+            # instantly on both sides; otherwise it surfaces their banner.
+            sent = False
+            if STATE.udp_sock is not None:
+                sent = _send_udp_friend_request(STATE.udp_sock, pid)
+            if sent:
+                with STATE.pending_lock:
+                    STATE.request_outgoing.add(pid)
+                _emit({"event": "friend-request", "outgoing": True, "to": pid,
+                       "toName": pname, "text": "wants to add you as a friend"})
+            else:
+                # No address known yet (friend offline / never seen) — the
+                # trust IS recorded locally; say so instead of leaving the
+                # user guessing why nothing happened.
+                _emit({"event": "error",
+                       "message": "Friend %s added — they'll get the request when their device appears on the network" % pname})
+            _diag("friend-added-by-fingerprint", peer=pid[:12], name=pname, addr=addr,
+                  notified=sent)
     elif kind == "rejectFriend":
         pid = str(cmd.get("id", ""))
         # Rejecting = declining the relationship. Notify the requester over

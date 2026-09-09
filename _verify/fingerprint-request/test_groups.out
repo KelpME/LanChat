@@ -1,0 +1,64 @@
+PASS room-created event 
+PASS roomId non-empty 
+PASS owner room-list carries the room 
+PASS invite reaches A 
+PASS roomState reaches A after join 
+PASS A in members 
+PASS member canInvite defaults false 
+PASS owner add sends an invite (not direct admission) 
+PASS roomState reaches B after B accepts 
+PASS C receives an invite (consent required) 
+PASS roomState reaches C after C accepts 
+PASS B received room text with room field 
+PASS owner also receives mesh text (owner is a room member) 
+PASS B sees room-file metadata (owner fan-out) 
+PASS metadata has sha256 
+PASS C (non-friend of A) sees the metadata too 
+PASS B saved the room file 
+PASS saved bytes exact 
+PASS A got roomFileStatus saved from B 
+PASS trust gate: C's save refused (not friends with sender) 
+PASS refusal left no .part 
+PASS after befriending, the same message saves 
+PASS canInvite grant broadcasts 
+PASS unpermitted member's add refused (local error on proposer) 
+PASS permitted member's add executed by owner (invite sent) 
+PASS color broadcast (token+hex) reaches members 
+PASS kill-switch broadcasts colorsEnabled=false 
+PASS kill-switch re-enable broadcasts 
+PASS forget: ghost room created 
+PASS forget: invite stub reaches member 
+PASS forget: orphaned room persists after roomLeave (leave dead) 
+PASS forget: roomForget drops the orphaned room 
+PASS forget: live-member room refuses forget (error) 
+PASS forget: live-member room still listed 
+PASS decline: room created 
+PASS decline: first invite reaches invitee 
+PASS decline: roomForget removes the invite stub from room-list 
+PASS decline: re-invite delivers a second room-invite for the same room 
+PASS decline: join after re-invite confirmed (member in room-state) 
+PASS unfriend-leave: room created 
+PASS unfriend-leave: invite reaches B 
+PASS unfriend-leave: B joined (member in room-state) 
+PASS unfriend-leave: B unfriended O (friend-removed seen) 
+PASS unfriend-leave: room gone from leaver's list after unfriend 
+PASS unfriend-leave: no 'frozen' error during the unfriend leave 
+PASS LeaveRoom: room created 
+PASS LeaveRoom: invite reaches A 
+PASS LeaveRoom: A joined (roomState seen) 
+PASS leaver's room-list drops the room 
+PASS owner receives room-state after member leave 
+PASS owner roster drops the leaver 
+PASS owner room-list memberCount drops to 1 
+PASS LeaveFrozen: room created 
+PASS LeaveFrozen: invite reaches A 
+PASS LeaveFrozen: A joined (roomState seen) 
+PASS offline owner: leave errors (frozen) 
+PASS offline owner: no half-left (room still listed) 
+PASS management against offline host errors (frozen) 
+PASS mesh room text works while host offline 
+PASS owner rooms persist across restart 
+PASS member cache persists across restart 
+PASS daemon responsive after room traffic 
+
+ALL GROUPS TESTS PASSED

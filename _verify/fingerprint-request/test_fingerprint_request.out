@@ -1,0 +1,18 @@
+OK   F1a B receives A's friend-request (inbound, from==fpA)
+OK   F1b A emitted outgoing friend-request feedback for B
+OK   F1c A recorded B as a confirmed friend locally
+OK   F2a C auto-accepted D (friend-accepted on C)
+OK   F2b D auto-accepted C (friend-accepted on D)
+OK   F2c C's friends list shows D confirmed
+OK   F2d D's friends list shows C confirmed
+OK   F3a one-way fingerprint-add surfaces the banner at F
+OK   F3b no friend-accepted on F (no ghost accept)
+OK   F3c F's friends list does NOT show E confirmed
+OK   F3d F's explicit accept confirmed F side
+OK   F3e E learned of the accept (friend-accepted on E)
+OK   F3f both lists confirmed after explicit accept
+OK   F4a A got an error event for the unseen friend
+OK   F4b no crash (daemon still alive)
+OK   F4c ghost friend still recorded locally as confirmed
+
+ALL FINGERPRINT-REQUEST TESTS PASSED (16 checks)
