@@ -354,13 +354,18 @@ Item {
           // Line 1: label + Accept/Reject (incoming) or Cancel
           // (outgoing — retract a request we sent). The requester's
           // name sits on its own line below so it reads clearly.
-          Row {
+          // Label and action buttons are anchored to opposite edges
+          // (no hardcoded reservation): the Row's natural width may
+          // exceed any constant, which clipped Reject on the right.
+          Item {
             width: parent.width
-            spacing: Style.spacing.sm
+            height: Math.max(rowLabel.implicitHeight, actionsRow.height)
 
             Text {
+              id: rowLabel
+              anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - Style.space(96)
+              width: parent.width - actionsRow.width - Style.spacing.sm
               text: modelData.outgoing
                 ? "Waiting for them to accept"
                 : "Friend request from"
@@ -369,25 +374,32 @@ Item {
               font.pixelSize: Style.font.caption
               elide: Text.ElideRight
             }
-            Item { width: Style.space(4) }
-            Button {
-              visible: !modelData.outgoing
-              text: "Accept"
-              fontSize: Style.font.caption
-              onClicked: friendAccepted(modelData.peerId)
-            }
-            Button {
-              visible: !modelData.outgoing
-              text: "Reject"
-              fontSize: Style.font.caption
-              onClicked: friendRejected(modelData.peerId)
-            }
-            Button {
-              visible: modelData.outgoing
-              text: "Cancel"
-              fontSize: Style.font.caption
-              tooltipText: "Withdraw this friend request"
-              onClicked: friendCancelled(modelData.peerId)
+            Row {
+              id: actionsRow
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.spacing.sm
+
+              Item { width: Style.space(4); height: 1 }
+              Button {
+                visible: !modelData.outgoing
+                text: "Accept"
+                fontSize: Style.font.caption
+                onClicked: friendAccepted(modelData.peerId)
+              }
+              Button {
+                visible: !modelData.outgoing
+                text: "Reject"
+                fontSize: Style.font.caption
+                onClicked: friendRejected(modelData.peerId)
+              }
+              Button {
+                visible: modelData.outgoing
+                text: "Cancel"
+                fontSize: Style.font.caption
+                tooltipText: "Withdraw this friend request"
+                onClicked: friendCancelled(modelData.peerId)
+              }
             }
           }
 
