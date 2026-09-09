@@ -31,6 +31,12 @@ cp "$REPO"/shared/ChatThread.qml "$REPO"/shared/RoomView.qml "$BENCH"/shared/ 2>
 cp "$REPO"/scripts/qml_gate/shared/Lanchat.qml "$BENCH"/shared/
 cp "$REPO"/shared/Lanchat.qml "$BENCH"/shared/Lanchat.real.qml 2>/dev/null || true
 cp "$REPO"/shared/SettingsPanel.qml "$BENCH"/shared/
+# Unread benches: shell8 (visual tint on rows) and shell9 (logic via the
+# REAL singleton file, de-singletoned: pragma Singleton stripped so it can
+# be instantiated; created with manageDaemon=false so nothing spawns).
+sed '/^pragma Singleton$/d' "$REPO"/shared/Lanchat.qml > "$BENCH/LanchatReal.qml"
+cp "$REPO"/scripts/qml_gate/shell8.qml "$BENCH"/
+cp "$REPO"/scripts/qml_gate/shell9.qml "$BENCH"/
 # Whole-panel bench: runs the REAL Panel.qml, copied next to the shell so
 # panelbench's Qt.createComponent("Panel.qml") resolves inside the bench dir.
 cp "$REPO"/scripts/qml_gate/panelbench.qml "$BENCH"/

@@ -186,9 +186,11 @@ Panel {
     Lanchat.selectedRoomId = ""
     editingMid = ""
     selectedPeerId = id
+    Lanchat.selectedPeerId = id
     Lanchat.setLastOpen("peer", id)
     Lanchat.resetHistoryMeta(id)
     Lanchat.refreshHistory(id, 0, 50)
+    Lanchat.clearPeerUnread(id)
     chatThreadView.positionViewAtEnd()
   }
 
@@ -257,7 +259,11 @@ Panel {
     root.confirmUnfriend = false
     if (selectedPeerId) {
       Lanchat.unfriend(selectedPeerId)
+      // Drop the unread tint too: a re-added friend must not arrive
+      // pre-tinted with counts from the old conversation.
+      Lanchat.clearPeerUnread(selectedPeerId)
       selectedPeerId = ""
+      Lanchat.selectedPeerId = ""
     }
   }
 
@@ -268,6 +274,7 @@ Panel {
     if (selectedPeerId) Lanchat.sendTypingStopped(selectedPeerId)
     editingMid = ""
     selectedPeerId = ""
+    Lanchat.selectedPeerId = ""
     Lanchat.selectedRoomId = ""
     Lanchat.setLastOpen("none", "")
   }
@@ -278,12 +285,17 @@ Panel {
     if (selectedPeerId) Lanchat.sendTypingStopped(selectedPeerId)
     editingMid = ""
     selectedPeerId = ""
+    Lanchat.selectedPeerId = ""
     Lanchat.selectRoom(roomId)
     Lanchat.setLastOpen("room", roomId)
+    Lanchat.clearRoomUnread(roomId)
   }
 
   function leaveSelectedRoom() {
-    if (Lanchat.selectedRoomId) Lanchat.roomLeave(Lanchat.selectedRoomId)
+    if (Lanchat.selectedRoomId) {
+      Lanchat.roomLeave(Lanchat.selectedRoomId)
+      Lanchat.clearRoomUnread(Lanchat.selectedRoomId)
+    }
     Lanchat.selectedRoomId = ""
   }
 
@@ -293,6 +305,7 @@ Panel {
   function forgetSelectedRoom() {
     if (Lanchat.selectedRoomId) {
       Lanchat.roomForget(Lanchat.selectedRoomId)
+      Lanchat.clearRoomUnread(Lanchat.selectedRoomId)
       Lanchat.selectedRoomId = ""
     }
   }
@@ -554,6 +567,14 @@ Panel {
           root.selectPeer(lo.id)
         else if (lo.type === "room" && lo.id)
           root.selectRoom(lo.id)
+      } else if (selectedPeerId !== "") {
+        // Reopen with the selection retained: the conversation is on screen
+        // again, so anything that arrived while closed is read NOW — without
+        // this, the entry survives and re-tints the row later when the user
+        // switches to another chat (messages they already saw).
+        Lanchat.clearPeerUnread(selectedPeerId)
+      } else {
+        Lanchat.clearRoomUnread(Lanchat.selectedRoomId)
       }
       Qt.callLater(function() { chatThreadView.positionViewAtEnd() })
     }

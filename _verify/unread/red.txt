@@ -1,0 +1,8 @@
+=== shell8 (RED) ===
+2 WARN scene: @shared/PeerList.qml[164:-1]: TypeError: Type error
+1 DEBUG qml: BENCH-UNREAD-OK-U1 peer-1 transparent
+1 DEBUG qml: BENCH-UNREAD-FAIL U2 unread row not accent tint: #00000000
+
+=== shell9 (RED) ===
+1 WARN scene: @shell9.qml[62:-1]: TypeError: Cannot read property 'peer-2' of undefined
+1 DEBUG qml: BENCH-LU-FAIL failsafe-timeout

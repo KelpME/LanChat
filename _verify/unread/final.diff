@@ -1,0 +1,269 @@
+diff --git a/Panel.qml b/Panel.qml
+index adcbeeb..ddee9f8 100644
+--- a/Panel.qml
++++ b/Panel.qml
+@@ -186,9 +186,11 @@ Panel {
+     Lanchat.selectedRoomId = ""
+     editingMid = ""
+     selectedPeerId = id
++    Lanchat.selectedPeerId = id
+     Lanchat.setLastOpen("peer", id)
+     Lanchat.resetHistoryMeta(id)
+     Lanchat.refreshHistory(id, 0, 50)
++    Lanchat.clearPeerUnread(id)
+     chatThreadView.positionViewAtEnd()
+   }
+ 
+@@ -257,7 +259,11 @@ Panel {
+     root.confirmUnfriend = false
+     if (selectedPeerId) {
+       Lanchat.unfriend(selectedPeerId)
++      // Drop the unread tint too: a re-added friend must not arrive
++      // pre-tinted with counts from the old conversation.
++      Lanchat.clearPeerUnread(selectedPeerId)
+       selectedPeerId = ""
++      Lanchat.selectedPeerId = ""
+     }
+   }
+ 
+@@ -268,6 +274,7 @@ Panel {
+     if (selectedPeerId) Lanchat.sendTypingStopped(selectedPeerId)
+     editingMid = ""
+     selectedPeerId = ""
++    Lanchat.selectedPeerId = ""
+     Lanchat.selectedRoomId = ""
+     Lanchat.setLastOpen("none", "")
+   }
+@@ -278,12 +285,17 @@ Panel {
+     if (selectedPeerId) Lanchat.sendTypingStopped(selectedPeerId)
+     editingMid = ""
+     selectedPeerId = ""
++    Lanchat.selectedPeerId = ""
+     Lanchat.selectRoom(roomId)
+     Lanchat.setLastOpen("room", roomId)
++    Lanchat.clearRoomUnread(roomId)
+   }
+ 
+   function leaveSelectedRoom() {
+-    if (Lanchat.selectedRoomId) Lanchat.roomLeave(Lanchat.selectedRoomId)
++    if (Lanchat.selectedRoomId) {
++      Lanchat.roomLeave(Lanchat.selectedRoomId)
++      Lanchat.clearRoomUnread(Lanchat.selectedRoomId)
++    }
+     Lanchat.selectedRoomId = ""
+   }
+ 
+@@ -293,6 +305,7 @@ Panel {
+   function forgetSelectedRoom() {
+     if (Lanchat.selectedRoomId) {
+       Lanchat.roomForget(Lanchat.selectedRoomId)
++      Lanchat.clearRoomUnread(Lanchat.selectedRoomId)
+       Lanchat.selectedRoomId = ""
+     }
+   }
+@@ -554,6 +567,14 @@ Panel {
+           root.selectPeer(lo.id)
+         else if (lo.type === "room" && lo.id)
+           root.selectRoom(lo.id)
++      } else if (selectedPeerId !== "") {
++        // Reopen with the selection retained: the conversation is on screen
++        // again, so anything that arrived while closed is read NOW — without
++        // this, the entry survives and re-tints the row later when the user
++        // switches to another chat (messages they already saw).
++        Lanchat.clearPeerUnread(selectedPeerId)
++      } else {
++        Lanchat.clearRoomUnread(Lanchat.selectedRoomId)
+       }
+       Qt.callLater(function() { chatThreadView.positionViewAtEnd() })
+     }
+diff --git a/scripts/qml_gate/run.sh b/scripts/qml_gate/run.sh
+index 1ba5317..fa57635 100755
+--- a/scripts/qml_gate/run.sh
++++ b/scripts/qml_gate/run.sh
+@@ -31,6 +31,12 @@ cp "$REPO"/shared/ChatThread.qml "$REPO"/shared/RoomView.qml "$BENCH"/shared/ 2>
+ cp "$REPO"/scripts/qml_gate/shared/Lanchat.qml "$BENCH"/shared/
+ cp "$REPO"/shared/Lanchat.qml "$BENCH"/shared/Lanchat.real.qml 2>/dev/null || true
+ cp "$REPO"/shared/SettingsPanel.qml "$BENCH"/shared/
++# Unread benches: shell8 (visual tint on rows) and shell9 (logic via the
++# REAL singleton file, de-singletoned: pragma Singleton stripped so it can
++# be instantiated; created with manageDaemon=false so nothing spawns).
++sed '/^pragma Singleton$/d' "$REPO"/shared/Lanchat.qml > "$BENCH/LanchatReal.qml"
++cp "$REPO"/scripts/qml_gate/shell8.qml "$BENCH"/
++cp "$REPO"/scripts/qml_gate/shell9.qml "$BENCH"/
+ # Whole-panel bench: runs the REAL Panel.qml, copied next to the shell so
+ # panelbench's Qt.createComponent("Panel.qml") resolves inside the bench dir.
+ cp "$REPO"/scripts/qml_gate/panelbench.qml "$BENCH"/
+diff --git a/scripts/qml_gate/shared/Lanchat.qml b/scripts/qml_gate/shared/Lanchat.qml
+index 0cb916b..4aaa78c 100644
+--- a/scripts/qml_gate/shared/Lanchat.qml
++++ b/scripts/qml_gate/shared/Lanchat.qml
+@@ -77,6 +77,27 @@ QtObject {
+   function shellQuote(s) { return "'" + s + "'" }
+   function roomSetCanInvite(roomId, peerId, can) { console.log("stub roomSetCanInvite", roomId, peerId, can) }
+   property bool roomHostOnline: true
++  // ---- unread indicators (mirror of the real singleton's state; benches
++  // shell8 assert the row tint bindings against these) ----
++  property string selectedPeerId: ""
++  property var unreadByPeer: ({})
++  property var unreadByRoom: ({})
++  // Mirrors the real singleton's unread helpers: Panel.selectPeer/selectRoom
++  // call these on every bench path that selects a conversation. Copy-reassign
++  // (NOT in-place delete) so the property change notification fires and
++  // dependent row-tint bindings re-evaluate — same as the real implementation.
++  function clearPeerUnread(peerId) {
++    if (!(peerId in unreadByPeer)) return
++    var p = {}
++    for (var k in unreadByPeer) if (k !== peerId) p[k] = unreadByPeer[k]
++    unreadByPeer = p
++  }
++  function clearRoomUnread(roomId) {
++    if (!(roomId in unreadByRoom)) return
++    var r = {}
++    for (var j in unreadByRoom) if (j !== roomId) r[j] = unreadByRoom[j]
++    unreadByRoom = r
++  }
+   property var roomInvites: []
+   // ---- settings-panel surface (step 7 bench; mirrors real singleton) ----
+   property bool firewall: false
+diff --git a/shared/Lanchat.qml b/shared/Lanchat.qml
+index 294a901..ebe3eb8 100644
+--- a/shared/Lanchat.qml
++++ b/shared/Lanchat.qml
+@@ -83,6 +83,21 @@ QtObject {
+   property var displayPeers: []   // peers merged with offline confirmed/pending friends
+   property var messages: []       // [{from,fromName,text,ts,outgoing}]
+   property int unreadCount: 0
++  // Per-conversation unread counts (session-local): key -> number of incoming
++  // messages never shown on screen. The peer/room list rows tint their
++  // background from these maps; entries are cleared the moment that
++  // conversation is opened (clearPeerUnread / clearRoomUnread).
++  property var unreadByPeer: ({})
++  property var unreadByRoom: ({})
++  // Mirror of the host panel's selectedPeerId: Panel.qml owns the real
++  // property and assigns through here at every selection change, so
++  // markIncomingUnread can tell whether the conversation a message belongs
++  // to is actually on screen.
++  property string selectedPeerId: ""
++  // Bench/de-singleton switch: when false, Component.onCompleted spawns no
++  // systemd-ensure or daemon processes (the QML gate instantiates this file
++  // directly and feeds it daemon JSON by hand).
++  property bool manageDaemon: true
+   property int onlineCount: 0
+   property var diagnostics: []    // [{ts, message, ...}] diagnostic log lines
+ 
+@@ -527,6 +542,46 @@ QtObject {
+     unreadCount = 0
+   }
+ 
++  // ---- per-conversation unread maps --------------------------------------
++
++  // Record an incoming message as unread unless its conversation is already
++  // on screen. "On screen" = panel open AND that peer/room selected. The
++  // caller passes the ALREADY-UPSERTED message so room routing (m.room) and
++  // the 1:1 store share one decision point.
++  function markIncomingUnread(m) {
++    if (m.outgoing) return
++    if (m.room) {
++      if (panelOpen && m.room === selectedRoomId) return
++      var r = {}
++      for (var rk in unreadByRoom) r[rk] = unreadByRoom[rk]
++      r[m.room] = (r[m.room] || 0) + 1
++      unreadByRoom = r
++      return
++    }
++    if (panelOpen && m.from && m.from === selectedPeerId) return
++    if (!m.from) return
++    var p = {}
++    for (var pk in unreadByPeer) p[pk] = unreadByPeer[pk]
++    p[m.from] = (p[m.from] || 0) + 1
++    unreadByPeer = p
++  }
++
++  // Clear one peer's unread tint (Panel.selectPeer calls this).
++  function clearPeerUnread(peerId) {
++    if (!(peerId in unreadByPeer)) return
++    var p = {}
++    for (var k in unreadByPeer) if (k !== peerId) p[k] = unreadByPeer[k]
++    unreadByPeer = p
++  }
++
++  // Clear one room's unread tint (Panel.selectRoom calls this).
++  function clearRoomUnread(roomId) {
++    if (!(roomId in unreadByRoom)) return
++    var r = {}
++    for (var j in unreadByRoom) if (j !== roomId) r[j] = unreadByRoom[j]
++    unreadByRoom = r
++  }
++
+   function clearChat(peer) {
+     daemon.write(JSON.stringify({ cmd: "clearChat", peer: peer }) + "\n")
+   }
+@@ -1091,8 +1146,17 @@ QtObject {
+         lanchat.unreadCount++
+         lanchat.playMessageSound()
+       }
+-      // If the panel is open for this peer, send a read receipt back.
+-      if (lanchat.panelOpen && !msgOut && obj.message.from) {
++      // Per-conversation unread tint: marks when the conversation is not on
++      // screen (panel open but another chat selected still counts — the
++      // list row must show something came in elsewhere).
++      if (!msgOut) lanchat.markIncomingUnread(obj.message)
++      // If the panel is open AND this conversation is on screen, send a read
++      // receipt back. Gated on the same on-screen test as the unread tint:
++      // a sender must not be told "read" while the row still shows unread.
++      if (lanchat.panelOpen && !msgOut && obj.message.from
++          && (obj.message.room
++              ? obj.message.room === lanchat.selectedRoomId
++              : obj.message.from === lanchat.selectedPeerId)) {
+         lanchat.sendReadReceipt(obj.message.from, obj.message.mid)
+       }
+       break
+@@ -1372,6 +1436,7 @@ QtObject {
+   }
+ 
+   Component.onCompleted: {
++    if (!lanchat.manageDaemon) return
+     lanchat.startDaemon()
+     // Silently check for updates at startup so the update button already
+     // reflects "update available" without a click. Uses only the small
+diff --git a/shared/PeerList.qml b/shared/PeerList.qml
+index 243075d..97fd641 100644
+--- a/shared/PeerList.qml
++++ b/shared/PeerList.qml
+@@ -103,7 +103,9 @@ Item {
+       height: peerRowH
+       radius: Style.cornerRadius
+       color: modelData.id === selectedPeerId
+-        ? Style.selectedFill : "transparent"
++        ? Style.selectedFill
++        : (modelData.id in Lanchat.unreadByPeer) ? Style.selectedAccentFill
++        : "transparent"
+ 
+       MouseArea {
+         anchors.fill: parent
+diff --git a/shared/RoomListSection.qml b/shared/RoomListSection.qml
+index 91495d2..7c32fab 100644
+--- a/shared/RoomListSection.qml
++++ b/shared/RoomListSection.qml
+@@ -214,13 +214,19 @@ Column {
+         width: roomsListCol.width
+         spacing: 0
+ 
+-        // Group header row: # name, member count, leave ✕.
++        // Group header row: # name, member count, leave ✕. objectName lets
++        // the QML bench find the row; the background tints while the room
++        // has unread messages (selection still wins over the tint).
+         Rectangle {
++          id: roomGroupHeader
++          objectName: "roomGroupHeader"
+           width: roomGroup.width
+           height: roomsSection.peerRowH
+           radius: Style.cornerRadius
+           color: modelData.roomId === Lanchat.selectedRoomId
+-            ? Style.selectedFill : "transparent"
++            ? Style.selectedFill
++            : (modelData.roomId in Lanchat.unreadByRoom) ? Style.selectedAccentFill
++            : "transparent"
+ 
+           MouseArea {
+             anchors.fill: parent

@@ -214,13 +214,19 @@ Column {
         width: roomsListCol.width
         spacing: 0
 
-        // Group header row: # name, member count, leave ✕.
+        // Group header row: # name, member count, leave ✕. objectName lets
+        // the QML bench find the row; the background tints while the room
+        // has unread messages (selection still wins over the tint).
         Rectangle {
+          id: roomGroupHeader
+          objectName: "roomGroupHeader"
           width: roomGroup.width
           height: roomsSection.peerRowH
           radius: Style.cornerRadius
           color: modelData.roomId === Lanchat.selectedRoomId
-            ? Style.selectedFill : "transparent"
+            ? Style.selectedFill
+            : (modelData.roomId in Lanchat.unreadByRoom) ? Style.selectedAccentFill
+            : "transparent"
 
           MouseArea {
             anchors.fill: parent

@@ -103,7 +103,9 @@ Item {
       height: peerRowH
       radius: Style.cornerRadius
       color: modelData.id === selectedPeerId
-        ? Style.selectedFill : "transparent"
+        ? Style.selectedFill
+        : (modelData.id in Lanchat.unreadByPeer) ? Style.selectedAccentFill
+        : "transparent"
 
       MouseArea {
         anchors.fill: parent

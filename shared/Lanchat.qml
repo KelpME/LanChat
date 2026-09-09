@@ -83,6 +83,21 @@ QtObject {
   property var displayPeers: []   // peers merged with offline confirmed/pending friends
   property var messages: []       // [{from,fromName,text,ts,outgoing}]
   property int unreadCount: 0
+  // Per-conversation unread counts (session-local): key -> number of incoming
+  // messages never shown on screen. The peer/room list rows tint their
+  // background from these maps; entries are cleared the moment that
+  // conversation is opened (clearPeerUnread / clearRoomUnread).
+  property var unreadByPeer: ({})
+  property var unreadByRoom: ({})
+  // Mirror of the host panel's selectedPeerId: Panel.qml owns the real
+  // property and assigns through here at every selection change, so
+  // markIncomingUnread can tell whether the conversation a message belongs
+  // to is actually on screen.
+  property string selectedPeerId: ""
+  // Bench/de-singleton switch: when false, Component.onCompleted spawns no
+  // systemd-ensure or daemon processes (the QML gate instantiates this file
+  // directly and feeds it daemon JSON by hand).
+  property bool manageDaemon: true
   property int onlineCount: 0
   property var diagnostics: []    // [{ts, message, ...}] diagnostic log lines
 
@@ -525,6 +540,46 @@ QtObject {
 
   function clearUnread() {
     unreadCount = 0
+  }
+
+  // ---- per-conversation unread maps --------------------------------------
+
+  // Record an incoming message as unread unless its conversation is already
+  // on screen. "On screen" = panel open AND that peer/room selected. The
+  // caller passes the ALREADY-UPSERTED message so room routing (m.room) and
+  // the 1:1 store share one decision point.
+  function markIncomingUnread(m) {
+    if (m.outgoing) return
+    if (m.room) {
+      if (panelOpen && m.room === selectedRoomId) return
+      var r = {}
+      for (var rk in unreadByRoom) r[rk] = unreadByRoom[rk]
+      r[m.room] = (r[m.room] || 0) + 1
+      unreadByRoom = r
+      return
+    }
+    if (panelOpen && m.from && m.from === selectedPeerId) return
+    if (!m.from) return
+    var p = {}
+    for (var pk in unreadByPeer) p[pk] = unreadByPeer[pk]
+    p[m.from] = (p[m.from] || 0) + 1
+    unreadByPeer = p
+  }
+
+  // Clear one peer's unread tint (Panel.selectPeer calls this).
+  function clearPeerUnread(peerId) {
+    if (!(peerId in unreadByPeer)) return
+    var p = {}
+    for (var k in unreadByPeer) if (k !== peerId) p[k] = unreadByPeer[k]
+    unreadByPeer = p
+  }
+
+  // Clear one room's unread tint (Panel.selectRoom calls this).
+  function clearRoomUnread(roomId) {
+    if (!(roomId in unreadByRoom)) return
+    var r = {}
+    for (var j in unreadByRoom) if (j !== roomId) r[j] = unreadByRoom[j]
+    unreadByRoom = r
   }
 
   function clearChat(peer) {
@@ -1091,8 +1146,17 @@ QtObject {
         lanchat.unreadCount++
         lanchat.playMessageSound()
       }
-      // If the panel is open for this peer, send a read receipt back.
-      if (lanchat.panelOpen && !msgOut && obj.message.from) {
+      // Per-conversation unread tint: marks when the conversation is not on
+      // screen (panel open but another chat selected still counts — the
+      // list row must show something came in elsewhere).
+      if (!msgOut) lanchat.markIncomingUnread(obj.message)
+      // If the panel is open AND this conversation is on screen, send a read
+      // receipt back. Gated on the same on-screen test as the unread tint:
+      // a sender must not be told "read" while the row still shows unread.
+      if (lanchat.panelOpen && !msgOut && obj.message.from
+          && (obj.message.room
+              ? obj.message.room === lanchat.selectedRoomId
+              : obj.message.from === lanchat.selectedPeerId)) {
         lanchat.sendReadReceipt(obj.message.from, obj.message.mid)
       }
       break
@@ -1372,6 +1436,7 @@ QtObject {
   }
 
   Component.onCompleted: {
+    if (!lanchat.manageDaemon) return
     lanchat.startDaemon()
     // Silently check for updates at startup so the update button already
     // reflects "update available" without a click. Uses only the small

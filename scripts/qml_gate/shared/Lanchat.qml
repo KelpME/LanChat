@@ -77,6 +77,27 @@ QtObject {
   function shellQuote(s) { return "'" + s + "'" }
   function roomSetCanInvite(roomId, peerId, can) { console.log("stub roomSetCanInvite", roomId, peerId, can) }
   property bool roomHostOnline: true
+  // ---- unread indicators (mirror of the real singleton's state; benches
+  // shell8 assert the row tint bindings against these) ----
+  property string selectedPeerId: ""
+  property var unreadByPeer: ({})
+  property var unreadByRoom: ({})
+  // Mirrors the real singleton's unread helpers: Panel.selectPeer/selectRoom
+  // call these on every bench path that selects a conversation. Copy-reassign
+  // (NOT in-place delete) so the property change notification fires and
+  // dependent row-tint bindings re-evaluate — same as the real implementation.
+  function clearPeerUnread(peerId) {
+    if (!(peerId in unreadByPeer)) return
+    var p = {}
+    for (var k in unreadByPeer) if (k !== peerId) p[k] = unreadByPeer[k]
+    unreadByPeer = p
+  }
+  function clearRoomUnread(roomId) {
+    if (!(roomId in unreadByRoom)) return
+    var r = {}
+    for (var j in unreadByRoom) if (j !== roomId) r[j] = unreadByRoom[j]
+    unreadByRoom = r
+  }
   property var roomInvites: []
   // ---- settings-panel surface (step 7 bench; mirrors real singleton) ----
   property bool firewall: false
