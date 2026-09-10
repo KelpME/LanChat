@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Optional HTTP API for KelpME.lanchat — extracted verbatim from server.py (Commit 2).
+"""Optional HTTP API for kelpme.lanchat — extracted verbatim from server.py (Commit 2).
 
 A small stdlib HTTP server for sending messages / reading state from other
 tools (curl, scripts, an agent). Disabled by default; toggled on/off from the

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TLS identity for KelpME.lanchat — extracted verbatim from server.py (Commit 2).
+"""TLS identity for kelpme.lanchat — extracted verbatim from server.py (Commit 2).
 
 Each install generates a persistent self-signed certificate. The SHA-256
 fingerprint of that cert is the device's true, stable identity — independent

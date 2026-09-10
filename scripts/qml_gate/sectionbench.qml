@@ -46,8 +46,8 @@ Item {
       return
     }
     panel = panelComp.createObject(benchRoot, {
-      "moduleName": "KelpME.lanchat",
-      "ipcTarget": "KelpME.lanchat",
+      "moduleName": "kelpme.lanchat",
+      "ipcTarget": "kelpme.lanchat",
       "manageIpc": false,
       "anchorItem": null,
       "hostWidget": null

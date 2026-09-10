@@ -11,7 +11,7 @@ import "shared"
 // right-click menu to toggle online/offline or set your status.
 BarWidget {
   id: root
-  moduleName: "KelpME.lanchat"
+  moduleName: "kelpme.lanchat"
 
   // ---- panel routing contract for the bar host --------------------------
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
@@ -155,7 +155,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "KelpME.lanchat"
+    target: "kelpme.lanchat"
     function open(): void { root.open() }
     function close(): void { root.close() }
     function show(): void { root.open() }

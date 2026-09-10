@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-KelpME.lanchat — LAN messaging daemon for Omarchy Quattro.
+kelpme.lanchat — LAN messaging daemon for Omarchy Quattro.
 
 A single long-lived Python process that handles the actual networking a
 Quickshell plugin cannot: a TCP server (incoming messages), UDP broadcast

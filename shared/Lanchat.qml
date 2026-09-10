@@ -5,7 +5,7 @@ import Quickshell.Io
 
 pragma Singleton
 
-// Shared state for the whole KelpME.lanchat plugin. A true QML singleton, so
+// Shared state for the whole kelpme.lanchat plugin. A true QML singleton, so
 // no matter how many bar surfaces or entry points exist, exactly one daemon
 // Process is spawned and every UI reads the same peers/messages state.
 //

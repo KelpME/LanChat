@@ -1,4 +1,4 @@
-# KelpME.lanchat — developer targets.
+# kelpme.lanchat — developer targets.
 # Pure-Python plugin: no build step. These wrap the tests, lint, and QML checks.
 #
 # Usage:
@@ -104,8 +104,8 @@ systemd-uninstall: ## FULL uninstall: stop the daemon, remove the systemd units 
 	@systemctl --user daemon-reload
 	@echo "Lanchat systemd unit removed."
 	@echo "Killing any surviving lanchat daemon/bridge processes (so a reinstall starts clean, no stale cert)..."
-	@-pkill -f "KelpME.lanchat/server.py" 2>/dev/null || true
-	@-pkill -f "KelpME.lanchat/lanchat-bridge.py" 2>/dev/null || true
+	@-pkill -f "kelpme.lanchat/server.py" 2>/dev/null || true
+	@-pkill -f "kelpme.lanchat/lanchat-bridge.py" 2>/dev/null || true
 	@-sleep 1
 	@echo "Closing lanchat's firewall port (best-effort)..."
 	@-scripts/lanchat-firewall.sh close 2>/dev/null || true
@@ -113,7 +113,7 @@ systemd-uninstall: ## FULL uninstall: stop the daemon, remove the systemd units 
 	@-rm -rf $${XDG_CONFIG_HOME:-$$HOME/.config}/omarchy/lanchat.json 2>/dev/null; echo "  removed config (lanchat.json)"
 	@-rm -rf $${XDG_CONFIG_HOME:-$$HOME/.config}/omarchy/lanchat-certs 2>/dev/null; echo "  removed TLS certs (lanchat-certs/)"
 	@-rm -rf $${XDG_STATE_HOME:-$$HOME/.local/state}/lanchat 2>/dev/null; echo "  removed history + logs (state/lanchat/)"
-	@echo "Now remove the plugin itself: omarchy plugin remove KelpME.lanchat --yes"
+	@echo "Now remove the plugin itself: omarchy plugin remove kelpme.lanchat --yes"
 
 ## lint: ruff check on all Python
 lint: ## run `ruff check` (fast, no fix)

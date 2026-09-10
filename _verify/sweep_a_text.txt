@@ -1,0 +1,12 @@
+=== tracked files (working tree, all extensions) ===
+./shared/MessageBubble.qml:164:          // Outgoing order: edit ✎ first (rightmost edge on sent bubbles),
+./scripts/qml_gate/shell.qml:33:  ListModel { id: msgModel }
+./plans/GROUPS.md:19:6. **No hardcoded absolute paths.** Resolve the repo / install / assets / config via `git rev-parse --show-toplevel`, `os.path.dirname(os.path.abspath(__file__))`, `iface`/config — not literal strings like `/home/tmo/...`.
+./README.md:182:  "downloadDir": "/home/you/Downloads",
+./Panel.qml:545:  // and its immediate parent visible (e.g. /home/tmo/Downloads stays, a deeper
+./Panel.qml:994:              // Rightmost is a Close button (deselect the peer so no chat
+./server.py:211:#   /home/tmo/Downloads) instead of only the folder name; middle-elide when long.
+=== case-sensitive 'tmo' as word ===
+./plans/GROUPS.md:19:6. **No hardcoded absolute paths.** Resolve the repo / install / assets / config via `git rev-parse --show-toplevel`, `os.path.dirname(os.path.abspath(__file__))`, `iface`/config — not literal strings like `/home/tmo/...`.
+./Panel.qml:545:  // and its immediate parent visible (e.g. /home/tmo/Downloads stays, a deeper
+./server.py:211:#   /home/tmo/Downloads) instead of only the folder name; middle-elide when long.

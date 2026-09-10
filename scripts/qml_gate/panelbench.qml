@@ -54,8 +54,8 @@ Item {
     // anchorItem/bar stay null: KeyboardPanel falls back to margin
     // positioning, Panel screenW/H fall back to 1440/900.
     panel = panelComp.createObject(benchRoot, {
-      "moduleName": "KelpME.lanchat",
-      "ipcTarget": "KelpME.lanchat",
+      "moduleName": "kelpme.lanchat",
+      "ipcTarget": "kelpme.lanchat",
       "manageIpc": false,
       "anchorItem": null,
       "hostWidget": null,

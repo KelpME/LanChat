@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Group chat rooms for KelpME.lanchat.
+"""Group chat rooms for kelpme.lanchat.
 
 Host-authoritative room state (membership, per-member canInvite permission,
 member colors, colorsEnabled kill-switch) persisted on the OWNER's daemon,

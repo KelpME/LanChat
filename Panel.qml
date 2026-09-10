@@ -12,8 +12,8 @@ import "shared"
 // column's footer holds the HTTP API toggle (enable/disable from the UI).
 Panel {
   id: root
-  moduleName: "KelpME.lanchat"
-  ipcTarget: "KelpME.lanchat"
+  moduleName: "kelpme.lanchat"
+  ipcTarget: "kelpme.lanchat"
   manageIpc: false
 
   property var anchorItem: null

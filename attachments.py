@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Attachments for KelpME.lanchat — extracted verbatim from server.py (Commit 2).
+"""Attachments for kelpme.lanchat — extracted verbatim from server.py (Commit 2).
 
 Attachment registration (metadata + TTL) and peer-to-peer file transfer: files
 are carried over the SAME persistent TLS socket as messages (the peer is

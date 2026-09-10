@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Message history for KelpME.lanchat — extracted verbatim from server.py (Commit 2).
+"""Message history for kelpme.lanchat — extracted verbatim from server.py (Commit 2).
 
 Per-machine persistence of chat messages. At-rest encryption (1.2.3): history
 is encrypted with AES-256-GCM so the file on disk isn't human-readable. The

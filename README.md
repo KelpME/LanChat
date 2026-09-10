@@ -86,9 +86,9 @@ omarchy plugin add https://github.com/KelpME/LanChat.git --enable --yes
 Or by hand:
 
 ```bash
-cp -r KelpME.lanchat ~/.config/omarchy/plugins/KelpME.lanchat
+cp -r kelpme.lanchat ~/.config/omarchy/plugins/kelpme.lanchat
 omarchy-shell shell rescanPlugins
-omarchy plugin enable KelpME.lanchat
+omarchy plugin enable kelpme.lanchat
 ```
 
 To update, click the **refresh button** in the chat thread header (it turns the
@@ -149,10 +149,10 @@ would leave the daemon running under systemd:
 
 ```bash
 # 1. Stop the daemon, remove the systemd unit, and wipe config/certs/history
-cd ~/.config/omarchy/plugins/KelpME.lanchat && make systemd-uninstall
+cd ~/.config/omarchy/plugins/kelpme.lanchat && make systemd-uninstall
 
 # 2. Remove the plugin itself
-omarchy plugin remove KelpME.lanchat --yes
+omarchy plugin remove kelpme.lanchat --yes
 ```
 
 `make systemd-uninstall` removes:
@@ -407,7 +407,7 @@ Validate your copy before installing:
 omarchy plugin validate .
 ```
 
-Saving any file under `~/.config/omarchy/plugins/KelpME.lanchat/` reloads the
+Saving any file under `~/.config/omarchy/plugins/kelpme.lanchat/` reloads the
 plugin code automatically; the daemon is supervised by systemd (it restarts
 itself on crash). Run the offline end-to-end suites (two isolated instances):
 

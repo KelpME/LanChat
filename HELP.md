@@ -237,12 +237,12 @@ If a machine isn't showing up in your peer list:
    mode)** — it's off by default. Peers appear within ~3 seconds of it being on.
 5. **Both on the same version?** Each machine updates itself from the
    **refresh button** in the chat thread header (when it shows an update
-   available), or with `omarchy plugin update KelpME.lanchat --yes`, then
+   available), or with `omarchy plugin update kelpme.lanchat --yes`, then
    restart the shell.
 
 To **fully uninstall** (remove the daemon, systemd unit, and all lanchat data):
-`cd ~/.config/omarchy/plugins/KelpME.lanchat && make systemd-uninstall`, then
-`omarchy plugin remove KelpME.lanchat --yes`.
+`cd ~/.config/omarchy/plugins/kelpme.lanchat && make systemd-uninstall`, then
+`omarchy plugin remove kelpme.lanchat --yes`.
 
 History stays per-machine and is never synced to a server.
 
