@@ -279,12 +279,12 @@ systemctl --user restart lanchat    # restart it
    mode)</strong> — it's off by default. Peers appear within ~3 seconds of it being on.</li>
 <li><strong>Both on the same version?</strong> Each machine updates itself from the
    <strong>refresh button</strong> in the chat thread header (when it shows an update
-   available), or with <code>omarchy plugin update KelpME.lanchat --yes</code>, then
+   available), or with <code>omarchy plugin update kelpme.lanchat --yes</code>, then
    restart the shell.</li>
 </ol>
 <p>To <strong>fully uninstall</strong> (remove the daemon, systemd unit, and all lanchat data):
-<code>cd ~/.config/omarchy/plugins/KelpME.lanchat &amp;&amp; make systemd-uninstall</code>, then
-<code>omarchy plugin remove KelpME.lanchat --yes</code>.</p>
+<code>cd ~/.config/omarchy/plugins/kelpme.lanchat &amp;&amp; make systemd-uninstall</code>, then
+<code>omarchy plugin remove kelpme.lanchat --yes</code>.</p>
 <p>History stays per-machine and is never synced to a server.</p>
 <h2>For contributors: Panel.qml layout</h2>
 <p><code>Panel.qml</code> is decomposed into components under <code>shared/</code> (see

@@ -14,8 +14,8 @@ Description=Watch lanchat daemon files and restart it on change
 # systemd.path); PathModified on server.py catches content edits to it.
 # The target is lanchat-restart.service (a oneshot), because a path unit only
 # STARTS its target — it can't restart an already-running daemon.
-PathModified=%h/.config/omarchy/plugins/KelpME.lanchat/server.py
-PathChanged=%h/.config/omarchy/plugins/KelpME.lanchat/scripts
+PathModified=%h/.config/omarchy/plugins/kelpme.lanchat/server.py
+PathChanged=%h/.config/omarchy/plugins/kelpme.lanchat/scripts
 Unit=lanchat-restart.service
 
 [Install]

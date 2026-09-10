@@ -14,7 +14,7 @@ ConditionEnvironment=WAYLAND_DISPLAY
 Type=simple
 # %h = the user's home dir (portable across machines). server.py --socket
 # serves the unix-socket control channel that the QML bridge connects to.
-ExecStart=/usr/bin/python3 %h/.config/omarchy/plugins/KelpME.lanchat/server.py --socket
+ExecStart=/usr/bin/python3 %h/.config/omarchy/plugins/kelpme.lanchat/server.py --socket
 # systemd supervises the daemon: always restart on crash/exit so lanchat is
 # never silently dead (the whole reason for this unit).
 Restart=always
