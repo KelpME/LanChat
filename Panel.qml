@@ -542,7 +542,7 @@ Panel {
   }
 
   // Shorten a filesystem path for display: always keep at least the folder
-  // and its immediate parent visible (e.g. $HOME/Downloads stays, a deeper
+  // and its immediate parent visible (e.g. /home/you/Downloads stays, a deeper
   // /data/a/b/c/downloads becomes …/b/c/downloads). The leading part is
   // collapsed so the tail — the part you actually care about — stays readable.
   function shortPath(path) {

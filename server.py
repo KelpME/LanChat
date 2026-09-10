@@ -208,7 +208,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # 1.5.11 — right-justify the My ID fingerprint value (aligns against the copy
 #   button, matching the other right-aligned controls).
 # 1.5.12 — "Save to" row now shows the full path (with parent folders, e.g.
-#   $HOME/Downloads) instead of only the folder name; middle-elide when long.
+#   /home/you/Downloads) instead of only the folder name; middle-elide when long.
 # 1.5.13 — "Save to" path keeps the folder + one parent visible and truncates
 #   the leading part (…/parent/folder) so the tail stays readable.
 # 1.5.14 — bar widget: add a pending-friend-request badge (lower-right,
