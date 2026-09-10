@@ -67,7 +67,10 @@ no IP addresses, no accounts, no cloud, no shared keys to copy.
 ## Requirements
 
 - **Omarchy Quattro** (the shell plugin system, `schemaVersion: 1`)
-- **Python 3** with `openssl` (the daemon is stdlib-only; Arch/Omarchy ship both)
+- **Python 3** with `openssl` (Arch/Omarchy ship both)
+- **`cryptography`** (optional but recommended: used for robust cert parsing
+  and as the fallback certificate generator when `openssl` is unavailable.
+  The first-run installer offers to install it via pacman/pip if missing)
 - Every machine must be on the same LAN/subnet (UDP broadcast + TCP)
 
 ## Install
