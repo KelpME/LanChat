@@ -823,7 +823,7 @@ QtObject {
   function playMessageSound() {
     if (!soundEnabled) return
     if (lanchat.status === "dnd") return
-    var url = Qt.resolvedUrl("../sounds/message.ogg").toString()
+    var url = Qt.resolvedUrl("../sounds/message.wav").toString()
     if (url.indexOf("file://") === 0) url = url.slice(7)
     Quickshell.execDetached(["paplay", decodeURIComponent(url)])
   }
