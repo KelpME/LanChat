@@ -66,6 +66,7 @@ from attachments import (  # noqa: F401
     _safe_filename,
     _serve_attachment,
     get_attachment,
+    refusal_error,
     register_attachment,
 )
 
@@ -2656,8 +2657,15 @@ def handle_command(cmd: dict) -> None:
         sha256 = str(cmd.get("sha256", ""))
         save_to = os.path.join(STATE.config.get("downloadDir", os.path.expanduser("~/Downloads")), name)
         if not _dl_begin(file_id, peer_id, save_to, sha256, mid, str(cmd.get("room", ""))):
+            # Distinguish "busy" (per-peer or global cap reached) from a local
+            # I/O failure: busy is transient and the sender may retry shortly.
+            err, ui_err = refusal_error(attachments.last_refusal_reason)
+            # Tell the sender the pull failed so their stream/queue doesn't
+            # hang waiting for chunks to be requested.
+            _write(peer_id, {"t": "attachmentError", "from": host_id(), "to": peer_id,
+                             "fileId": file_id, "mid": mid, "error": err})
             _emit({"event": "attachment-saved", "ok": False, "path": save_to,
-                   "mid": mid, "fileId": file_id, "error": "cannot open download file"})
+                   "mid": mid, "fileId": file_id, "error": ui_err})
             return
         # Ask the sender to stream the file over our authenticated socket (no
         # HTTP server, no LAN bind, no token in a URL). The sender replies with

@@ -16,6 +16,7 @@ Ownership: the module-private _http_server/_http_server_thread globals.
 
 import http.server
 import json
+import os
 import threading
 import time
 import urllib.parse
@@ -24,6 +25,9 @@ import urllib.parse
 # (http_api.init(STATE)).
 
 STATE = None
+
+# /attachment streams in this chunk size instead of buffering whole files.
+ATT_HTTP_CHUNK = 64 * 1024
 
 
 def init(state):
@@ -131,16 +135,31 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
             if not att:
                 return self._send_json(404, {"ok": False, "error": "not found"})
             try:
-                with open(att["path"], "rb") as f:
-                    data = f.read()
+                size = os.stat(att["path"]).st_size
             except OSError:
                 return self._send_json(404, {"ok": False, "error": "file missing"})
+            # Stream in fixed chunks: never buffer the whole file in daemon
+            # memory. A file that shrinks/vanishes mid-stream just truncates
+            # the body — the short Content-Length signals it to the client.
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Length", str(size))
             self.send_header("Content-Disposition", "attachment; filename=%s" % att["name"])
             self.end_headers()
-            self.wfile.write(data)
+            try:
+                with open(att["path"], "rb") as f:
+                    sent = 0
+                    while sent < size:
+                        chunk = f.read(ATT_HTTP_CHUNK)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        sent += len(chunk)
+            except OSError:
+                # Header already sent — can't turn this into a 404; drop the
+                # connection rather than continue with a corrupt body.
+                self.close_connection = True
+                return
             return
         self._send_json(404, {"ok": False, "error": "not found"})
 

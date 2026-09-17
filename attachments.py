@@ -46,11 +46,31 @@ def init(state):
 # raw bytes per chunk; base64 ~1.33x, well under MAX_FRAME_BUF
 ATT_CHUNK_RAW = 128 * 1024
 
+# Recipient-side limits: a hard ceiling on any single attachment and on how
+# many transfers may reassemble at once. A trusted-but-malicious friend could
+# otherwise stream chunks until the recipient's disk is exhausted.
+ATT_MAX_BYTES = 100 * 1024 * 1024 * 1024
+ATT_MAX_CONCURRENT = 8
+ATT_MAX_PER_PEER = 2
+
+# Registration-TTL scaling: 10 min base, +10 min per 10 GiB, 1 h ceiling.
+# A pull registration must outlive however long the recipient needs to click
+# Save on a huge file; transfers in flight are not killed by this expiry.
+ATT_TTL_BASE_S = 600.0
+ATT_TTL_STEP_S = 600.0
+ATT_TTL_SCALE_BYTES = 10 * 1024 * 1024 * 1024
+ATT_TTL_MAX_S = 3600.0
+
 # Recipient-side reassembly state, keyed by fileId.
 _dl = {}                 # fileId -> {save_to,tmp,fh,mid,sha256,total,written,peer,ts}
 # Last-known pull peer per fileId, remembered past _dl_finish pop so the
 # room-file delivery report can address the sender after completion.
 _last_dl_peer = {}
+
+# Refusal reason from the most recent _dl_begin call: "per-peer",
+# "max-concurrent", "open-failed", or None on success. Read (right after a
+# False return) by server.acceptAttachment to send the right error.
+last_refusal_reason = None
 
 _DL_TTL_S = 600.0
 
@@ -90,9 +110,35 @@ def _safe_filename(name: str) -> str:
     return name or "download"
 
 
-def register_attachment(file_id: str, path: str, name: str, ttl: float = 600.0) -> None:
+def register_attachment(file_id: str, path: str, name: str, ttl: float = 0.0) -> bool:
+    """Register a local file for peer pull. Refuses (returns False) when the
+    file exceeds ATT_MAX_BYTES — callers ignore the return value today, so the
+    refusal must stay raise-free and silent-but-logged.
+
+    ttl=0 (the default) scales the registration window with file size: the
+    pull must start AND the sender must keep serving while the recipient's
+    Save runs, so a 100 GiB file needs hours, not the 600s of a small drop.
+    An explicit ttl (tests, callers that know better) always wins."""
+    import server
+    try:
+        size = os.stat(path).st_size
+    except OSError:
+        size = 0  # same tolerance as the send/roomFile callers (size 0)
+    if size > ATT_MAX_BYTES:
+        server._log("attachment-register-refused file=%s size=%d max=%d"
+                    % (os.path.basename(path), size, ATT_MAX_BYTES))
+        return False
+    if ttl <= 0:
+        # Base 600s covers small files; every ATT_TTL_SCALE_BYTES beyond the
+        # first buys one more ATT_TTL_STEP_S, capped at ATT_TTL_MAX_S. At the
+        # 100 GiB ceiling that lands on the cap (1h) — enough to start the
+        # pull comfortably; a running transfer is never killed mid-stream by
+        # this expiry (only the initial attachmentRequest lookup uses it).
+        steps = max(0, size - ATT_CHUNK_RAW) // ATT_TTL_SCALE_BYTES
+        ttl = min(ATT_TTL_BASE_S + steps * ATT_TTL_STEP_S, ATT_TTL_MAX_S)
     with STATE.att_lock:
         STATE.attachments[file_id] = {"path": path, "name": name, "expires": time.time() + ttl}
+    return True
 
 
 def get_attachment(file_id: str):
@@ -105,8 +151,12 @@ def get_attachment(file_id: str):
 
 def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, room: str = "") -> bool:
     """Register an in-progress download and open its .part file. Purges any
-    stale transfer first. room = the room id for a room-file pull (used to
-    report delivery status back to the sender). Returns True on success."""
+    stale transfer first. room = the room id for a room-file pull
+    (used to report delivery status back to the sender). Returns True on
+    success, False on any failure (including the transfer caps). On False,
+    last_refusal_reason holds "per-peer", "max-concurrent", or "open-failed"
+    so callers can distinguish a busy-busy refusal from a local I/O error."""
+    global last_refusal_reason
     now = time.time()
     with STATE.dl_lock:
         for fid in list(_dl):
@@ -117,15 +167,31 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, r
                 except OSError:
                     pass
                 _remove_file(old["tmp"])
+        peer_count = sum(1 for e in _dl.values() if e.get("peer") == peer_id)
+        if peer_count >= ATT_MAX_PER_PEER:
+            import server
+            last_refusal_reason = "per-peer"
+            server._log("attachment-dl-refused file=%s peer=%s reason=per-peer"
+                        % (file_id[:12], peer_id[:12]))
+            return False
+        if len(_dl) >= ATT_MAX_CONCURRENT:
+            import server
+            last_refusal_reason = "max-concurrent"
+            server._log("attachment-dl-refused file=%s peer=%s reason=max-concurrent"
+                        % (file_id[:12], peer_id[:12]))
+            return False
         try:
             os.makedirs(os.path.dirname(save_to) or ".", exist_ok=True)
         except OSError:
+            last_refusal_reason = "open-failed"
             return False
         tmp = save_to + ".part"
         try:
             fh = open(tmp, "wb")
         except OSError:
+            last_refusal_reason = "open-failed"
             return False
+        last_refusal_reason = None
         _dl[file_id] = {"save_to": save_to, "tmp": tmp, "fh": fh, "mid": mid,
                         "sha256": sha256, "total": 0, "written": 0,
                         "peer": peer_id, "ts": now, "room": room}
@@ -134,24 +200,65 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, r
 
 
 def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
-    """Decode + append one chunk from the sender. Returns (ok, total, written)."""
+    """Decode + append one chunk from the sender. Returns (ok, total, written).
+
+    Enforces ATT_MAX_BYTES two ways: a declared total over the ceiling aborts
+    immediately, and the cumulative write can never pass the ceiling (the
+    backstop for a sender that lies about, or never sends, the total)."""
     with STATE.dl_lock:
         d = _dl.get(file_id)
         if not d or d.get("peer") != peer_id:
             return (False, 0, 0)
         if total:
+            if total > ATT_MAX_BYTES:
+                _dl_abort_locked(file_id, d)
+                return (False, total, d["written"])
             d["total"] = total
         try:
             raw = base64.b64decode(data_b64)
         except Exception:
             return (False, d["total"], d["written"])
+        if d["written"] + len(raw) > ATT_MAX_BYTES:
+            _dl_abort_locked(file_id, d)
+            return (False, d["total"], d["written"])
+        if d["total"] and d["written"] + len(raw) > d["total"]:
+            _dl_abort_locked(file_id, d)
+            return (False, d["total"], d["written"])
         try:
             d["fh"].write(raw)
         except OSError:
+            # Write failed — usually disk-full on a huge transfer. Tear the
+            # transfer down now (same as a size-limit abort) instead of
+            # leaving a possibly-gigantic .part for the TTL purge to collect.
+            _dl_abort_locked(file_id, d)
             return (False, d["total"], d["written"])
         d["written"] += len(raw)
         d["ts"] = time.time()
         return (True, d["total"], d["written"])
+
+
+def _dl_abort_locked(file_id: str, d: dict) -> None:
+    """Tear down a transfer whose chunk crossed a size limit. Caller holds
+    STATE.dl_lock. Closes the .part handle, removes the partial file, and pops
+    the entry so the sender cannot keep streaming into it."""
+    _dl.pop(file_id, None)
+    try:
+        d["fh"].close()
+    except OSError:
+        pass
+    _remove_file(d["tmp"])
+    import server
+    server._log("attachment-dl-aborted file=%s peer=%s reason=size-limit"
+                % (file_id[:12], d.get("peer", "")[:12]))
+
+
+def refusal_error(reason):
+    """Map a _dl_begin refusal reason to (peerError, uiError). Busy refusals
+    (per-peer / global cap) are transient and get a distinct, retryable
+    message; local I/O failures keep the historical strings."""
+    if reason in ("per-peer", "max-concurrent"):
+        return ("busy", "attachment transfer busy — try again shortly")
+    return ("cannot open download file", "cannot open download file")
 
 
 def _dl_finish(file_id: str, peer_id: str, ok: bool):
