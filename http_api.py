@@ -105,10 +105,20 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             return {}
 
+    def _request_token(self):
+        """The request's auth token. Accepted ONLY from the Authorization
+        header (Bearer scheme) — never from the URL query, which leaks into
+        server logs, history, diagnostics, and process listings. An empty
+        string means 'no token' and fails _auth_ok downstream."""
+        auth = (self.headers.get("Authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        return ""
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
-        token = (qs.get("token") or [""])[0]
+        token = self._request_token()
         if parsed.path == "/health":
             return self._send_json(200, {"ok": True})
         if self._auth_blocked():
@@ -128,8 +138,9 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/attachment":
             import server
             # Serving a registered file to a confirmed friend (token in the
-            # query) is peer-to-peer file transfer, not script read-access — so
-            # it must NOT be gated behind apiFullAccess. Auth is enforced above.
+            # Authorization header) is peer-to-peer file transfer, not script
+            # read-access — so it must NOT be gated behind apiFullAccess. Auth
+            # is enforced above.
             file_id = (qs.get("fileId") or [""])[0]
             att = server.get_attachment(file_id)
             if not att:
@@ -170,7 +181,7 @@ class _ApiHandler(http.server.BaseHTTPRequestHandler):
         if body is None:  # oversized body already answered with 413
             return
         if parsed.path == "/send":
-            token = body.get("token")
+            token = self._request_token()
             if self._auth_blocked():
                 return self._send_json(429, {"ok": False, "error": "rate limited"})
             if not self._auth_ok(token):

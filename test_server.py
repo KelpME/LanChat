@@ -357,15 +357,12 @@ def main():
             url = "https://127.0.0.1:%d%s" % (http_port, path)
             data = None
             headers = {}
+            # Token rides the Authorization header — query tokens are refused.
+            if token is not None:
+                headers["Authorization"] = "Bearer " + token
             if body is not None:
-                payload = dict(body)
-                if token is not None:
-                    payload["token"] = token
-                data = json.dumps(payload).encode()
+                data = json.dumps(body).encode()
                 headers["Content-Type"] = "application/json"
-            elif token is not None:
-                sep = "&" if "?" in url else "?"
-                url += sep + "token=" + token
             req = urllib.request.Request(url, data=data, method=method, headers=headers)
             # self-signed cert: disable verification for the test
             ssl_ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_CLIENT)

@@ -53,6 +53,21 @@ ATT_MAX_BYTES = 100 * 1024 * 1024 * 1024
 ATT_MAX_CONCURRENT = 8
 ATT_MAX_PER_PEER = 2
 
+# Aggregate disk budget across ALL active reassemblies: the sum of reserved
+# space (declared totals where known, written bytes otherwise) may never
+# exceed this. One peer can therefore never reserve more than
+# ATT_MAX_PER_PEER * ATT_MAX_BYTES, and the board can never promise more
+# disk than the machine is willing to give attachments.
+ATT_MAX_RESERVED_BYTES = 64 * 1024 * 1024 * 1024
+# Never start a transfer if the destination filesystem has less than this
+# free — keeps the daemon from eating the last slice of the user's disk.
+ATT_MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024
+
+# How long a transfer may run with no declared total at all. The very first
+# chunk from the real sender carries the total; this grace window only
+# tolerates a request/first-chunk race, so it is short.
+ATT_TOTAL_GRACE_S = 10.0
+
 # Registration-TTL scaling: 10 min base, +10 min per 10 GiB, 1 h ceiling.
 # A pull registration must outlive however long the recipient needs to click
 # Save on a huge file; transfers in flight are not killed by this expiry.
@@ -149,13 +164,53 @@ def get_attachment(file_id: str):
         return None
 
 
+def _reserved_bytes_locked() -> int:
+    """Sum of disk space committed by active transfers (caller holds
+    dl_lock): the declared total when the sender has declared one, else the
+    bytes actually written so far. Declared totals count at full value even
+    before the bytes arrive — reserving is what bounds the worst case."""
+    reserved = 0
+    for e in _dl.values():
+        reserved += e["total"] if e["total"] else e["written"]
+    return reserved
+
+
+def _disk_free(path: str) -> int:
+    """Bytes free on the filesystem that would hold the download. Returns a
+    huge number on stat failure so a probe error never blocks a transfer."""
+    try:
+        st = os.statvfs(os.path.dirname(path) or ".")
+        return st.f_bavail * st.f_frsize
+    except OSError:
+        return 1 << 60
+
+
+def _disk_free_min_required() -> int:
+    """Worst-case reservation for a transfer whose total isn't declared yet:
+    min(per-file ceiling, free space beyond the keep-free floor). Bounded by
+    what the disk could actually hold, not by the abstract ceiling."""
+    free = max(0, _disk_free(_dl_dir_hint()) - ATT_MIN_FREE_BYTES)
+    return min(ATT_MAX_BYTES, free)
+
+
+def _dl_dir_hint() -> str:
+    """Best-effort download dir for disk probes (the real save path is
+    checked again with its own dirname at begin-time)."""
+    import server
+    try:
+        return server.STATE.config.get("downloadDir", os.path.expanduser("~/Downloads"))
+    except Exception:
+        return os.path.expanduser("~/Downloads")
+
+
 def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, room: str = "") -> bool:
     """Register an in-progress download and open its .part file. Purges any
     stale transfer first. room = the room id for a room-file pull
     (used to report delivery status back to the sender). Returns True on
     success, False on any failure (including the transfer caps). On False,
-    last_refusal_reason holds "per-peer", "max-concurrent", or "open-failed"
-    so callers can distinguish a busy-busy refusal from a local I/O error."""
+    last_refusal_reason holds "per-peer", "max-concurrent", "disk-budget", or
+    "open-failed" so callers can distinguish a busy refusal from a local I/O
+    error."""
     global last_refusal_reason
     now = time.time()
     with STATE.dl_lock:
@@ -178,6 +233,26 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, r
             import server
             last_refusal_reason = "max-concurrent"
             server._log("attachment-dl-refused file=%s peer=%s reason=max-concurrent"
+                        % (file_id[:12], peer_id[:12]))
+            return False
+        # Aggregate budget: the sum of reserved space across active transfers
+        # (declared totals where known, written bytes otherwise) plus this new
+        # transfer's worst-case reservation. The first transfer always passes
+        # (reserved == 0): the budget limits how many transfers may pile up,
+        # never blocks the only one. A transfer that never declares a total is
+        # killed by the grace window in _dl_chunk, so the unbounded
+        # reservation is temporary.
+        reserved = _reserved_bytes_locked()
+        if reserved > 0 and reserved + _disk_free_min_required() > ATT_MAX_RESERVED_BYTES:
+            import server
+            last_refusal_reason = "disk-budget"
+            server._log("attachment-dl-refused file=%s peer=%s reason=disk-budget"
+                        % (file_id[:12], peer_id[:12]))
+            return False
+        if _disk_free(save_to) < ATT_MIN_FREE_BYTES:
+            import server
+            last_refusal_reason = "disk-budget"
+            server._log("attachment-dl-refused file=%s peer=%s reason=low-disk"
                         % (file_id[:12], peer_id[:12]))
             return False
         try:
@@ -213,7 +288,18 @@ def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
             if total > ATT_MAX_BYTES:
                 _dl_abort_locked(file_id, d)
                 return (False, total, d["written"])
+            # A total, once declared, is final: a later chunk claiming a
+            # different one means the sender is rewriting the deal mid-stream.
+            if d["total"] and total != d["total"]:
+                _dl_abort_locked(file_id, d)
+                return (False, d["total"], d["written"])
             d["total"] = total
+        elif not d["total"] and time.time() - d["ts"] > ATT_TOTAL_GRACE_S:
+            # No valid bounded declared total within the grace window — refuse
+            # the chunk. The reservation math depends on totals being declared
+            # promptly; a sender that never declares one doesn't get to write.
+            _dl_abort_locked(file_id, d)
+            return (False, 0, d["written"])
         try:
             raw = base64.b64decode(data_b64)
         except Exception:

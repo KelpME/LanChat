@@ -9,15 +9,27 @@ jobs:
   python-tests:
     name: Python tests
     runs-on: ubuntu-latest
+    env:
+      CRYPTO_HASH: "51afcfceb15597cf2635068e4ac9a56b2abde622edde17f37d85fd7b5306497a"
+      CFFI_HASH: "3e17ed538242334bf70832644a32a7aae3d83b57567f9fd60a26257e992b79ba"
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v4.2.2 (pinned to the signed release commit)
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
-      - uses: actions/setup-python@v5
+      # actions/setup-python v5.6.0 (pinned to the signed release commit)
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
 
-      - name: Install deps (cryptography for cert fingerprint)
-        run: pip install cryptography
+      # cryptography 50.0.1 + cffi 2.0.0, pinned to exact reviewed versions.
+      # The wheels are downloaded, hash-verified, then installed from the
+      # verified copies — pip never resolves "latest" on its own.
+      - name: Install pinned, hash-verified deps
+        run: |
+          pip download cryptography==50.0.1 cffi==2.0.0 --no-deps --only-binary :all: -d /tmp/pins
+          echo "$CRYPTO_HASH  /tmp/pins/cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl" | sha256sum -c -
+          echo "$CFFI_HASH  /tmp/pins/cffi-2.0.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl" | sha256sum -c -
+          pip install /tmp/pins/cryptography-50.0.1-*.whl /tmp/pins/cffi-2.0.0-*.whl
 
       - name: Run test suites
         run: |
@@ -29,7 +41,8 @@ jobs:
     name: QML structural check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v4.2.2 (pinned to the signed release commit)
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       # Full qmllint needs the Omarchy shell modules (qs.Ui, qs.Commons) which
       # only exist on a real install, so CI can't run it cleanly. Instead we

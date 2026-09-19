@@ -360,13 +360,14 @@ def test_http_attachment_streaming():
                 return len(b)
 
         handler = object.__new__(http_api._ApiHandler)
-        handler.path = "/attachment?fileId=fid1&token=tok"
+        handler.path = "/attachment?fileId=fid1"
+        handler.headers = {"Authorization": "Bearer tok"}
         handler.wfile = _StubWFile()
         handler.rfile = io_mod.BytesIO(b"")
         handler.client_address = ("127.0.0.1", 0)
         handler.command = "GET"
         handler.request_version = "HTTP/1.1"
-        handler.headers = {}
+        handler.headers = {"Authorization": "Bearer tok"}
         handler.close_connection = False
         sent = []
         handler.send_response = lambda code: sent.append(("status", code))
@@ -397,11 +398,22 @@ def test_http_attachment_streaming():
         st.attachments["fid2"] = {"path": os.path.join(tmp, "gone.bin"),
                                   "name": "gone.bin", "expires": time.time() + 60}
         writes.clear(); sent.clear()
-        handler.path = "/attachment?fileId=fid2&token=tok"
+        handler.path = "/attachment?fileId=fid2"
+        handler.headers = {"Authorization": "Bearer tok"}
         handler._send_json = lambda code, obj: sent.append(("status", code))
         handler.do_GET()
         assert [v for k, v in sent if k == "status"] == [404], "missing file not 404"
         print("OK  /attachment missing file -> 404")
+
+        # Query-string tokens are DEAD: same request with the token in the URL
+        # must 401 — credentials ride the Authorization header only.
+        writes.clear(); sent.clear()
+        handler.path = "/attachment?fileId=fid1&token=tok"
+        handler.headers = {}
+        handler.do_GET()
+        assert [v for k, v in sent if k == "status"] == [401], \
+            "query-token auth must be refused"
+        print("OK  /attachment rejects token-in-URL (header only)")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -428,6 +440,70 @@ def test_busy_error_mapping():
         "unexpected size ceiling"
     # _dl_begin itself sets last_refusal_reason=None on success (unit level).
     import tempfile
+
+    # Budget refusal: with one active transfer already reserving space,
+    # a second is refused when the aggregate passes the budget. Shrink
+    # the budget to make the math tangible.
+    class _State:
+        pass
+
+    real_budget = att.ATT_MAX_RESERVED_BYTES
+    att.ATT_MAX_RESERVED_BYTES = 1500  # bytes
+    st2 = _State()
+    st2.att_lock = threading.Lock(); st2.attachments = {}; st2.dl_lock = threading.Lock()
+    att.init(st2)
+    tmp = tempfile.mkdtemp(prefix="lanchat-budget-")
+    try:
+        s1 = os.path.join(tmp, "b1.bin")
+        assert att._dl_begin("budget_a", "pb", s1, "", "mb1"), "first transfer must pass"
+        with st2.dl_lock:
+            att._dl["budget_a"]["total"] = 1200  # declared: reserves 1200
+        s2 = os.path.join(tmp, "b2.bin")
+        ok = att._dl_begin("budget_b", "pc", s2, "", "mb2")
+        assert ok is False and att.last_refusal_reason == "disk-budget", \
+            "second transfer must hit the aggregate budget, got %r" % att.last_refusal_reason
+        assert not os.path.exists(s2 + ".part"), "budget-refused transfer opened .part"
+        print("OK  aggregate disk budget refuses transfer beyond the cap")
+    finally:
+        att._dl_finish("budget_a", "pb", False)
+        att.ATT_MAX_RESERVED_BYTES = real_budget
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # Grace window: a chunk with no declared total past the window aborts.
+    att.init(st2)
+    tmp2 = tempfile.mkdtemp(prefix="lanchat-grace-")
+    try:
+        sg = os.path.join(tmp2, "g.bin")
+        assert att._dl_begin("grace_t", "pg", sg, "", "mg")
+        with st2.dl_lock:
+            att._dl["grace_t"]["ts"] = 0  # transfer looks ancient
+        ok, _, _ = att._dl_chunk("grace_t", "pg",
+                                 base64.b64encode(b"x").decode(), 0)
+        assert ok is False, "chunk without declared total past grace must abort"
+        with st2.dl_lock:
+            assert "grace_t" not in att._dl, "grace abort not torn down"
+        assert not os.path.exists(sg + ".part"), "grace abort left .part"
+        print("OK  chunks without a bounded declared total refused after grace")
+    finally:
+        shutil.rmtree(tmp2, ignore_errors=True)
+
+    # Total is final: a changed total mid-stream aborts.
+    att.init(st2)
+    tmp3 = tempfile.mkdtemp(prefix="lanchat-total-")
+    try:
+        stt = os.path.join(tmp3, "t.bin")
+        assert att._dl_begin("total_t", "pt", stt, "", "mt")
+        ok, _, _ = att._dl_chunk("total_t", "pt",
+                                 base64.b64encode(b"aa").decode(), 10)
+        assert ok, "first chunk with total must write"
+        ok, _, _ = att._dl_chunk("total_t", "pt",
+                                 base64.b64encode(b"bb").decode(), 99)
+        assert ok is False, "changed declared total must abort"
+        with st2.dl_lock:
+            assert "total_t" not in att._dl
+        print("OK  declared total is final; rewriting it aborts")
+    finally:
+        shutil.rmtree(tmp3, ignore_errors=True)
 
     class _State:
         pass
