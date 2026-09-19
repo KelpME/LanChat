@@ -175,7 +175,6 @@ def main():
         time.sleep(1.0)
         check("M3b2 F actually confirmed as E's friend", _confirmed(e, idf))
         # Unfriend: E drops F (notifies F over signed UDP; both sides drop).
-        n_rej_f = len(f.events_of("friend-rejected"))
         e.cmd(cmd="unfriend", id=idf)
         time.sleep(1.5)
         removed = any(ev.get("id") == idf for ev in e.events_of("friend-removed"))

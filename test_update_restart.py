@@ -229,7 +229,7 @@ try:
     # so match it line-wise: `git reset --hard` prints "HEAD is now at ..." to
     # stdout (2>/dev/null doesn't cover it), and that extra line is ignored by
     # the real parser too.
-    check("APPLIED" in [l.strip() for l in r.stdout.splitlines()],
+    check("APPLIED" in [line.strip() for line in r.stdout.splitlines()],
           "behavioral: clean checkout -> APPLIED (got %r)" % r.stdout.strip())
     # and the reset must have run (f is tracked-clean after reset --hard)
     r2 = subprocess.run("git status --porcelain", shell=True, cwd=tmp,
@@ -239,7 +239,7 @@ try:
 
     # systemctl failing -> still APPLIED (restart failure tolerated)
     r = sh(probe, fail_stub=True)
-    check("APPLIED" in [l.strip() for l in r.stdout.splitlines()],
+    check("APPLIED" in [line.strip() for line in r.stdout.splitlines()],
           "behavioral: systemctl failure still yields APPLIED (got %r)" % r.stdout.strip())
 
     # reset failure -> ERROR (never APPLIED)
