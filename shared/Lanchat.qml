@@ -1149,6 +1149,19 @@ QtObject {
         }
         lanchat.showChatAlert(obj.path ? "Saved to " + obj.path : "Saved", false, fromPeer)
       } else {
+        if (obj.gone && obj.mid) {
+          // The sender no longer has the file (registration expired / file
+          // deleted): this Save bar can never succeed, so flag it gone — the
+          // pending-attachment scan skips gone files and the bar clears.
+          var gupd = lanchat.messages.slice()
+          for (var gi = 0; gi < gupd.length; gi++) {
+            if (gupd[gi].mid === obj.mid && gupd[gi].attachment) {
+              gupd[gi].attachment.gone = true
+              break
+            }
+          }
+          lanchat.messages = gupd
+        }
         lanchat.showChatAlert(obj.error
           ? ("Failed to save attachment: " + obj.error)
           : "Failed to save attachment", true, fromPeer)

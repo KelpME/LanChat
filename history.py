@@ -195,6 +195,23 @@ def find_message(mid: str):
     return None
 
 
+def mark_attachment_gone(mid: str) -> bool:
+    """Flag a message's attachment as gone: the sender no longer has the file
+    (registration expired / file deleted), so the recipient's Save bar for it
+    can never succeed. Persisted like mark_attachment_saved so the flag
+    survives history reloads. Returns True when a matching attachment message
+    was flagged, False otherwise (unknown mid / no attachment)."""
+    if not mid:
+        return False
+    with STATE.hist_lock:
+        for m in STATE.history:
+            if m.get("mid") == mid and m.get("attachment"):
+                m["attachment"]["gone"] = True
+                _save_history_locked()
+                return True
+    return False
+
+
 def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
     """Lazy-load a peer's thread, newest-last, paged by offset/limit."""
     with STATE.hist_lock:

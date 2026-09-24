@@ -95,6 +95,8 @@ from history import (  # noqa: F401
     history_for_room,
     history_snapshot,
     load_history,
+    mark_attachment_gone,
+    mark_attachment_saved,
 )
 
 # http_api.py — optional token-authenticated HTTP API
@@ -272,7 +274,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.79"
+VERSION = "1.5.80"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2127,8 +2129,30 @@ def _handle_incoming(msg: dict, addr) -> None:
         elif msg.get("t") == "attachmentEnd":
             _finalize_download(_dl_finish(file_id, from_pid, True), mid, file_id)
         else:
-            _finalize_download(_dl_finish(file_id, from_pid, False), mid, file_id,
-                               error=str(msg.get("error") or "sender aborted"))
+            # Sender replied with an error. If we have an active transfer for
+            # it, tear it down normally. If NOT (e.g. the sender no longer has
+            # the file — registration expired / file deleted — so our Save
+            # request was answered "not found" before any transfer began), the
+            # old code swallowed the reply silently: no event, no log, and the
+            # Save bar stayed forever on a file that can never be saved. Now:
+            # surface the failure AND flag the message gone when the sender
+            # says the file no longer exists, so the bar clears.
+            _err_text = str(msg.get("error") or "sender aborted")
+            with STATE.dl_lock:
+                _known = file_id in _dl and _dl[file_id].get("peer") == from_pid
+            if _known:
+                _finalize_download(_dl_finish(file_id, from_pid, False), mid, file_id,
+                                   error=_err_text)
+            else:
+                _log("attachment-error-unmatched file=%s peer=%s mid=%s err=%s"
+                     % (file_id[:12], from_pid[:12], mid[:12], _err_text))
+                _gone = _err_text in ("not found", "file missing")
+                if _gone and mid:
+                    mark_attachment_gone(mid)
+                _emit({"event": "attachment-saved", "ok": False,
+                       "mid": mid, "fileId": file_id, "gone": _gone,
+                       "error": (_err_text if not _gone else
+                                 "sender no longer has this file")})
         return
     if msg.get("t") != "msg":
         return
@@ -2710,7 +2734,14 @@ def handle_command(cmd: dict) -> None:
     elif kind == "acceptAttachment":
         peer_id = str(cmd.get("from", ""))
         if not peer_id or find_peer(peer_id) is None:
-            _emit({"event": "error", "message": "attachment sender not found"})
+            _mid_early = str(cmd.get("mid", ""))
+            _log("attachment-sender-unknown peer=%s mid=%s" % (peer_id[:12], _mid_early[:12]))
+            # Surface it (error events only reach the diagnostics pane) so the
+            # user knows WHY nothing happened. The bar stays: the sender may
+            # come back online and Save is the retry.
+            _emit({"event": "attachment-saved", "ok": False,
+                   "mid": _mid_early, "fileId": str(cmd.get("fileId", "")),
+                   "error": "sender not found — they may be offline; Save again when they're back"})
             return
         # Room trust gate (plans/ROOMS.md decision: friend-gated file accept):
         # room membership alone does NOT authorize byte transfer — the

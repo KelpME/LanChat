@@ -929,12 +929,104 @@ def test_settings_attachment_max():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_stale_attachment_gone():
+    """Regression: pressing Save on an attachment whose sender copy is long
+    gone used to be swallowed silently (sender replies attachmentError 'not
+    found' before any transfer began -> no event, no log) and the Save bar
+    stayed forever. Now: the failure is surfaced AND the history message is
+    flagged gone (persisted), which the UI bar scan skips. A mid-stream error
+    for an ACTIVE transfer keeps the old retryable behavior (no gone flag)."""
+    import tempfile
+
+    import attachments as _att
+    import history as _h
+    import server as _s
+
+    tmp = tempfile.mkdtemp(prefix="lanchat-gone-")
+    iso = os.path.join(tmp, "state"); os.makedirs(iso, exist_ok=True)
+    saved = (_h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH)
+    _h.STATE_DIR = iso
+    _h.HISTORY_PATH = os.path.join(iso, "history.json")
+    _h.HISTORY_KEY = os.path.join(iso, "history.key")
+    _s.STATE_DIR = iso
+    _s._LOG_PATH = os.path.join(iso, "daemon.log")
+    _s.CONFIG["token"] = TOKEN
+    _s.STATE.stdout = open(os.devnull, "w")
+    _att.init(_s.STATE)
+
+    peer = "deadbeefcafe0001"
+    _s.append_history({"mid": "mgone", "from": peer, "to": _s.host_id(),
+                       "text": "old file", "outgoing": False,
+                       "attachment": {"name": "old.bin", "size": 10,
+                                      "mime": "application/octet-stream",
+                                      "fileId": "gone1", "sha256": ""}})
+    captured = []
+    real_emit = _s._emit
+    _s._emit = lambda e: captured.append(e)
+    try:
+        # (a) sender replies "not found" for a transfer that never began.
+        _s._handle_incoming({"t": "attachmentError", "from": peer,
+                             "fileId": "gone1", "mid": "mgone",
+                             "error": "not found"}, ("127.0.0.1", 1))
+        evs = [e for e in captured if e.get("event") == "attachment-saved"]
+        assert evs and evs[0].get("ok") is False, \
+            "unmatched attachmentError must surface: %r" % (captured,)
+        assert evs[0].get("gone") is True, "gone must be flagged: %r" % (evs[0],)
+        assert "no longer" in (evs[0].get("error") or ""), \
+            "user-facing error must say the file is gone: %r" % (evs[0],)
+        with _s.STATE.hist_lock:
+            m = [x for x in _s.STATE.history if x.get("mid") == "mgone"][0]
+            assert m["attachment"].get("gone") is True, "history not flagged gone"
+        # (b) a NON-gone error (transient) surfaces but does not flag gone.
+        _s.append_history({"mid": "mtrans", "from": peer, "to": _s.host_id(),
+                           "text": "x", "outgoing": False,
+                           "attachment": {"name": "t.bin", "size": 1,
+                                          "mime": "a/b", "fileId": "tr1", "sha256": ""}})
+        captured.clear()
+        _s._handle_incoming({"t": "attachmentError", "from": peer,
+                             "fileId": "tr1", "mid": "mtrans",
+                             "error": "socket down"}, ("127.0.0.1", 1))
+        evs = [e for e in captured if e.get("event") == "attachment-saved"]
+        assert evs and evs[0].get("ok") is False and evs[0].get("gone") is not True, \
+            "transient error must not flag gone: %r" % (evs,)
+        with _s.STATE.hist_lock:
+            m = [x for x in _s.STATE.history if x.get("mid") == "mtrans"][0]
+            assert not m["attachment"].get("gone"), "transient error flagged gone"
+        # (c) mark_attachment_gone persists across a reload.
+        _s2 = type("S", (), {})()
+        _s2.hist_lock = threading.Lock(); _s2.history = []; _s2.hist_crypto = None
+        _h.init(_s2)
+        _h.load_history()
+        with _s2.hist_lock:
+            m = [x for x in _s2.history if x.get("mid") == "mgone"][0]
+            assert m["attachment"].get("gone") is True, "gone flag not persisted"
+        # (d) an error for an ACTIVE transfer keeps the old abort path (with
+        # its own event, no gone flag) — peer-checked teardown.
+        ok_dir = os.path.join(tmp, "dl"); os.makedirs(ok_dir)
+        assert _s._dl_begin("live1", peer, os.path.join(ok_dir, "l.bin"), "", "mlive")
+        captured.clear()
+        _s._handle_incoming({"t": "attachmentError", "from": peer,
+                             "fileId": "live1", "mid": "mlive",
+                             "error": "sender aborted"}, ("127.0.0.1", 1))
+        evs = [e for e in captured if e.get("event") == "attachment-saved"]
+        assert evs and evs[0].get("ok") is False and "gone" not in evs[0], \
+            "active-transfer abort must use the old path: %r" % (evs,)
+        assert not os.path.exists(os.path.join(ok_dir, "l.bin.part")), "abort left .part"
+        print("OK  stale Save bar: sender-gone reply surfaces, flags gone (persisted); "
+              "transient errors stay retryable")
+    finally:
+        _s._emit = real_emit
+        _h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     test_mark_attachment_saved()
     test_busy_error_mapping()
     test_attachment_limit_config()
     test_sender_side_over_cap()
     test_settings_attachment_max()
+    test_stale_attachment_gone()
     test_attachment_limits()
     test_http_attachment_streaming()
     ha = make_home("a", 4991, "Alpha"); hb = make_home("b", 4992, "Beta")

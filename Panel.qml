@@ -125,7 +125,8 @@ Panel {
     var all = Lanchat.messages
     for (var i = all.length - 1; i >= 0; i--) {
       var m = all[i]
-      if (!m.outgoing && m.from === selectedPeerId && m.attachment && !m.attachment.accepted)
+      if (!m.outgoing && m.from === selectedPeerId && m.attachment
+          && !m.attachment.accepted && !m.attachment.gone)
         return m
     }
     return null
