@@ -272,7 +272,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.78"
+VERSION = "1.5.79"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2680,6 +2680,33 @@ def handle_command(cmd: dict) -> None:
         STATE.config["sendDelay"] = int(cmd.get("seconds", 0))
         _save_config()
         _emit({"event": "send-delay", "seconds": STATE.config["sendDelay"]})
+    elif kind == "setAttachmentMax":
+        # Settings-menu control for the per-file attachment ceiling (GiB).
+        # Applied live (no daemon restart) AND persisted. Raising the ceiling
+        # past the aggregate budget scales the budget to 2x the ceiling so the
+        # ceiling is actually reachable — never silently clamped down (the
+        # user would set 16 and get 8 with no explanation).
+        try:
+            gib = int(cmd.get("gib", 0))
+        except (TypeError, ValueError):
+            gib = 0
+        if gib < 1:
+            _emit({"event": "error", "message": "Max file size must be at least 1 GiB"})
+            return
+        want = gib * 1024 ** 3
+        budget = attachments.ATT_MAX_RESERVED_BYTES
+        if want > budget:
+            budget = min(2 * want, attachments.ATT_LIMIT_HARD_MAX)
+            STATE.config["attachmentMaxReservedBytes"] = budget
+        STATE.config["attachmentMaxBytes"] = want
+        eff = attachments.apply_config_limits(STATE.config)
+        _save_config()
+        _emit({"event": "attachment-limits",
+               "perFileBytes": eff["ATT_MAX_BYTES"],
+               "aggregateBytes": eff["ATT_MAX_RESERVED_BYTES"],
+               "keepFreeBytes": eff["ATT_MIN_FREE_BYTES"]})
+        _diag("attachment-limits-updated", per_file=eff["ATT_MAX_BYTES"],
+              aggregate=eff["ATT_MAX_RESERVED_BYTES"])
     elif kind == "acceptAttachment":
         peer_id = str(cmd.get("from", ""))
         if not peer_id or find_peer(peer_id) is None:
@@ -3077,6 +3104,7 @@ def _ready_event() -> dict:
         "friends": friends_list(),
         "rooms": rooms.rooms_list(),
         "downloadDir": STATE.config.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),
+        "attachmentMaxBytes": attachments.ATT_MAX_BYTES,
         "sendDelay": STATE.config.get("sendDelay", 0),
         "apiFullAccess": api_full_access(),
         "panelSize": panel_size(),

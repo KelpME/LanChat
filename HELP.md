@@ -167,6 +167,9 @@ online/offline, or pick a status.
 - **Undo delay** — hold messages for N seconds so you can undo them before they
   send.
 - **Save to** — the folder accepted files go to (default `~/Downloads`).
+- **Max file size** — the largest file you will accept, in GiB (default 4).
+  Applied immediately — no restart. Raising it also raises the total download
+  budget to twice the per-file max; the drive always keeps 4 GiB free.
 - **Rooms: members pick their colors** — owner-level room setting (shown when
   you own at least one room). Off = rooms you own render with the standard
   theme colors instead of member-picked colors.

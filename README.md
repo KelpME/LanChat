@@ -257,6 +257,10 @@ a limit but never remove one: values are clamped to 64 MiB–1 TiB, junk is
 ignored, and the per-file ceiling is capped at the aggregate budget. The daemon
 must be restarted (`systemctl --user restart lanchat`) to pick up a change.
 
+> Easier: **Settings → Max file size** sets the per-file ceiling in GiB from
+> the UI, applies it immediately (no restart), persists it, and scales the
+> aggregate budget to twice the ceiling when needed.
+
 ## Using the app
 
 Lanchat is **private by default**: your machine is invisible on the network.

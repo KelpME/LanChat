@@ -859,11 +859,82 @@ def test_sender_side_over_cap():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_settings_attachment_max():
+    """Unit test: the Settings-menu command setAttachmentMax applies the
+    per-file ceiling live AND persists it; raising it past the aggregate
+    budget scales the budget to 2x (never silently clamped); junk is refused
+    refused with a visible error; ready events carry the effective value."""
+    import tempfile
+
+    import attachments as _att
+    import history as _h
+    import server as _s
+
+    tmp = tempfile.mkdtemp(prefix="lanchat-setmax-")
+    iso = os.path.join(tmp, "state"); os.makedirs(iso, exist_ok=True)
+    saved = (_h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH,
+             _s.CONFIG_PATH)
+    _h.STATE_DIR = iso
+    _h.HISTORY_PATH = os.path.join(iso, "history.json")
+    _h.HISTORY_KEY = os.path.join(iso, "history.key")
+    _s.STATE_DIR = iso
+    _s._LOG_PATH = os.path.join(iso, "daemon.log")
+    _s.CONFIG_PATH = os.path.join(iso, "lanchat.json")  # never the real config
+
+    _s.CONFIG["token"] = TOKEN
+    _s.STATE.stdout = open(os.devnull, "w")
+    _att.init(_s.STATE)
+    _s.STATE.config.setdefault("attachmentMaxBytes", _att.ATT_MAX_BYTES_DEFAULT)
+    _s.STATE.config.setdefault("attachmentMaxReservedBytes", _att.ATT_MAX_RESERVED_BYTES_DEFAULT)
+    _s.STATE.config.setdefault("attachmentMinFreeBytes", _att.ATT_MIN_FREE_BYTES_DEFAULT)
+    _att.apply_config_limits(_s.STATE.config)
+
+    captured = []
+    real_emit = _s._emit
+    _s._emit = lambda e: captured.append(e)
+    real = (_att.ATT_MAX_BYTES, _att.ATT_MAX_RESERVED_BYTES, _att.ATT_MIN_FREE_BYTES)
+    try:
+        # Raise to 16 GiB: ceiling applied, budget scaled to 2x, persisted.
+        _s.handle_command({"cmd": "setAttachmentMax", "gib": 16})
+        assert _att.ATT_MAX_BYTES == 16 * 1024 ** 3, \
+            "ceiling not applied: %d" % _att.ATT_MAX_BYTES
+        assert _att.ATT_MAX_RESERVED_BYTES == 32 * 1024 ** 3, \
+            "budget must scale to 2x the ceiling, got %d" % _att.ATT_MAX_RESERVED_BYTES
+        assert _s.STATE.config["attachmentMaxBytes"] == 16 * 1024 ** 3, "not persisted"
+        lim = [e for e in captured if e.get("event") == "attachment-limits"]
+        assert lim and lim[-1]["perFileBytes"] == 16 * 1024 ** 3, \
+            "effective values must be echoed: %r" % (captured,)
+        # The ready event carries the ceiling for UI init.
+        ready = _s._ready_event()
+        assert ready["attachmentMaxBytes"] == 16 * 1024 ** 3, "ready event missing ceiling"
+
+        # Junk: 0 / negative -> visible error, limits unchanged.
+        captured.clear()
+        _s.handle_command({"cmd": "setAttachmentMax", "gib": 0})
+        errs = [e for e in captured if e.get("event") == "error"]
+        assert errs, "junk value must surface an error: %r" % (captured,)
+        assert _att.ATT_MAX_BYTES == 16 * 1024 ** 3, "junk must not change the limit"
+
+        # Absurdly large is clamped to the hard max (1 TiB), budget follows.
+        _s.handle_command({"cmd": "setAttachmentMax", "gib": 100000})
+        assert _att.ATT_MAX_BYTES == _att.ATT_LIMIT_HARD_MAX, \
+            "override must clamp to the hard max, got %d" % _att.ATT_MAX_BYTES
+        print("OK  Settings setAttachmentMax: applies live, persists, scales budget, "
+              "refuses junk, echoes effective values")
+    finally:
+        _s._emit = real_emit
+        _att.ATT_MAX_BYTES, _att.ATT_MAX_RESERVED_BYTES, _att.ATT_MIN_FREE_BYTES = real
+        _h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH, \
+            _s.CONFIG_PATH = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     test_mark_attachment_saved()
     test_busy_error_mapping()
     test_attachment_limit_config()
     test_sender_side_over_cap()
+    test_settings_attachment_max()
     test_attachment_limits()
     test_http_attachment_streaming()
     ha = make_home("a", 4991, "Alpha"); hb = make_home("b", 4992, "Beta")

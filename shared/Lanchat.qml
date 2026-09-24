@@ -74,6 +74,10 @@ QtObject {
   property double dlTotal: 0
   readonly property bool dlActive: lanchat.dlFileId !== ""
   property int sendDelay: 0
+  // Per-file attachment ceiling (bytes) — shown in Settings as GiB. The
+  // daemon is the source of truth; updated from ready + attachment-limits.
+  property int attachmentMaxBytes: 4 * 1024 * 1024 * 1024
+  readonly property int attachmentMaxGiB: Math.max(1, Math.round(attachmentMaxBytes / (1024 * 1024 * 1024)))
   property var pendingSends: []  // [{mid, to, text, remaining, total}] undo-window
   property var friendRequests: [] // [{peerId, name, outgoing, ts, mid}] pending friend requests (notifications)
   property var typing: ({})      // peerId -> name currently typing
@@ -609,6 +613,14 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setSendDelay", seconds: seconds }) + "\n")
   }
 
+  function setAttachmentMaxGiB(gib) {
+    // Per-file attachment ceiling in GiB (Settings). The daemon applies it
+    // live, persists it, and echoes attachment-limits with the EFFECTIVE
+    // values (it may also raise the aggregate budget / clamp) — the property
+    // updates there, not optimistically here.
+    daemon.write(JSON.stringify({ cmd: "setAttachmentMax", gib: gib }) + "\n")
+  }
+
   // Accept an incoming file: ask the daemon to pull it from the sender and
   // save it. mid + sha256 let the daemon echo the right completion and verify
   // the download. Sets live download state so the UI can show progress.
@@ -920,6 +932,7 @@ QtObject {
       // lists) so the rooms list renders members immediately on boot.
       lanchat.syncRoomStates()
       if (obj.downloadDir !== undefined) lanchat.downloadDir = obj.downloadDir
+      if (obj.attachmentMaxBytes !== undefined) lanchat.attachmentMaxBytes = obj.attachmentMaxBytes
       if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
       if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
       if (obj.panelSize !== undefined) lanchat.panelSize = obj.panelSize
@@ -1065,6 +1078,10 @@ QtObject {
 
     case "send-delay":
       lanchat.sendDelay = obj.seconds || 0
+      break
+
+    case "attachment-limits":
+      if (obj.perFileBytes !== undefined) lanchat.attachmentMaxBytes = obj.perFileBytes
       break
 
     case "chat-cleared":

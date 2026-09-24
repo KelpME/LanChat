@@ -900,6 +900,52 @@ Item {
                   }
                 }
 
+                // Max file size (per-file attachment ceiling, GiB)
+                Item {
+                  width: parent.width
+                  height: Style.space(28)
+
+                  MouseArea {
+                    id: maxFileTipHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                  }
+
+                  Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.spacing.sm
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Max file size"
+                    color: Color.popups.text
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.weight: Font.Bold
+                  }
+
+                  PanelToolTip {
+                    visible: maxFileTipHover.containsMouse
+                    text: "Largest file you will accept, in GiB (default 4). " +
+                          "Applied immediately; larger values also raise the total download budget. " +
+                          "The drive always keeps 4 GiB free."
+                  }
+
+                  TextField {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.spacing.sm
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(48)
+                    text: Lanchat.attachmentMaxGiB
+                    maximumLength: 3
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(4)
+                    onEditingFinished: {
+                      var v = parseInt(text, 10)
+                      if (!isNaN(v) && v >= 1) Lanchat.setAttachmentMaxGiB(v)
+                      else text = Lanchat.attachmentMaxGiB
+                    }
+                  }
+                }
+
                 Item {
                   width: parent.width
                   height: Style.space(30)
