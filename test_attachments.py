@@ -135,7 +135,6 @@ def test_attachment_limits():
         # against a 1 MiB ceiling keeps the test fast and disk-free.
         real_cap = att.ATT_MAX_BYTES
         att.ATT_MAX_BYTES = 1024 * 1024
-        real_cap_value = real_cap  # the true 100 GiB ceiling, for the TTL check
         tmp = tempfile.mkdtemp(prefix="lanchat-attlim-")
         try:
             # ---- 1) register_attachment refuses over-ceiling files --------
@@ -155,11 +154,9 @@ def test_attachment_limits():
             print("OK  register_attachment refuses %d-byte file, allows small" %
                   (att.ATT_MAX_BYTES + 1))
 
-            # ---- 1b) TTL scales with file size (tiny test ceiling in effect,
-            # but the TTL math uses its own constants, so use real sizes via a
-            # fake size through a small explicit probe: base for small file,
-            # capped max for a hypothetically huge one — computed, not faked,
-            # by checking the scaling formula against the module constants).
+            # ---- 1b) TTL scales with file size (1:1 with the extracted
+            # formula, so the scaling is exercised at real sizes without
+            # writing gigabytes to disk).
             # NOTE: read through att.STATE, not the local `st` — an earlier
             # test (busy mapping) re-inits attachments with its own State, so
             # the module-global STATE is not this test's `st` object.
@@ -167,19 +164,42 @@ def test_attachment_limits():
             got = att.STATE.attachments["smallid"]["expires"] - time.time()
             assert att.ATT_TTL_BASE_S - 2 <= got <= att.ATT_TTL_BASE_S + 5, \
                 "small file TTL should be base %s, got %s" % (small_exp, got)
-            # The formula itself, evaluated against the REAL 100 GiB ceiling
-            # (the module cap is shrunk for these tests — see above).
-            size = real_cap_value
-            steps = max(0, size - att.ATT_CHUNK_RAW) // att.ATT_TTL_SCALE_BYTES
-            want = min(att.ATT_TTL_BASE_S + steps * att.ATT_TTL_STEP_S,
-                       att.ATT_TTL_MAX_S)
-            assert want == att.ATT_TTL_MAX_S, \
-                "100 GiB must land on the TTL cap, got %s" % want
+            # The scaling must stay meaningful under the CONSERVATIVE ceiling:
+            # a file at the ceiling in force lands on the 1 h cap, a mid-size
+            # file lands between base and cap (not pinned to base), and a small
+            # file stays at base. Run the probe against the REAL ceiling (the
+            # helper reads the live module attribute) and restore it after —
+            # no gigabytes are written, only arithmetic is checked.
+            cap_for_ttl = att.ATT_MAX_BYTES_DEFAULT
+            att.ATT_MAX_BYTES = cap_for_ttl
+            try:
+                ttl_at_cap = att._registration_ttl(cap_for_ttl)
+                ttl_mid = att._registration_ttl(cap_for_ttl // 4)
+                ttl_small = att._registration_ttl(1024)
+            finally:
+                att.ATT_MAX_BYTES = real_cap
+            assert ttl_at_cap == att.ATT_TTL_MAX_S, \
+                "a file at the per-file ceiling must land on the TTL cap, got %s" % ttl_at_cap
+            assert att.ATT_TTL_BASE_S < ttl_mid < att.ATT_TTL_MAX_S, \
+                "mid-size file must scale between base and cap, got %s" % ttl_mid
+            assert ttl_small == att.ATT_TTL_BASE_S, \
+                "small file must keep the base TTL, got %s" % ttl_small
+            # The scaling step is derived from the ceiling, so raising the
+            # ceiling scales the window coarser instead of leaving it pinned.
+            att.ATT_MAX_BYTES = 100 * 1024 * 1024 * 1024
+            try:
+                ttl_big_cap = att._registration_ttl(100 * 1024 * 1024 * 1024)
+                ttl_big_mid = att._registration_ttl(10 * 1024 * 1024 * 1024)
+            finally:
+                att.ATT_MAX_BYTES = real_cap
+            assert ttl_big_cap == att.ATT_TTL_MAX_S and ttl_big_mid > att.ATT_TTL_BASE_S, \
+                "raised ceiling must scale the TTL window too (%s, %s)" % (ttl_big_cap, ttl_big_mid)
             # Explicit ttl wins over scaling (existing test convention).
             ok = att.register_attachment("ttlid", small, "t.bin", ttl=30.0)
             got30 = att.STATE.attachments["ttlid"]["expires"] - time.time()
             assert ok and 28 <= got30 <= 32, "explicit ttl must win, got %s" % got30
-            print("OK  registration TTL: base for small, formula caps at 1h, explicit wins")
+            print("OK  registration TTL: base for small, scales mid, caps at 1h for a "
+                  "%d-byte file, explicit wins" % cap_for_ttl)
 
             # ---- 2) declared total over ceiling aborts at _dl_chunk -------
             save = os.path.join(tmp, "over-total.bin")
@@ -419,16 +439,34 @@ def test_http_attachment_streaming():
 
 
 def test_busy_error_mapping():
-    """Unit test: when _dl_begin refuses with reason per-peer or
-    max-concurrent, the server busy mapping produces error=="busy" and the
-    user-facing attachment-saved string; other reasons keep the old strings."""
+    """Unit test: when _dl_begin refuses with reason per-peer, max-concurrent,
+    disk-budget or disk-unknown, the server refusal mapping produces the right
+    peer/UI strings; local I/O failures keep the old strings. Also pins the
+    conservative limit defaults and the capacity gates themselves."""
     import attachments as att
 
+    # Capture the daemon log lines the refusal paths write, so a capacity
+    # refusal is provably diagnosable (not just a silent False).
+    import server as srv
+    logged_budget = []
+    _real_log = srv._log
+    srv._log = lambda m: logged_budget.append(m)
+    try:
+        _busy_error_mapping_body(att, logged_budget)
+    finally:
+        srv._log = _real_log
+
+
+def _busy_error_mapping_body(att, logged_budget):
     # The REAL mapping server.py uses — not a local copy — so a change to the
     # production mapping breaks this test.
     for reason, want_err, want_ui in (
             ("per-peer", "busy", "attachment transfer busy — try again shortly"),
             ("max-concurrent", "busy", "attachment transfer busy — try again shortly"),
+            ("disk-budget", "disk limit",
+             "attachment too large for the allowed disk space"),
+            ("disk-unknown", "cannot open download file",
+             "cannot verify free disk space — download refused"),
             ("open-failed", "cannot open download file", "cannot open download file"),
             (None, "cannot open download file", "cannot open download file")):
         got_err, got_ui = att.refusal_error(reason)
@@ -436,37 +474,180 @@ def test_busy_error_mapping():
             "reason %r mapped to (%r, %r)" % (reason, got_err, got_ui)
     assert att.ATT_MAX_CONCURRENT == 8 and att.ATT_MAX_PER_PEER == 2, \
         "unexpected cap constants"
-    assert att.ATT_MAX_BYTES == 100 * 1024 * 1024 * 1024, \
+    # The per-file ceiling must stay CONSERVATIVE: it was 100 GiB, which made
+    # the aggregate budget decorative (one transfer could be enormous and still
+    # sit under the budget). Default is 4 GiB and must never be larger than the
+    # aggregate budget, or the budget could not bind.
+    assert att.ATT_MAX_BYTES == att.ATT_MAX_BYTES_DEFAULT, \
         "unexpected size ceiling"
+    assert att.ATT_MAX_BYTES_DEFAULT == 4 * 1024 * 1024 * 1024, \
+        "per-file ceiling must be the conservative 4 GiB default"
+    assert att.ATT_MAX_RESERVED_BYTES_DEFAULT == 8 * 1024 * 1024 * 1024, \
+        "aggregate budget must be 8 GiB"
+    assert att.ATT_MIN_FREE_BYTES_DEFAULT == 4 * 1024 * 1024 * 1024, \
+        "keep-free floor must be 4 GiB"
+    assert att.ATT_MAX_BYTES_DEFAULT <= att.ATT_MAX_RESERVED_BYTES_DEFAULT, \
+        "a per-file cap above the aggregate budget makes the budget unenforceable"
+    assert att.ATT_LIMIT_MIN < att.ATT_LIMIT_HARD_MAX, "limit clamp bounds"
     # _dl_begin itself sets last_refusal_reason=None on success (unit level).
     import tempfile
 
-    # Budget refusal: with one active transfer already reserving space,
-    # a second is refused when the aggregate passes the budget. Shrink
-    # the budget to make the math tangible.
+    # Capacity gates, exercised with small numbers so the math is tangible and
+    # the test writes nothing to disk beyond an empty .part. The three gates are
+    # independent by design: per-file ceiling (cap), aggregate budget, and the
+    # filesystem floor each get their own refusal case below.
     class _State:
         pass
 
+    CAP = 4000     # per-file ceiling for this block
+    BUDGET = 1500  # aggregate budget across active transfers
+    FLOOR = 64     # keep-free floor (tiny: the real filesystem dwarfs it)
+
     real_budget = att.ATT_MAX_RESERVED_BYTES
-    att.ATT_MAX_RESERVED_BYTES = 1500  # bytes
+    real_cap = att.ATT_MAX_BYTES
+    real_floor = att.ATT_MIN_FREE_BYTES
+    att.ATT_MAX_RESERVED_BYTES = BUDGET
+    att.ATT_MAX_BYTES = CAP
+    att.ATT_MIN_FREE_BYTES = FLOOR
     st2 = _State()
     st2.att_lock = threading.Lock(); st2.attachments = {}; st2.dl_lock = threading.Lock()
     att.init(st2)
     tmp = tempfile.mkdtemp(prefix="lanchat-budget-")
     try:
         s1 = os.path.join(tmp, "b1.bin")
-        assert att._dl_begin("budget_a", "pb", s1, "", "mb1"), "first transfer must pass"
+        assert att._dl_begin("budget_a", "pb", s1, "", "mb1", "", 1200), \
+            "first transfer within the budget must pass"
         with st2.dl_lock:
-            att._dl["budget_a"]["total"] = 1200  # declared: reserves 1200
+            assert att._dl["budget_a"]["total"] == 1200, \
+                "declared total must be reserved at accept time"
         s2 = os.path.join(tmp, "b2.bin")
-        ok = att._dl_begin("budget_b", "pc", s2, "", "mb2")
+        ok = att._dl_begin("budget_b", "pc", s2, "", "mb2", "", 400)
         assert ok is False and att.last_refusal_reason == "disk-budget", \
             "second transfer must hit the aggregate budget, got %r" % att.last_refusal_reason
         assert not os.path.exists(s2 + ".part"), "budget-refused transfer opened .part"
         print("OK  aggregate disk budget refuses transfer beyond the cap")
+
+        # NO FIRST-TRANSFER EXEMPTION (the reported blocker): a lone transfer
+        # whose declared total passes the budget is refused even with
+        # reserved == 0, because nothing else is on the board. The old code's
+        # `reserved > 0` guard let exactly this through.
+        for fid in list(att._dl):
+            att._dl_finish(fid, att._dl[fid]["peer"], False)
+        assert not att._dl, "cleanup left transfers registered"
+        s3 = os.path.join(tmp, "b3.bin")
+        ok = att._dl_begin("budget_solo", "psolo", s3, "", "mb3", "", BUDGET + 1)
+        assert ok is False and att.last_refusal_reason == "disk-budget", \
+            "solo transfer over the aggregate budget must be refused (reserved==0), got %r" \
+            % att.last_refusal_reason
+        assert not os.path.exists(s3 + ".part"), "refused transfer opened .part"
+        assert any("reason=disk-budget" in m for m in logged_budget), \
+            "budget refusal not logged with its numbers"
+        assert any("budget=%d" % BUDGET in m for m in logged_budget), \
+            "budget refusal log must carry the numbers that produced it"
+        print("OK  first/only transfer is no longer exempt from the budget")
+
+        # A declared total over the PER-FILE cap is refused at accept time,
+        # before a single chunk is requested.
+        s4 = os.path.join(tmp, "b4.bin")
+        ok = att._dl_begin("budget_cap", "pcap", s4, "", "mb4", "", CAP + 1)
+        assert ok is False and att.last_refusal_reason == "disk-budget", \
+            "over-ceiling declared total must be refused at begin, got %r" % att.last_refusal_reason
+        assert not os.path.exists(s4 + ".part"), "over-ceiling begin left a .part"
+        print("OK  declared total over the per-file cap refused before any byte")
+
+        # FILESYSTEM CAPACITY gate: a declared total must fit what the
+        # destination filesystem can actually hold above the keep-free floor.
+        # Move the floor to just under the real free space so the total no
+        # longer fits — the same arithmetic a nearly-full disk produces.
+        free_now = att._probe_free(os.path.join(tmp, "probe.bin"))
+        assert free_now is not None and free_now > 0, "real filesystem must be probeable"
+        att.ATT_MIN_FREE_BYTES = free_now - 10
+        s5 = os.path.join(tmp, "b5.bin")
+        ok = att._dl_begin("budget_disk", "pdisk", s5, "", "mb5", "", 500)
+        assert ok is False and att.last_refusal_reason == "disk-budget", \
+            "total that does not fit above the keep-free floor must be refused, got %r" \
+            % att.last_refusal_reason
+        assert not os.path.exists(s5 + ".part"), "capacity-refused transfer opened .part"
+        att.ATT_MIN_FREE_BYTES = FLOOR
+        print("OK  declared total checked against real filesystem capacity")
+
+        # MISSING DESTINATION DIRECTORY: the download dir may not exist yet
+        # (a fresh install, or a setDownloadDir to a path the user deleted).
+        # _dl_begin must create it and then measure THAT directory — the old
+        # order probed a path that didn't exist, and a failed probe used to
+        # return 1 EiB (fail open). Assert the dir is created and the probe
+        # succeeds against it.
+        fresh_dir = os.path.join(tmp, "nested", "dl")
+        assert not os.path.exists(fresh_dir), "precondition: fresh dir must not exist"
+        s6 = os.path.join(fresh_dir, "fresh.bin")
+        assert att._dl_begin("budget_fresh", "pfresh", s6, "", "mb6", "", 300), \
+            "transfer into a not-yet-existing download dir must be accepted after creating it"
+        assert os.path.isdir(fresh_dir), "_dl_begin did not create the download directory"
+        assert att._probe_free(s6) is not None, "probe failed against the created directory"
+        print("OK  download dir created before the free-space probe (no fail-open)")
+
+        # PROBE FAILURE FAILS CLOSED: if the filesystem cannot be inspected the
+        # transfer is refused with reason disk-unknown — never treated as
+        # 'plenty of room'.
+        real_probe = att._probe_free
+        att._probe_free = lambda path: None
+        try:
+            s7 = os.path.join(tmp, "b7.bin")
+            ok = att._dl_begin("probe_fail", "pfail", s7, "", "mb7", "", 100)
+            assert ok is False and att.last_refusal_reason == "disk-unknown", \
+                "unprobeable filesystem must refuse (fail closed), got %r" % att.last_refusal_reason
+            assert not os.path.exists(s7 + ".part"), "probe-failed transfer left a .part behind"
+            print("OK  free-space probe failure fails closed (disk-unknown)")
+        finally:
+            att._probe_free = real_probe
+
+        # MID-TRANSFER RECHECK: available capacity is re-read while writing, so
+        # a transfer that started on a healthy disk is torn down before it lands
+        # on the keep-free floor. The fake probe models the disk filling up
+        # (this transfer plus other writers) between chunks.
+        real_interval = att.ATT_DISK_CHECK_INTERVAL_BYTES
+        att.ATT_DISK_CHECK_INTERVAL_BYTES = 10
+        s8 = os.path.join(tmp, "b8.bin")
+        assert att._dl_begin("fill_disk", "pfill", s8, "", "mb8", "", 1000), \
+            "fill-disk transfer must be accepted to start"
+        _fake_free = {"v": 1000}
+
+        def _filling_free(path):
+            # 250 bytes of usable capacity disappear at every re-read: enough
+            # that the transfer must be stopped before free drops below FLOOR.
+            _fake_free["v"] -= 250
+            return _fake_free["v"]
+        real_probe2 = att._probe_free
+        att._probe_free = _filling_free
+        try:
+            wrote = 0
+            aborted = False
+            for _ in range(12):
+                ok, _t, wrote = att._dl_chunk(
+                    "fill_disk", "pfill", base64.b64encode(b"z" * 100).decode(), 1000)
+                if not ok:
+                    aborted = True
+                    break
+            assert aborted, "transfer kept writing after available capacity dropped below the floor"
+            assert wrote < 1000, "abort happened only after the whole file was written"
+            with st2.dl_lock:
+                assert "fill_disk" not in att._dl, "low-disk abort did not tear the transfer down"
+            assert not os.path.exists(s8 + ".part"), "low-disk abort left a .part behind"
+            assert any("reason=low-disk" in m for m in logged_budget), \
+                "mid-transfer capacity abort not logged"
+            print("OK  capacity rechecked while writing; transfer aborted at the floor "
+                  "(wrote %d of 1000 bytes before stopping)" % wrote)
+        finally:
+            att._probe_free = real_probe2
+            att.ATT_DISK_CHECK_INTERVAL_BYTES = real_interval
+            for fid in list(att._dl):
+                att._dl_finish(fid, att._dl[fid]["peer"], False)
     finally:
-        att._dl_finish("budget_a", "pb", False)
+        for fid in list(att._dl):
+            att._dl_finish(fid, att._dl[fid]["peer"], False)
         att.ATT_MAX_RESERVED_BYTES = real_budget
+        att.ATT_MAX_BYTES = real_cap
+        att.ATT_MIN_FREE_BYTES = real_floor
         shutil.rmtree(tmp, ignore_errors=True)
 
     # Grace window: a chunk with no declared total past the window aborts.
@@ -524,9 +705,165 @@ def test_busy_error_mapping():
     print("OK  busy error mapping: busy reasons -> 'busy', others unchanged")
 
 
+def test_attachment_limit_config():
+    """Unit test: attachments.apply_config_limits() is the ONLY way a config
+    moves the disk limits, and it is fail-closed:
+      - absent / non-numeric / zero / negative / absurd values keep the current
+        numbers (a limit can never be switched off),
+      - a valid override is adopted and clamped into [ATT_LIMIT_MIN, HARD_MAX],
+      - a per-file ceiling above the aggregate budget is pulled back to the
+        budget, because otherwise the budget could not bind,
+      - the effective numbers are returned so the daemon can log them."""
+    import attachments as att
+
+    real = (att.ATT_MAX_BYTES, att.ATT_MAX_RESERVED_BYTES, att.ATT_MIN_FREE_BYTES)
+    try:
+        # Baseline: defaults.
+        eff = att.apply_config_limits({})
+        assert eff["ATT_MAX_BYTES"] == att.ATT_MAX_BYTES_DEFAULT, \
+            "empty config must keep the default ceiling, got %r" % (eff,)
+        assert eff["ATT_MAX_RESERVED_BYTES"] == att.ATT_MAX_RESERVED_BYTES_DEFAULT
+        assert eff["ATT_MIN_FREE_BYTES"] == att.ATT_MIN_FREE_BYTES_DEFAULT
+
+        # A legitimate override is adopted (a user who moves bigger files).
+        eff = att.apply_config_limits({"attachmentMaxBytes": 17179869184,      # 16 GiB
+                                       "attachmentMaxReservedBytes": 34359738368})  # 32 GiB
+        assert eff["ATT_MAX_BYTES"] == 17179869184 and att.ATT_MAX_BYTES == 17179869184, \
+            "override must be adopted, got %r" % (eff,)
+        assert eff["ATT_MAX_RESERVED_BYTES"] == 34359738368
+
+        # An override that is larger than the aggregate budget is clamped DOWN
+        # to it (gate sanity: the budget has to be able to bind).
+        eff = att.apply_config_limits({"attachmentMaxBytes": 40 * 1024 ** 3,
+                                       "attachmentMaxReservedBytes": 8 * 1024 ** 3})
+        assert eff["ATT_MAX_BYTES"] == 8 * 1024 ** 3, \
+            "per-file cap must not exceed the aggregate budget, got %r" % (eff,)
+
+        # Junk can't disable a gate: each case must leave the limit >= MIN.
+        def _reset_defaults():
+            att.ATT_MAX_BYTES = att.ATT_MAX_BYTES_DEFAULT
+            att.ATT_MAX_RESERVED_BYTES = att.ATT_MAX_RESERVED_BYTES_DEFAULT
+            att.ATT_MIN_FREE_BYTES = att.ATT_MIN_FREE_BYTES_DEFAULT
+
+        for bad in (0, -1, -10 ** 12, True, False, "", "abc", None, [], {}):
+            _reset_defaults()
+            eff = att.apply_config_limits({"attachmentMaxBytes": bad,
+                                           "attachmentMinFreeBytes": bad})
+            assert eff["ATT_MAX_BYTES"] == att.ATT_MAX_BYTES_DEFAULT and \
+                   eff["ATT_MIN_FREE_BYTES"] == att.ATT_MIN_FREE_BYTES_DEFAULT, \
+                "value %r must be refused, not applied: %r" % (bad, eff)
+            assert att.ATT_MAX_BYTES >= att.ATT_LIMIT_MIN, \
+                "value %r left the live ceiling unbounded" % (bad,)
+
+        # Absurdly large is clamped to the hard max, never adopted raw.
+        eff = att.apply_config_limits({"attachmentMaxReservedBytes": 10 ** 18,
+                                       "attachmentMaxBytes": 10 ** 18})
+        assert eff["ATT_MAX_RESERVED_BYTES"] == att.ATT_LIMIT_HARD_MAX, \
+            "override must clamp to the hard max, got %r" % (eff,)
+
+        # A tiny-but-valid value is honoured (limits may be tightened too),
+        # as long as it is >= ATT_LIMIT_MIN.
+        eff = att.apply_config_limits({"attachmentMaxBytes": att.ATT_LIMIT_MIN,
+                                       "attachmentMaxReservedBytes": att.ATT_LIMIT_MIN,
+                                       "attachmentMinFreeBytes": att.ATT_LIMIT_MIN})
+        assert eff["ATT_MAX_BYTES"] == att.ATT_LIMIT_MIN, \
+            "a tightened limit must be honoured, got %r" % (eff,)
+        print("OK  attachment limits are config-overridable and fail closed on junk")
+    finally:
+        att.ATT_MAX_BYTES, att.ATT_MAX_RESERVED_BYTES, att.ATT_MIN_FREE_BYTES = real
+        assert att.ATT_MAX_BYTES == att.ATT_MAX_BYTES_DEFAULT, "restore failed"
+
+
+def test_sender_side_over_cap():
+    """Unit test (in-process daemon, isolated state): a SEND whose file is over
+    the per-file ceiling must surface an error event and must NOT send a message
+    carrying attachment metadata the recipient could never pull (the silent
+    half-send). Text + over-cap file still sends the text with no attachment."""
+    import tempfile
+
+    import attachments as _att
+    import history as _h
+    import server as _s
+
+    tmp = tempfile.mkdtemp(prefix="lanchat-send-cap-")
+    iso = os.path.join(tmp, "state"); os.makedirs(iso, exist_ok=True)
+    saved = (_h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH)
+    _h.STATE_DIR = iso
+    _h.HISTORY_PATH = os.path.join(iso, "history.json")
+    _h.HISTORY_KEY = os.path.join(iso, "history.key")
+    _s.STATE_DIR = iso
+    _s._LOG_PATH = os.path.join(iso, "daemon.log")
+
+    _s.CONFIG["token"] = TOKEN
+    _s.STATE.stdout = open(os.devnull, "w")
+    _att.init(_s.STATE)
+
+    # A peer to "send" to; sockets are stubbed so nothing leaves the process.
+    peer = "deadbeefcafe0000"
+    _s._peers[peer] = {"id": peer, "name": "Target", "address": "127.0.0.1",
+                       "port": 1, "httpPort": None, "status": "available",
+                       "lastSeen": int(time.time() * 1000), "version": ""}
+
+    sent = []
+    captured = []
+    real_write, real_emit = _s._write, _s._emit
+    _s._write = lambda pid, obj: (sent.append(obj), True)[1]
+    _s._emit = lambda e: captured.append(e)
+    real_cap = _att.ATT_MAX_BYTES
+    _att.ATT_MAX_BYTES = 1024  # 1 KiB ceiling for this case
+    try:
+        big = os.path.join(tmp, "toobig.bin")
+        with open(big, "wb") as f:
+            f.write(b"z" * 4096)
+
+        # (a) file-only send, over the cap -> error event, NO message sent.
+        _s.handle_command({"cmd": "send", "to": peer, "text": "",
+                           "attachment": {"path": big, "name": "toobig.bin"}})
+        errs = [e for e in captured if e.get("event") == "error"]
+        assert errs, "over-cap send must surface an error: %r" % (captured,)
+        assert "limit" in (errs[0].get("message") or "").lower(), \
+            "error must name the limit: %r" % (errs[0],)
+        assert not [m for m in sent if m.get("t") == "msg"], \
+            "over-cap file-only send must not emit a message: %r" % (sent,)
+        assert not any(m.get("attachment") for m in sent), \
+            "over-cap send must not advertise attachment metadata: %r" % (sent,)
+
+        # (b) text + over-cap file -> the text still sends, attachment dropped.
+        sent.clear(); captured.clear()
+        _s.handle_command({"cmd": "send", "to": peer, "text": "the note",
+                           "attachment": {"path": big, "name": "toobig.bin"}})
+        msgs = [m for m in sent if m.get("t") == "msg"]
+        assert msgs and msgs[0].get("text") == "the note", \
+            "text must still send alongside a refused file: %r" % (sent,)
+        assert not msgs[0].get("attachment"), \
+            "refused file must not be attached to the message: %r" % (msgs[0],)
+
+        # (c) an under-cap file still sends normally (no regression).
+        sent.clear(); captured.clear()
+        small = os.path.join(tmp, "ok.bin")
+        with open(small, "wb") as f:
+            f.write(b"ok")
+        _s.handle_command({"cmd": "send", "to": peer, "text": "small",
+                           "attachment": {"path": small, "name": "ok.bin"}})
+        msgs = [m for m in sent if m.get("t") == "msg"]
+        assert msgs and msgs[0].get("attachment", {}).get("name") == "ok.bin", \
+            "under-cap file must still attach normally: %r" % (sent,)
+        assert not [e for e in captured if e.get("event") == "error"], \
+            "under-cap send must not error: %r" % (captured,)
+        print("OK  over-cap SEND is refused visibly (no silent half-send); "
+              "text survives; small files unaffected")
+    finally:
+        _s._write, _s._emit = real_write, real_emit
+        _att.ATT_MAX_BYTES = real_cap
+        _h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     test_mark_attachment_saved()
     test_busy_error_mapping()
+    test_attachment_limit_config()
+    test_sender_side_over_cap()
     test_attachment_limits()
     test_http_attachment_streaming()
     ha = make_home("a", 4991, "Alpha"); hb = make_home("b", 4992, "Beta")
@@ -698,6 +1035,112 @@ def main():
         assert not os.path.exists(os.path.join(off_dir, "gone.bin.part")), \
             "offline sender left .part behind"
         print("OK  offline sender fail-fast: attachment-saved ok:false, no hang, no .part")
+
+        # ---- 3.8) over-capacity file is refused BEFORE bytes are requested --
+        # The reviewer's scenario: an authenticated peer advertises a file
+        # larger than the recipient's limits. The recipient must refuse at
+        # accept time using the size already on the message metadata — not open
+        # a .part, not send an attachmentRequest, not stream a single byte.
+        import attachments as _att
+        import history as _h
+        import server as _s
+        _s.CONFIG["token"] = TOKEN
+        _s.STATE.stdout = open(os.devnull, "w")
+        _att.init(_s.STATE)
+
+        # Redirect the IN-PROCESS module's state/log/history paths into the
+        # test's temp home before anything is appended or logged — the daemon
+        # subprocesses already get HOME=home, but `import server` here points at
+        # the real ~/.local/state/lanchat, and a test must never touch it.
+        iso = os.path.join(hb, "iso-state"); os.makedirs(iso, exist_ok=True)
+        _restore = [(_h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY,
+                     _s.STATE_DIR, _s._LOG_PATH)]
+        _h.STATE_DIR = iso
+        _h.HISTORY_PATH = os.path.join(iso, "history.json")
+        _h.HISTORY_KEY = os.path.join(iso, "history.key")
+        _s.STATE_DIR = iso
+        _s._LOG_PATH = os.path.join(iso, "daemon.log")
+
+        # Peer known to the recipient (friend handshake happened above), but we
+        # capture rather than rely on its socket: the refusal must happen before
+        # any socket write.
+        _s._peers[ida] = {"id": ida, "name": "Alpha", "address": "127.0.0.1",
+                          "port": 4991, "httpPort": None, "status": "available",
+                          "lastSeen": int(time.time() * 1000), "version": ""}
+
+        cap_dir = os.path.join(hb, "dl-cap"); os.makedirs(cap_dir, exist_ok=True)
+        _s.CONFIG["downloadDir"] = cap_dir
+
+        # A message in the recipient's history advertising a 1 TiB file, the way
+        # a real inbound attachment message carries {name,size,fileId,sha256}.
+        BIG = 1024 * 1024 * 1024 * 1024
+        _s.append_history({"mid": "mbig", "from": ida, "to": _s.host_id(),
+                           "text": "huge file", "outgoing": False,
+                           "attachment": {"name": "huge.bin", "size": BIG,
+                                          "mime": "application/octet-stream",
+                                          "fileId": "big1", "sha256": ""}})
+
+        real_cap = _att.ATT_MAX_BYTES
+        _att.ATT_MAX_BYTES = 10 * 1024 * 1024  # recipient allows 10 MiB
+
+        # Record what the accept path actually hands to _dl_begin: the declared
+        # total must arrive there, not be discovered mid-stream.
+        seen_args = {}
+        real_begin = _s._dl_begin
+
+        def _spy_begin(file_id, peer_id, save_to, sha256, mid, room="", total=0):
+            seen_args["file_id"] = file_id
+            seen_args["total"] = total
+            return real_begin(file_id, peer_id, save_to, sha256, mid, room, total)
+
+        # A peer that got this far would get chunks; prove it never does.
+        writes = []
+        real_write = _s._write
+
+        def _spy_write(pid, obj):
+            writes.append(obj)
+            return real_write(pid, obj)
+
+        captured = []
+        orig_emit, orig_log = _s._emit, _s._log
+        logs = []
+        _s._emit = lambda e: captured.append(e)
+        _s._log = lambda m: logs.append(m)
+        _s._write = _spy_write
+        _s._dl_begin = _spy_begin
+        try:
+            _s.handle_command({"cmd": "acceptAttachment", "from": ida, "fileId": "big1",
+                               "name": "huge.bin", "mid": "mbig", "sha256": ""})
+        finally:
+            _s._emit, _s._log = orig_emit, orig_log
+            _s._write = real_write
+            _s._dl_begin = real_begin
+            _att.ATT_MAX_BYTES = real_cap
+            _h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH = _restore[0]
+
+        assert seen_args.get("total") == BIG, \
+            "accept path must pass the advertised size into _dl_begin, got %r" % (seen_args,)
+        assert seen_args.get("file_id") == "big1", "wrong transfer was targeted: %r" % (seen_args,)
+        assert _att.last_refusal_reason == "disk-budget", \
+            "over-capacity accept must refuse with disk-budget, got %r" % _att.last_refusal_reason
+        saved_ev = [e for e in captured if e.get("event") == "attachment-saved"]
+        assert saved_ev and saved_ev[0].get("ok") is False, \
+            "over-capacity accept must emit attachment-saved ok:false: %r" % (captured,)
+        assert "disk" in (saved_ev[0].get("error") or "").lower(), \
+            "user-facing error should name the disk limit: %r" % (saved_ev[0],)
+        # No bytes were requested: the recipient never sent attachmentRequest.
+        assert not [w for w in writes if w.get("t") == "attachmentRequest"], \
+            "recipient asked the sender to stream an over-capacity file: %r" % (writes,)
+        assert [w for w in writes if w.get("t") == "attachmentError"], \
+            "sender must be told the pull failed: %r" % (writes,)
+        # No residue: no final file, no .part.
+        assert not os.path.exists(os.path.join(cap_dir, "huge.bin")), "refused file was saved"
+        assert not os.path.exists(os.path.join(cap_dir, "huge.bin.part")), "refused file left .part"
+        assert not _att._dl, "refused transfer left a live reassembly entry"
+        assert any("reason=disk-budget" in m for m in logs), \
+            "capacity refusal must be logged: %r" % (logs,)
+        print("OK  over-capacity attachment refused at accept time "
+              "(no attachmentRequest, no bytes, no .part)")
 
         # ---- 4) _safe_filename unit behaviour ------------------------------
         import server as _s

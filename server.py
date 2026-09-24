@@ -90,6 +90,7 @@ from history import (  # noqa: F401
     clear_history_for_peer,
     delete_message,
     edit_message,
+    find_message,
     history_for_peer,
     history_for_room,
     history_snapshot,
@@ -593,6 +594,15 @@ def load_config() -> None:
     # When False, the agent can send messages to friends but cannot read
     # history, list peers, or download attachments.
     STATE.config.setdefault("apiFullAccess", False)
+    # Attachment disk limits (bytes). The defaults in attachments.py are
+    # deliberately conservative; these keys let a user who legitimately moves
+    # bigger files raise them on THEIR machine. They are applied (and clamped)
+    # by attachments.apply_config_limits below — an override can move a limit,
+    # never remove one. See README "Attachment size limits".
+    STATE.config.setdefault("attachmentMaxBytes", attachments.ATT_MAX_BYTES_DEFAULT)
+    STATE.config.setdefault("attachmentMaxReservedBytes", attachments.ATT_MAX_RESERVED_BYTES_DEFAULT)
+    STATE.config.setdefault("attachmentMinFreeBytes", attachments.ATT_MIN_FREE_BYTES_DEFAULT)
+    attachments.apply_config_limits(STATE.config)
     # Panel size: "small" | "medium" | "large" | "xl" | "full".
     STATE.config.setdefault("panelSize", "medium")
     # Manual pixel override for panel size (0 = follow the preset).
@@ -2099,8 +2109,18 @@ def _handle_incoming(msg: dict, addr) -> None:
         file_id = str(msg.get("fileId", ""))
         mid = str(msg.get("mid", ""))
         if msg.get("t") == "attachmentChunk":
+            # `total` is peer-supplied: coerce defensively so a non-numeric or
+            # negative value cannot reach the reservation arithmetic (an
+            # uncaught TypeError here would kill the reader thread and drop
+            # the whole connection).
+            try:
+                _total = int(msg.get("total") or 0)
+            except (TypeError, ValueError):
+                _total = 0
+            if _total < 0:
+                _total = 0
             ok, total, written = _dl_chunk(
-                file_id, from_pid, str(msg.get("data", "")), int(msg.get("total") or 0))
+                file_id, from_pid, str(msg.get("data", "")), _total)
             if ok:
                 _emit({"event": "attachment-progress", "fileId": file_id, "mid": mid,
                        "bytes": written, "total": total})
@@ -2459,6 +2479,7 @@ def handle_command(cmd: dict) -> None:
         return
     if kind == "send":
         att = cmd.get("attachment")
+        att_refused = False
         if att and att.get("path"):
             # Local file: register it for the receiver to fetch, build metadata.
             path = str(att["path"])
@@ -2468,9 +2489,27 @@ def handle_command(cmd: dict) -> None:
                 size = os.path.getsize(path)
             except OSError:
                 size = 0
-            register_attachment(file_id, path, name)
-            att = {"name": name, "size": size, "mime": "application/octet-stream",
-                   "fileId": file_id, "sha256": _file_sha256(path)}
+            if not register_attachment(file_id, path, name):
+                # Over the per-file ceiling (or unreadable). Registration is
+                # what lets the receiver pull the bytes, so without it the
+                # message would arrive with an attachment that can never be
+                # saved — the classic silent half-send. Tell the user instead
+                # and drop the attachment; the text still sends.
+                _emit({"event": "error",
+                       "message": "%s is larger than the %s attachment limit — not sent"
+                                  % (name, attachments.fmt_bytes(attachments.ATT_MAX_BYTES))})
+                _diag("attachment-send-refused", name=name, size=size,
+                      limit=attachments.ATT_MAX_BYTES)
+                att = None
+                att_refused = True
+            else:
+                att = {"name": name, "size": size, "mime": "application/octet-stream",
+                       "fileId": file_id, "sha256": _file_sha256(path)}
+        # A file-only send whose file was refused must not send a blank message
+        # (the recipient drops empty messages; our own history would keep a
+        # ghost bubble). Text + refused file still sends the text.
+        if att_refused and not str(cmd.get("text", "")).strip():
+            return
         send_message(
             str(cmd.get("to", "")),
             str(cmd.get("text", "")),
@@ -2512,10 +2551,19 @@ def handle_command(cmd: dict) -> None:
                     fsize = os.path.getsize(path_f)
                 except OSError:
                     fsize = 0
-                register_attachment(fid, path_f, fname)
-                att_f = {"name": fname, "size": fsize, "mime": "application/octet-stream",
-                         "fileId": fid, "sha256": _file_sha256(path_f)}
-                rooms.post_room_file(room_id_f, att_f, str(cmd.get("text", "")))
+                if not register_attachment(fid, path_f, fname):
+                    # Same limit as a 1:1 send: posting metadata for a file no
+                    # member can ever pull would leave a dead 📎 bubble in the
+                    # room. Refuse with a visible reason instead.
+                    _emit({"event": "error",
+                           "message": "%s is larger than the %s attachment limit — not posted"
+                                      % (fname, attachments.fmt_bytes(attachments.ATT_MAX_BYTES))})
+                    _diag("room-file-refused", name=fname, size=fsize,
+                          limit=attachments.ATT_MAX_BYTES)
+                else:
+                    att_f = {"name": fname, "size": fsize, "mime": "application/octet-stream",
+                             "fileId": fid, "sha256": _file_sha256(path_f)}
+                    rooms.post_room_file(room_id_f, att_f, str(cmd.get("text", "")))
         else:
             rooms.post_room_file(room_id_f, att_f, str(cmd.get("text", "")))
     elif kind == "roomInvite":
@@ -2656,7 +2704,19 @@ def handle_command(cmd: dict) -> None:
         mid = str(cmd.get("mid", ""))
         sha256 = str(cmd.get("sha256", ""))
         save_to = os.path.join(STATE.config.get("downloadDir", os.path.expanduser("~/Downloads")), name)
-        if not _dl_begin(file_id, peer_id, save_to, sha256, mid, str(cmd.get("room", ""))):
+        # The sender advertised this attachment's size on the message metadata,
+        # so pass it into _dl_begin: an over-capacity file is refused BEFORE we
+        # ask for a single byte. Without it the first chunk would carry the
+        # total and the refusal would happen mid-stream, after the sender has
+        # already been asked to stream the file.
+        _msg = find_message(mid) or {}
+        _att_meta = _msg.get("attachment") or {}
+        try:
+            _declared_total = int(_att_meta.get("size") or 0)
+        except (TypeError, ValueError):
+            _declared_total = 0
+        if not _dl_begin(file_id, peer_id, save_to, sha256, mid,
+                         str(cmd.get("room", "")), _declared_total):
             # Distinguish "busy" (per-peer or global cap reached) from a local
             # I/O failure: busy is transient and the sender may retry shortly.
             err, ui_err = refusal_error(attachments.last_refusal_reason)
@@ -3096,6 +3156,12 @@ def main() -> None:
         pass
 
     load_config()
+    # Surface the enforced attachment disk limits at startup so a capacity
+    # refusal is diagnosable from the log alone (defaults vs config overrides).
+    _diag("attachment-limits",
+          per_file=attachments.ATT_MAX_BYTES,
+          aggregate=attachments.ATT_MAX_RESERVED_BYTES,
+          keep_free=attachments.ATT_MIN_FREE_BYTES)
     load_history()
     rooms.load_rooms()
     # Recover any friends the config may have lost (a config-save slippage or

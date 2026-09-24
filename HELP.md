@@ -204,6 +204,12 @@ except `/health` require the token in `~/.config/omarchy/lanchat.json`.
 - Config: `~/.config/omarchy/lanchat.json`
 - TLS identity: `~/.config/omarchy/lanchat-certs/`
 - Message history: `~/.local/state/lanchat/history.json` (per machine)
+- **File size limits** — incoming files can't fill your disk: 4 GiB per file,
+  8 GiB across all downloads at once, and 4 GiB always left free on the drive.
+  A file that doesn't fit is refused with a clear message before any bytes are
+  pulled. If you legitimately move bigger files, raise the limits in
+  `lanchat.json` (bytes): `attachmentMaxBytes`, `attachmentMaxReservedBytes`,
+  `attachmentMinFreeBytes`, then restart the daemon.
 
 ## The daemon & troubleshooting
 

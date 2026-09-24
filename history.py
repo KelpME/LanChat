@@ -182,6 +182,19 @@ def _has_mid(mid: str) -> bool:
         return mid in _seen_mids
 
 
+def find_message(mid: str):
+    """The history message with this mid, or None. Used by the attachment
+    accept path to read back the advertised attachment metadata (size) the
+    sender put on the message."""
+    if not mid:
+        return None
+    with STATE.hist_lock:
+        for m in STATE.history:
+            if m.get("mid") == mid:
+                return m
+    return None
+
+
 def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
     """Lazy-load a peer's thread, newest-last, paged by offset/limit."""
     with STATE.hist_lock:

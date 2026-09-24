@@ -225,6 +225,37 @@ agents) — it is not needed for peer messaging.
 | `showTyping`  | `true`             | Show friends' typing indicators                       |
 | `readReceiptsEnabled` | `true`      | Send read receipts to friends                        |
 | `showReadReceipts` | `true`         | Show friends' read receipts                          |
+| `attachmentMaxBytes` | `4294967296` | Largest single attachment accepted (4 GiB), bytes   |
+| `attachmentMaxReservedBytes` | `8589934592` | Total disk all concurrent transfers may occupy (8 GiB) |
+| `attachmentMinFreeBytes` | `4294967296` | Disk always kept free — never filled by transfers (4 GiB) |
+
+### Attachment size limits
+
+Files ride the authenticated friend socket, and the recipient decides how much
+disk it is willing to give them. Three independent gates apply to every
+incoming file, checked **before a single byte is requested** and rechecked
+**while the file is being written**:
+
+1. **Per-file ceiling** — `attachmentMaxBytes` (default 4 GiB). A file bigger
+   than this is refused when you press Save.
+2. **Aggregate budget** — `attachmentMaxReservedBytes` (default 8 GiB). The sum
+   of everything downloading at once, so a few transfers can't pile up past it.
+3. **Keep-free floor** — `attachmentMinFreeBytes` (default 4 GiB). Attachments
+   never eat the last slice of your disk; a transfer that would push available
+   capacity below this is refused, and one that starts on a healthy disk is
+   stopped mid-write when the disk fills up.
+
+Refusals say so: the Save bar reports `attachment too large for the allowed
+disk space` (or `cannot verify free disk space — download refused` if the disk
+state can't be read), the sender gets an error instead of streaming, and the
+daemon log carries the numbers that produced the refusal. The enforced limits
+are logged at startup as `attachment-limits per_file=… aggregate=… keep_free=…`.
+
+If you legitimately move bigger files, raise the numbers in `lanchat.json` —
+bytes, e.g. `"attachmentMaxBytes": 34359738368` (32 GiB). An override can move
+a limit but never remove one: values are clamped to 64 MiB–1 TiB, junk is
+ignored, and the per-file ceiling is capped at the aggregate budget. The daemon
+must be restarted (`systemctl --user restart lanchat`) to pick up a change.
 
 ## Using the app
 
@@ -348,6 +379,16 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 - **Transport hardening** (1.2.2) — per-connection buffered input is bounded
   (512 KB) and concurrent inbound connections are capped (64), so a flooding
   LAN peer can't exhaust memory or threads.
+- **Attachment disk limits** — being a friend does not entitle a peer to fill
+  your disk. Accepting a file is gated by a per-file ceiling (4 GiB), an
+  aggregate budget across concurrent transfers (8 GiB), and a keep-free floor
+  (4 GiB), all measured against the destination filesystem. The declared size is
+  validated **before** the recipient requests a single byte, the download
+  directory is created and verified first, free space is re-checked **while
+  writing**, and a filesystem that cannot be inspected **fails closed** (the
+  transfer is refused rather than assumed to fit). Limits are configurable per
+  machine but can be moved, never removed (clamped 64 MiB–1 TiB). See
+  [Attachment size limits](#attachment-size-limits).
 - **At-rest encryption** (1.2.3) — message history is AES-256-GCM encrypted on
   disk with a dedicated 0600 key, so `history.json` isn't readable as
   plaintext. This protects the file in isolation (a backup, a copy, sync);

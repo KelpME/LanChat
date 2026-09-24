@@ -251,6 +251,12 @@ except <code>/health</code> require the token in <code>~/.config/omarchy/lanchat
 <li>Config: <code>~/.config/omarchy/lanchat.json</code></li>
 <li>TLS identity: <code>~/.config/omarchy/lanchat-certs/</code></li>
 <li>Message history: <code>~/.local/state/lanchat/history.json</code> (per machine)</li>
+<li><strong>File size limits</strong> — incoming files can't fill your disk: 4 GiB per file,
+  8 GiB across all downloads at once, and 4 GiB always left free on the drive.
+  A file that doesn't fit is refused with a clear message before any bytes are
+  pulled. If you legitimately move bigger files, raise the limits in
+  <code>lanchat.json</code> (bytes): <code>attachmentMaxBytes</code>, <code>attachmentMaxReservedBytes</code>,
+  <code>attachmentMinFreeBytes</code>, then restart the daemon.</li>
 </ul>
 <h2>The daemon &amp; troubleshooting</h2>
 <p>Lanchat's daemon runs as a <strong>systemd user service</strong> (not a child of the shell),
