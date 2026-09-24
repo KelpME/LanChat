@@ -95,6 +95,7 @@ from history import (  # noqa: F401
     history_for_room,
     history_snapshot,
     load_history,
+    mark_attachment_dismissed,
     mark_attachment_gone,
     mark_attachment_saved,
 )
@@ -274,7 +275,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.80"
+VERSION = "1.5.81"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2731,6 +2732,15 @@ def handle_command(cmd: dict) -> None:
                "keepFreeBytes": eff["ATT_MIN_FREE_BYTES"]})
         _diag("attachment-limits-updated", per_file=eff["ATT_MAX_BYTES"],
               aggregate=eff["ATT_MAX_RESERVED_BYTES"])
+    elif kind == "dismissAttachment":
+        # Save-bar ✕: the user declines this attachment. Flagged in history
+        # (persisted) so the bar never comes back — including across daemon
+        # restarts and history reloads. Idempotent: an unknown mid still
+        # echoes the event so the UI always clears its bar.
+        _d_mid = str(cmd.get("mid", ""))
+        mark_attachment_dismissed(_d_mid)
+        _log("attachment-dismissed mid=%s" % _d_mid[:12])
+        _emit({"event": "attachment-dismissed", "mid": _d_mid})
     elif kind == "acceptAttachment":
         peer_id = str(cmd.get("from", ""))
         if not peer_id or find_peer(peer_id) is None:

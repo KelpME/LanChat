@@ -212,6 +212,22 @@ def mark_attachment_gone(mid: str) -> bool:
     return False
 
 
+def mark_attachment_dismissed(mid: str) -> bool:
+    """Flag a message's attachment as dismissed by the user (the Save bar's
+    ✕). Persisted like mark_attachment_saved so the bar stays gone across
+    history reloads. Returns True when a matching attachment message was
+    flagged, False otherwise (unknown mid / no attachment)."""
+    if not mid:
+        return False
+    with STATE.hist_lock:
+        for m in STATE.history:
+            if m.get("mid") == mid and m.get("attachment"):
+                m["attachment"]["dismissed"] = True
+                _save_history_locked()
+                return True
+    return False
+
+
 def history_for_peer(peer_id: str, offset: int = 0, limit: int = 100) -> dict:
     """Lazy-load a peer's thread, newest-last, paged by offset/limit."""
     with STATE.hist_lock:

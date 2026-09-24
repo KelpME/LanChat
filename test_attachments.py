@@ -1020,6 +1020,63 @@ def test_stale_attachment_gone():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_attachment_dismiss():
+    """Unit test: the Save-bar ✕ (dismissAttachment) flags the message's
+    attachment dismissed in history (persisted across reloads) and echoes an
+    attachment-dismissed event so the UI always clears its bar — including for
+    an unknown mid (idempotent)."""
+    import tempfile
+
+    import history as _h
+    import server as _s
+
+    tmp = tempfile.mkdtemp(prefix="lanchat-dismiss-")
+    iso = os.path.join(tmp, "state"); os.makedirs(iso, exist_ok=True)
+    saved = (_h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH)
+    _h.STATE_DIR = iso
+    _h.HISTORY_PATH = os.path.join(iso, "history.json")
+    _h.HISTORY_KEY = os.path.join(iso, "history.key")
+    _s.STATE_DIR = iso
+    _s._LOG_PATH = os.path.join(iso, "daemon.log")
+    _s.CONFIG["token"] = TOKEN
+    _s.STATE.stdout = open(os.devnull, "w")
+    # history.STATE must be THE server State: earlier tests rebind it to stubs.
+    _h.init(_s.STATE)
+
+    _s.append_history({"mid": "mdis", "from": "peerz", "to": _s.host_id(),
+                       "text": "file", "outgoing": False,
+                       "attachment": {"name": "a.bin", "size": 1,
+                                      "mime": "a/b", "fileId": "d1", "sha256": ""}})
+    captured = []
+    real_emit = _s._emit
+    _s._emit = lambda e: captured.append(e)
+    try:
+        _s.handle_command({"cmd": "dismissAttachment", "mid": "mdis"})
+        evs = [e for e in captured if e.get("event") == "attachment-dismissed"]
+        assert evs and evs[0]["mid"] == "mdis", "dismiss event must echo: %r" % (captured,)
+        with _s.STATE.hist_lock:
+            m = [x for x in _s.STATE.history if x.get("mid") == "mdis"][0]
+            assert m["attachment"].get("dismissed") is True, "history not flagged dismissed"
+        # Idempotent: unknown mid still echoes (UI clears its bar regardless).
+        captured.clear()
+        _s.handle_command({"cmd": "dismissAttachment", "mid": "nope"})
+        evs = [e for e in captured if e.get("event") == "attachment-dismissed"]
+        assert evs and evs[0]["mid"] == "nope", "unknown mid must still echo: %r" % (captured,)
+        # Persists across a reload.
+        _s2 = type("S", (), {})()
+        _s2.hist_lock = threading.Lock(); _s2.history = []; _s2.hist_crypto = None
+        _h.init(_s2)
+        _h.load_history()
+        with _s2.hist_lock:
+            m = [x for x in _s2.history if x.get("mid") == "mdis"][0]
+            assert m["attachment"].get("dismissed") is True, "dismissed flag not persisted"
+        print("OK  Save-bar ✕: dismissed flag persisted, event echoes, idempotent")
+    finally:
+        _s._emit = real_emit
+        _h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     test_mark_attachment_saved()
     test_busy_error_mapping()
@@ -1027,6 +1084,7 @@ def main():
     test_sender_side_over_cap()
     test_settings_attachment_max()
     test_stale_attachment_gone()
+    test_attachment_dismiss()
     test_attachment_limits()
     test_http_attachment_streaming()
     ha = make_home("a", 4991, "Alpha"); hb = make_home("b", 4992, "Beta")

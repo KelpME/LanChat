@@ -621,6 +621,13 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setAttachmentMax", gib: gib }) + "\n")
   }
 
+  function dismissAttachment(mid) {
+    // Save-bar ✕: decline this attachment. The daemon flags it dismissed in
+    // history (persisted) and echoes attachment-dismissed — the bar clears
+    // there, never optimistically, so the flag is authoritative.
+    daemon.write(JSON.stringify({ cmd: "dismissAttachment", mid: mid }) + "\n")
+  }
+
   // Accept an incoming file: ask the daemon to pull it from the sender and
   // save it. mid + sha256 let the daemon echo the right completion and verify
   // the download. Sets live download state so the UI can show progress.
@@ -1082,6 +1089,19 @@ QtObject {
 
     case "attachment-limits":
       if (obj.perFileBytes !== undefined) lanchat.attachmentMaxBytes = obj.perFileBytes
+      break
+
+    case "attachment-dismissed":
+      if (obj.mid) {
+        var dupd = lanchat.messages.slice()
+        for (var di = 0; di < dupd.length; di++) {
+          if (dupd[di].mid === obj.mid && dupd[di].attachment) {
+            dupd[di].attachment.dismissed = true
+            break
+          }
+        }
+        lanchat.messages = dupd
+      }
       break
 
     case "chat-cleared":

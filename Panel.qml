@@ -126,7 +126,8 @@ Panel {
     for (var i = all.length - 1; i >= 0; i--) {
       var m = all[i]
       if (!m.outgoing && m.from === selectedPeerId && m.attachment
-          && !m.attachment.accepted && !m.attachment.gone)
+          && !m.attachment.accepted && !m.attachment.gone
+          && !m.attachment.dismissed)
         return m
     }
     return null
@@ -1207,7 +1208,7 @@ Panel {
 
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
-                  width: Math.max(10, parent.width - Style.space(84))
+                  width: Math.max(10, parent.width - Style.space(118))
                   text: {
                     var p = root.pendingAttachment
                     if (p) {
@@ -1238,6 +1239,29 @@ Panel {
                     var p = root.pendingAttachment
                     if (p)
                       Lanchat.acceptAttachment(p.from, p.attachment.fileId, p.attachment.name, p.mid, p.attachment.sha256 || "")
+                  }
+                }
+
+                // Dismiss (✕): decline this attachment. The daemon flags it
+                // dismissed in history (persisted) so the bar never returns —
+                // unlike a failed save, which stays retryable. Hidden while a
+                // download is in flight so ✕ can't cancel a live transfer.
+                Button {
+                  visible: root.pendingAttachment !== null && !root.pendingDownloading
+                  width: Style.space(28)
+                  text: "\u2715"
+                  fontSize: Style.font.caption
+                  ToolTip.visible: dismissHover.containsMouse
+                  ToolTip.text: "Dismiss this file — no Save prompt for it anymore"
+                  MouseArea {
+                    id: dismissHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                  }
+                  onClicked: {
+                    var p = root.pendingAttachment
+                    if (p) Lanchat.dismissAttachment(p.mid)
                   }
                 }
               }
