@@ -304,15 +304,21 @@ def _probe_free(path: str):
     return st.f_bavail * st.f_frsize
 
 
-def _fits_reservation(reserved: int, need: int, free) -> bool:
+def _fits_reservation(reserved: int, need: int, free,
+                      cap: int | None = None) -> bool:
     """One rule, used by BOTH gates (_dl_begin's acceptance test and
     _dl_chunk's re-check when a total arrives or capacity is re-read):
     a transfer is allowed only if
       1. it fits its own per-file ceiling,
       2. reserved + it fits the aggregate budget, and
       3. the filesystem can hold it while keeping ATT_MIN_FREE_BYTES free.
-    free = None (capacity unknown) fails closed."""
-    if need > ATT_MAX_BYTES:
+    free = None (capacity unknown) fails closed. cap = the per-file ceiling to
+    enforce; it defaults to the LIVE ATT_MAX_BYTES, but an in-flight transfer
+    always passes the cap it was accepted under (snapshot taken in _dl_begin),
+    so a later settings change shrinks new transfers without killing ones
+    already in progress. The AGGREGATE budget is always live — a snapshot
+    there could over-commit the disk."""
+    if need > (ATT_MAX_BYTES if cap is None else cap):
         return False
     if reserved + need > ATT_MAX_RESERVED_BYTES:
         return False
@@ -410,6 +416,12 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, r
             return _refuse("disk-unknown")
 
         reserved = _reserved_bytes_locked()
+        # Snapshot the per-file ceiling NOW: this transfer keeps the cap it
+        # was accepted under for its whole life, so a later settings change
+        # shrinks new transfers without aborting this one mid-stream. The
+        # aggregate budget and free-space floor stay live — they are disk-wide
+        # guarantees, not per-transfer promises.
+        cap = ATT_MAX_BYTES
         # A declared total is a promise about disk, so it must clear every gate
         # BEFORE a byte is requested — this is the check the old code skipped
         # for the first transfer (its `reserved > 0` guard let reserved == 0
@@ -417,9 +429,9 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, r
         # transfer is still bound by its own ceiling, the aggregate budget, and
         # the free-space floor.
         if total:
-            if not _fits_reservation(reserved, total, free):
+            if not _fits_reservation(reserved, total, free, cap):
                 detail = "total=%d cap=%d budget=%d free=%d floor=%d" % (
-                    total, ATT_MAX_BYTES, ATT_MAX_RESERVED_BYTES, free, ATT_MIN_FREE_BYTES)
+                    total, cap, ATT_MAX_RESERVED_BYTES, free, ATT_MIN_FREE_BYTES)
                 return _refuse("disk-budget", detail)
         else:
             # No total declared yet: reserve the transfer's worst case so the
@@ -428,16 +440,16 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, r
             # The ceiling is also tested against this filesystem, so even a
             # transfer that never declares a total cannot push the disk below
             # the safety floor.
-            need = min(ATT_MAX_BYTES, max(0, free - ATT_MIN_FREE_BYTES))
-            if not _fits_reservation(reserved, need, free):
+            need = min(cap, max(0, free - ATT_MIN_FREE_BYTES))
+            if not _fits_reservation(reserved, need, free, cap):
                 detail = "worst-case=%d cap=%d budget=%d free=%d floor=%d" % (
-                    need, ATT_MAX_BYTES, ATT_MAX_RESERVED_BYTES, free, ATT_MIN_FREE_BYTES)
+                    need, cap, ATT_MAX_RESERVED_BYTES, free, ATT_MIN_FREE_BYTES)
                 return _refuse("disk-budget", detail)
 
         last_refusal_reason = None
         _dl[file_id] = {"save_to": save_to, "tmp": tmp, "fh": fh, "mid": mid,
                         "sha256": sha256, "total": total, "written": 0,
-                        "peer": peer_id, "ts": now, "room": room,
+                        "peer": peer_id, "ts": now, "room": room, "cap": cap,
                         "next_disk_check": ATT_DISK_CHECK_INTERVAL_BYTES}
         _last_dl_peer[file_id] = peer_id
     return True
@@ -447,9 +459,12 @@ def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
     """Decode + append one chunk from the sender. Returns (ok, total, written).
 
     Enforcement layers, all re-checked on every chunk:
-      - the per-file ceiling: a declared total over ATT_MAX_BYTES aborts
-        immediately, and the cumulative write can never pass it (the backstop
-        for a sender that lies about, or never sends, the total);
+      - the per-file ceiling SNAPSHOT taken when the transfer was accepted
+        (d["cap"]): a declared total over it aborts immediately, and the
+        cumulative write can never pass it (the backstop for a sender that
+        lies about, or never sends, the total). A later settings change
+        shrinks NEW transfers; in-flight ones keep the ceiling they were
+        accepted under;
       - the declared total is final once set, and bytes can never exceed it;
       - the aggregate reservation: when a total arrives mid-stream it replaces
         the bytes-written reservation, and the new figure must still fit the
@@ -467,7 +482,7 @@ def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
             if not isinstance(total, int) or total < 0:
                 _dl_abort_locked(file_id, d, "bad-total")
                 return (False, 0, d["written"])
-            if total > ATT_MAX_BYTES:
+            if total > d["cap"]:
                 _dl_abort_locked(file_id, d, "over-per-file-cap")
                 return (False, total, d["written"])
             # A total, once declared, is final: a later chunk claiming a
@@ -481,7 +496,7 @@ def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
                 # remaining capacity, replacing the bytes-written reservation.
                 reserved = _reserved_bytes_locked() - d["written"]
                 free = _probe_free(d["tmp"])
-                if not _fits_reservation(reserved, total, free):
+                if not _fits_reservation(reserved, total, free, d["cap"]):
                     _dl_abort_locked(file_id, d, "disk-budget")
                     return (False, total, d["written"])
             d["total"] = total
@@ -495,7 +510,7 @@ def _dl_chunk(file_id: str, peer_id: str, data_b64: str, total: int):
             raw = base64.b64decode(data_b64)
         except Exception:
             return (False, d["total"], d["written"])
-        if d["written"] + len(raw) > ATT_MAX_BYTES:
+        if d["written"] + len(raw) > d["cap"]:
             _dl_abort_locked(file_id, d, "over-per-file-cap")
             return (False, d["total"], d["written"])
         if d["total"] and d["written"] + len(raw) > d["total"]:

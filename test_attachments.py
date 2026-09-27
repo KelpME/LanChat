@@ -250,6 +250,48 @@ def test_attachment_limits():
             assert ok is False, "chunk into aborted transfer accepted"
             print("OK  cumulative write over ATT_MAX_BYTES aborts, entry unusable")
 
+            # ---- 4a) ceiling snapshot: lowering the cap mid-transfer -------
+            # must NOT kill an in-flight transfer; it only binds new ones.
+            real_cap_4a = att.ATT_MAX_BYTES
+            try:
+                att.ATT_MAX_BYTES = 1024 * 1024
+                save = os.path.join(tmp, "snapshot.bin")
+                assert att._dl_begin("t4a", "peer1", save, "", "m4a")
+                part = save + ".part"
+                data4a = base64.b64encode(b"\0" * 10).decode()
+                ok, _, written = att._dl_chunk("t4a", "peer1", data4a, 100)
+                assert ok and written == 10, "in-flight chunk failed before cap drop"
+                # Lower the live ceiling below the in-flight file's total...
+                att.ATT_MAX_BYTES = 50
+                # ...the in-flight transfer keeps its accepted cap and finishes.
+                ok, _, written = att._dl_chunk("t4a", "peer1", data4a, 0)
+                assert ok and written == 20, \
+                    "lowering the live ceiling aborted an in-flight transfer"
+                ok, _, _ = att._dl_chunk("t4a", "peer1", data4a, 0)
+                assert ok, "grandfathered transfer aborted mid-stream"
+                # ...but a NEW transfer is refused under the lowered cap.
+                save2 = os.path.join(tmp, "snapshot-new.bin")
+                ok = att._dl_begin("t4a-new", "peer1", save2, "", "m4a-new",
+                                   total=100)
+                assert ok is False, "new transfer accepted over lowered cap"
+                assert att.last_refusal_reason == "disk-budget", \
+                    "expected disk-budget refusal, got %s" % att.last_refusal_reason
+                # and a new transfer within the lowered cap still works.
+                ok = att._dl_begin("t4a-ok", "peer1", save2, "", "m4a-ok", total=40)
+                assert ok, "new transfer within lowered cap refused"
+                ok, _, written = att._dl_chunk("t4a-ok", "peer1",
+                                               base64.b64encode(b"\0" * 40).decode(), 40)
+                assert ok and written == 40, "chunk under lowered cap failed"
+                att._dl_finish("t4a-ok", "peer1", True)
+                att._dl_finish("t4a", "peer1", True)
+                print("OK  ceiling snapshot: lowering cap spares in-flight "
+                      "transfer, refuses/limits new ones")
+            finally:
+                att.ATT_MAX_BYTES = real_cap_4a
+                with st.dl_lock:
+                    att._dl.pop("t4a", None)
+                    att._dl.pop("t4a-ok", None)
+
             # ---- 4b) disk-full on write tears the transfer down now --------
             save = os.path.join(tmp, "diskfull.bin")
             assert att._dl_begin("t4b", "peer1", save, "", "m4b")
