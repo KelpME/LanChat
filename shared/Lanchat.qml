@@ -76,7 +76,11 @@ QtObject {
   property int sendDelay: 0
   // Per-file attachment ceiling (bytes) — shown in Settings as GiB. The
   // daemon is the source of truth; updated from ready + attachment-limits.
-  property int attachmentMaxBytes: 4 * 1024 * 1024 * 1024
+  // double, NOT int: byte counts exceed int32 (4 GiB default literal and any
+  // config > 2 GiB wrap to 0/negative in a QML int, flagging EVERY file as
+  // too large — bench-verified). dlBytes/dlTotal below are double for the
+  // same reason.
+  property double attachmentMaxBytes: 4 * 1024 * 1024 * 1024
   readonly property int attachmentMaxGiB: Math.max(1, Math.round(attachmentMaxBytes / (1024 * 1024 * 1024)))
   property var pendingSends: []  // [{mid, to, text, remaining, total}] undo-window
   property var friendRequests: [] // [{peerId, name, outgoing, ts, mid}] pending friend requests (notifications)
