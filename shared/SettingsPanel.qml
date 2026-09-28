@@ -954,6 +954,38 @@ Item {
                     anchors.left: parent.left
                     anchors.leftMargin: Style.spacing.sm
                     anchors.verticalCenter: parent.verticalCenter
+                    text: "Parallel downloads per friend"
+                    color: Color.popups.text
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.weight: Font.Bold
+                  }
+
+                  TextField {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.spacing.sm
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(48)
+                    text: Lanchat.perPeerSlots
+                    maximumLength: 2
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(4)
+                    onEditingFinished: {
+                      var v = parseInt(text, 10)
+                      if (!isNaN(v) && v >= 1) Lanchat.setPerPeerSlots(v)
+                      else text = Lanchat.perPeerSlots
+                    }
+                  }
+                }
+
+                Item {
+                  width: parent.width
+                  height: Style.space(30)
+
+                  Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.spacing.sm
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "Clear all chats"
                     color: Color.popups.text
                     font.family: Style.font.family

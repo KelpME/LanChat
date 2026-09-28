@@ -170,6 +170,11 @@ online/offline, or pick a status.
 - **Max file size** — the largest file you will accept, in GiB (default 4).
   Applied immediately — no restart. Raising it also raises the total download
   budget to twice the per-file max; the drive always keeps 4 GiB free.
+- **Parallel downloads per friend** — how many files you will download
+  concurrently from ONE friend (default 2, range 1–8). Applied immediately —
+  no restart. Raising it also raises the total download budget so that
+  slots × max file size can actually be in flight at once; the global cap
+  across ALL friends stays 8.
 - **Rooms: members pick their colors** — owner-level room setting (shown when
   you own at least one room). Off = rooms you own render with the standard
   theme colors instead of member-picked colors.

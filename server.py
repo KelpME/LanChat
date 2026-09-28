@@ -2738,6 +2738,34 @@ def handle_command(cmd: dict) -> None:
                "keepFreeBytes": eff["ATT_MIN_FREE_BYTES"]})
         _diag("attachment-limits-updated", per_file=eff["ATT_MAX_BYTES"],
               aggregate=eff["ATT_MAX_RESERVED_BYTES"])
+    elif kind == "setPerPeerDownloads":
+        # Settings-menu control for the per-peer concurrent download cap
+        # (slots). Applied live AND persisted, mirroring setAttachmentMax.
+        # Raising the slots past the aggregate budget scales the budget to
+        # slots x per-file ceiling so slots x ceiling can actually be in
+        # flight at once — otherwise the extra slots would be fictional
+        # (allowed by the count check, refused by the budget check).
+        try:
+            slots = int(cmd.get("slots", 0))
+        except (TypeError, ValueError):
+            slots = 0
+        if slots < 1:
+            _emit({"event": "error", "message": "Parallel downloads per friend must be at least 1"})
+            return
+        budget = attachments.ATT_MAX_RESERVED_BYTES
+        if slots * attachments.ATT_MAX_BYTES > budget:
+            budget = min(slots * attachments.ATT_MAX_BYTES,
+                         attachments.ATT_LIMIT_HARD_MAX)
+            STATE.config["attachmentMaxReservedBytes"] = budget
+        STATE.config["attachmentMaxPerPeer"] = slots
+        eff = attachments.apply_config_limits(STATE.config)
+        _save_config()
+        _emit({"event": "attachment-limits",
+               "perFileBytes": eff["ATT_MAX_BYTES"],
+               "aggregateBytes": eff["ATT_MAX_RESERVED_BYTES"],
+               "keepFreeBytes": eff["ATT_MIN_FREE_BYTES"],
+               "perPeerSlots": eff["ATT_MAX_PER_PEER"]})
+        _diag("per-peer-slots-updated", slots=eff["ATT_MAX_PER_PEER"])
     elif kind == "dismissAttachment":
         # Save-bar ✕: the user declines this attachment. Flagged in history
         # (persisted) so the bar never comes back — including across daemon
@@ -3152,6 +3180,7 @@ def _ready_event() -> dict:
         "rooms": rooms.rooms_list(),
         "downloadDir": STATE.config.get("downloadDir", os.path.join(os.path.expanduser("~"), "Downloads")),
         "attachmentMaxBytes": attachments.ATT_MAX_BYTES,
+        "attachmentMaxPerPeer": attachments.ATT_MAX_PER_PEER,
         "sendDelay": STATE.config.get("sendDelay", 0),
         "apiFullAccess": api_full_access(),
         "panelSize": panel_size(),

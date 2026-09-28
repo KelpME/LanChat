@@ -1005,6 +1005,116 @@ def test_settings_attachment_max():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_settings_per_peer_downloads():
+    """Unit test: the Settings-menu command setPerPeerDownloads applies the
+    per-peer slot cap live AND persists it; the aggregate budget scales to
+    slots x per-file ceiling so the slots are actually reachable; absurd
+    values clamp (16 -> 8, the per-peer ceiling); junk is refused with a
+    visible error; ready events carry the value; the config-file key
+    attachmentMaxPerPeer flows through apply_config_limits with clamps."""
+    import tempfile
+
+    import attachments as _att
+    import history as _h
+    import server as _s
+
+    tmp = tempfile.mkdtemp(prefix="lanchat-perpeer-")
+    iso = os.path.join(tmp, "state"); os.makedirs(iso, exist_ok=True)
+    saved = (_h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH,
+             _s.CONFIG_PATH)
+    _h.STATE_DIR = iso
+    _h.HISTORY_PATH = os.path.join(iso, "history.json")
+    _h.HISTORY_KEY = os.path.join(iso, "history.key")
+    _s.STATE_DIR = iso
+    _s._LOG_PATH = os.path.join(iso, "daemon.log")
+    _s.CONFIG_PATH = os.path.join(iso, "lanchat.json")  # never the real config
+
+    _s.CONFIG["token"] = TOKEN
+    _s.STATE.stdout = open(os.devnull, "w")
+    _att.init(_s.STATE)
+    # Fresh attachment config: a prior suite in this process (e.g.
+    # test_settings_attachment_max) may have left 1 TiB-scale values in
+    # STATE.config, which would make the budget-scaling math meaningless.
+    # Snapshot and restore so other suites are unaffected.
+    cfg_saved = dict(_s.STATE.config)
+    _s.STATE.config["attachmentMaxBytes"] = _att.ATT_MAX_BYTES_DEFAULT
+    _s.STATE.config["attachmentMaxReservedBytes"] = _att.ATT_MAX_RESERVED_BYTES_DEFAULT
+    _s.STATE.config["attachmentMinFreeBytes"] = _att.ATT_MIN_FREE_BYTES_DEFAULT
+    _s.STATE.config["attachmentMaxPerPeer"] = _att.ATT_MAX_PER_PEER
+    _att.apply_config_limits(_s.STATE.config)
+
+    captured = []
+    real_emit = _s._emit
+    _s._emit = lambda e: captured.append(e)
+    real = (_att.ATT_MAX_BYTES, _att.ATT_MAX_RESERVED_BYTES, _att.ATT_MIN_FREE_BYTES,
+            _att.ATT_MAX_PER_PEER)
+    try:
+        # 4 slots: default ceiling is 4 GiB, so 4 x 4 GiB = 16 GiB > the 8 GiB
+        # default budget -> the budget scales to exactly 16 GiB (min(16 GiB,
+        # 1 TiB hard max)).
+        _s.handle_command({"cmd": "setPerPeerDownloads", "slots": 4})
+        assert _att.ATT_MAX_PER_PEER == 4, \
+            "per-peer cap not applied: %d" % _att.ATT_MAX_PER_PEER
+        assert _att.ATT_MAX_RESERVED_BYTES == 16 * 1024 ** 3, \
+            "budget must scale to slots x ceiling (4 x 4 GiB), got %d" \
+            % _att.ATT_MAX_RESERVED_BYTES
+        assert _s.STATE.config["attachmentMaxPerPeer"] == 4, "not persisted"
+        assert _s.STATE.config["attachmentMaxReservedBytes"] == 16 * 1024 ** 3, \
+            "scaled budget not persisted"
+        lim = [e for e in captured if e.get("event") == "attachment-limits"]
+        assert lim and lim[-1]["perPeerSlots"] == 4 \
+            and lim[-1]["aggregateBytes"] == 16 * 1024 ** 3, \
+            "effective values (incl. perPeerSlots) must be echoed: %r" % (captured,)
+        # The ready event carries the slot cap for UI init.
+        ready = _s._ready_event()
+        assert ready["attachmentMaxPerPeer"] == 4, "ready event missing slot cap"
+
+        # 16 slots: clamped to 8 (per-peer ceiling = min(8, global 8)). The
+        # budget follows the WANTED slots: 16 x 4 GiB = 64 GiB > 16 GiB ->
+        # scaled to 64 GiB. The extra headroom is harmless; the cap is 8.
+        captured.clear()
+        _s.handle_command({"cmd": "setPerPeerDownloads", "slots": 16})
+        assert _att.ATT_MAX_PER_PEER == 8, \
+            "slots must clamp to 8, got %d" % _att.ATT_MAX_PER_PEER
+        assert _att.ATT_MAX_RESERVED_BYTES == 64 * 1024 ** 3, \
+            "budget must scale to 16 x 4 GiB, got %d" % _att.ATT_MAX_RESERVED_BYTES
+        lim = [e for e in captured if e.get("event") == "attachment-limits"]
+        assert lim and lim[-1]["perPeerSlots"] == 8, \
+            "echo must carry the EFFECTIVE (clamped) slots: %r" % (captured,)
+
+        # Junk: 0 / negative -> visible error, limits unchanged.
+        captured.clear()
+        _s.handle_command({"cmd": "setPerPeerDownloads", "slots": 0})
+        errs = [e for e in captured if e.get("event") == "error"]
+        assert errs, "junk value must surface an error: %r" % (captured,)
+        assert _att.ATT_MAX_PER_PEER == 8, "junk must not change the cap"
+
+        # Config-file override flows through apply_config_limits with clamps.
+        eff = _att.apply_config_limits({"attachmentMaxPerPeer": 6})
+        assert eff["ATT_MAX_PER_PEER"] == 6 and _att.ATT_MAX_PER_PEER == 6, \
+            "config override must apply: %r" % (eff,)
+        eff = _att.apply_config_limits({"attachmentMaxPerPeer": 99})
+        assert eff["ATT_MAX_PER_PEER"] == 8, \
+            "override must clamp to 8, got %r" % (eff,)
+        eff = _att.apply_config_limits({"attachmentMaxPerPeer": True})
+        assert eff["ATT_MAX_PER_PEER"] == 8, \
+            "bool must be refused (fail-closed), got %r" % (eff,)
+        eff = _att.apply_config_limits({"attachmentMaxPerPeer": 0})
+        assert eff["ATT_MAX_PER_PEER"] == 8, \
+            "below-min override must keep the current value, got %r" % (eff,)
+        print("OK  Settings setPerPeerDownloads: applies live, persists, scales "
+              "budget, clamps 16->8, refuses junk, echoes effective values")
+    finally:
+        _s._emit = real_emit
+        _s.STATE.config.clear()
+        _s.STATE.config.update(cfg_saved)
+        _att.ATT_MAX_BYTES, _att.ATT_MAX_RESERVED_BYTES, _att.ATT_MIN_FREE_BYTES, \
+            _att.ATT_MAX_PER_PEER = real
+        _h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH, \
+            _s.CONFIG_PATH = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_stale_attachment_gone():
     """Regression: pressing Save on an attachment whose sender copy is long
     gone used to be swallowed silently (sender replies attachmentError 'not
@@ -1159,6 +1269,7 @@ def main():
     test_attachment_limit_config()
     test_sender_side_over_cap()
     test_settings_attachment_max()
+    test_settings_per_peer_downloads()
     test_stale_attachment_gone()
     test_attachment_dismiss()
     test_attachment_limits()

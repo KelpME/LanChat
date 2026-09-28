@@ -86,9 +86,12 @@ ATT_MIN_FREE_BYTES = ATT_MIN_FREE_BYTES_DEFAULT
 # statvfs is cheap; chunk sizes are 128 KiB, so this is ~1 probe per 64 chunks.
 ATT_DISK_CHECK_INTERVAL_BYTES = 8 * 1024 * 1024
 
-# Transfer-count caps (not disk-sized, so not config-overridable).
+# Transfer-count caps. ATT_MAX_PER_PEER (max concurrent downloads from ONE
+# friend) is config-overridable via attachmentMaxPerPeer (see ATT_CONFIG_KEYS);
+# the global cap across all peers stays fixed.
 ATT_MAX_CONCURRENT = 8
 ATT_MAX_PER_PEER = 2
+ATT_MAX_PER_PEER_MAX = 8  # per-peer slots can never exceed ATT_MAX_CONCURRENT
 
 # Absolute bounds for a config override. An override can loosen a default; it
 # can never switch a gate off or set a nonsense value. Anything outside this
@@ -101,6 +104,7 @@ ATT_CONFIG_KEYS = (
     ("attachmentMaxBytes", "ATT_MAX_BYTES"),
     ("attachmentMaxReservedBytes", "ATT_MAX_RESERVED_BYTES"),
     ("attachmentMinFreeBytes", "ATT_MIN_FREE_BYTES"),
+    ("attachmentMaxPerPeer", "ATT_MAX_PER_PEER"),
 )
 
 # How long a transfer may run with no declared total at all. The very first
@@ -253,16 +257,22 @@ def apply_config_limits(config: dict) -> dict:
         "attachmentMaxBytes":         17179869184   # per-file ceiling
         "attachmentMaxReservedBytes": 34359738368   # aggregate budget
         "attachmentMinFreeBytes":      8589934592   # keep-free safety floor
+        "attachmentMaxPerPeer":               4    # concurrent DLs per friend
 
     Fail-closed by construction: a missing/invalid/non-numeric value keeps the
     current value, and every accepted value is clamped into
-    [ATT_LIMIT_MIN, ATT_LIMIT_HARD_MAX]. An override can move a limit; it can
-    never disable a gate. Returns the effective values so the daemon log (and
-    any test) can see exactly what is being enforced."""
+    [ATT_LIMIT_MIN, ATT_LIMIT_HARD_MAX] (bytes) or
+    [ATT_LIMIT_MIN, min(ATT_MAX_PER_PEER_MAX, ATT_MAX_CONCURRENT)] (per-peer
+    slots, floored at 1 — ATT_LIMIT_MIN is a byte floor, meaningless for
+    slot counts). An override can move a limit; it can never disable a gate or push
+    the per-peer cap past the global cap. Returns the effective values so the
+    daemon log (and any test) can see exactly what is being enforced."""
     global ATT_MAX_BYTES, ATT_MAX_RESERVED_BYTES, ATT_MIN_FREE_BYTES
+    global ATT_MAX_PER_PEER
     limits = {"ATT_MAX_BYTES": ATT_MAX_BYTES,
               "ATT_MAX_RESERVED_BYTES": ATT_MAX_RESERVED_BYTES,
-              "ATT_MIN_FREE_BYTES": ATT_MIN_FREE_BYTES}
+              "ATT_MIN_FREE_BYTES": ATT_MIN_FREE_BYTES,
+              "ATT_MAX_PER_PEER": ATT_MAX_PER_PEER}
     for cfg_key, attr in ATT_CONFIG_KEYS:
         raw = config.get(cfg_key)
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
@@ -271,6 +281,21 @@ def apply_config_limits(config: dict) -> dict:
         if value < ATT_LIMIT_MIN:
             continue  # zero/negative/tiny means "no limit" to a caller: refused
         limits[attr] = min(value, ATT_LIMIT_HARD_MAX)
+    # Per-peer slot count has its own, much smaller range than the byte
+    # limits — it is handled separately (running it through the byte loop
+    # above would refuse any sane slot count as "below the byte floor").
+    # Same fail-closed style: missing/non-numeric/bool/below-min keeps the
+    # current value; accepted values clamp into [1, min(ATT_MAX_PER_PEER_MAX,
+    # ATT_MAX_CONCURRENT)] so the per-peer cap can never exceed the global
+    # cap. (ATT_LIMIT_MIN is a byte floor, meaningless for slot counts.)
+    raw_slots = config.get("attachmentMaxPerPeer")
+    if isinstance(raw_slots, bool) or not isinstance(raw_slots, (int, float)):
+        pass  # absent or wrong type -> keep the current value
+    else:
+        slots = int(raw_slots)
+        if slots >= 1:
+            limits["ATT_MAX_PER_PEER"] = min(
+                slots, min(ATT_MAX_PER_PEER_MAX, ATT_MAX_CONCURRENT))
     # Keep the gates sane relative to each other: a per-file ceiling bigger
     # than the aggregate budget would make the budget unenforceable.
     if limits["ATT_MAX_BYTES"] > limits["ATT_MAX_RESERVED_BYTES"]:
@@ -278,6 +303,7 @@ def apply_config_limits(config: dict) -> dict:
     ATT_MAX_BYTES = limits["ATT_MAX_BYTES"]
     ATT_MAX_RESERVED_BYTES = limits["ATT_MAX_RESERVED_BYTES"]
     ATT_MIN_FREE_BYTES = limits["ATT_MIN_FREE_BYTES"]
+    ATT_MAX_PER_PEER = limits["ATT_MAX_PER_PEER"]
     return dict(limits)
 
 

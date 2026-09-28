@@ -82,6 +82,9 @@ QtObject {
   // same reason.
   property double attachmentMaxBytes: 4 * 1024 * 1024 * 1024
   readonly property int attachmentMaxGiB: Math.max(1, Math.round(attachmentMaxBytes / (1024 * 1024 * 1024)))
+  // Max concurrent downloads from ONE friend (Settings). The daemon is the
+  // source of truth; updated from ready + attachment-limits.
+  property int perPeerSlots: 2
   property var pendingSends: []  // [{mid, to, text, remaining, total}] undo-window
   property var friendRequests: [] // [{peerId, name, outgoing, ts, mid}] pending friend requests (notifications)
   property var typing: ({})      // peerId -> name currently typing
@@ -625,6 +628,14 @@ QtObject {
     daemon.write(JSON.stringify({ cmd: "setAttachmentMax", gib: gib }) + "\n")
   }
 
+  function setPerPeerSlots(slots) {
+    // Max concurrent downloads from ONE friend (Settings). The daemon applies
+    // it live, persists it, and echoes attachment-limits with the EFFECTIVE
+    // values (it may also raise the aggregate budget / clamp) — the property
+    // updates there, not optimistically here.
+    daemon.write(JSON.stringify({ cmd: "setPerPeerDownloads", slots: slots }) + "\n")
+  }
+
   function dismissAttachment(mid) {
     // Save-bar ✕: decline this attachment. The daemon flags it dismissed in
     // history (persisted) and echoes attachment-dismissed — the bar clears
@@ -944,6 +955,7 @@ QtObject {
       lanchat.syncRoomStates()
       if (obj.downloadDir !== undefined) lanchat.downloadDir = obj.downloadDir
       if (obj.attachmentMaxBytes !== undefined) lanchat.attachmentMaxBytes = obj.attachmentMaxBytes
+      if (obj.attachmentMaxPerPeer !== undefined) lanchat.perPeerSlots = obj.attachmentMaxPerPeer
       if (obj.sendDelay !== undefined) lanchat.sendDelay = obj.sendDelay
       if (obj.apiFullAccess !== undefined) lanchat.apiFullAccess = obj.apiFullAccess
       if (obj.panelSize !== undefined) lanchat.panelSize = obj.panelSize
@@ -1093,6 +1105,7 @@ QtObject {
 
     case "attachment-limits":
       if (obj.perFileBytes !== undefined) lanchat.attachmentMaxBytes = obj.perFileBytes
+      if (obj.perPeerSlots !== undefined) lanchat.perPeerSlots = obj.perPeerSlots
       break
 
     case "attachment-dismissed":
