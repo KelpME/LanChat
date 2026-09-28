@@ -1,5 +1,7 @@
 # Lanchat
 
+<video src="https://raw.githubusercontent.com/KelpME/LanChat/main/lanchat-demo-github.mp4" controls muted playsinline width="100%"></video>
+
 Private messaging between your own machines on your local network, as an
 [Omarchy Quattro](https://github.com/omacom/omarchy/tree/quattro) shell plugin.
 Install it on every computer you own and they find each other automatically —
