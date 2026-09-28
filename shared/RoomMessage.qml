@@ -205,9 +205,24 @@ Column {
 
         Button {
           visible: fileBubbleRect.senderIsFriend
-          text: fileBubbleRect.fileDownloading ? "Saving…" : "Save"
-          enabled: !fileBubbleRect.fileDownloading
+          // Same over-ceiling pre-check as the 1:1 bar (Panel.qml): the Save
+          // click can never succeed against the local per-file ceiling, so
+          // show the raise-it hint instead. Full detail on hover.
+          property bool tooLarge: !fileBubbleRect.fileDownloading
+            && (fileBubbleRect.att.size || 0) > Lanchat.attachmentMaxBytes
+          text: fileBubbleRect.fileDownloading ? "Saving…"
+                : tooLarge ? "Too large — raise max in Settings" : "Save"
+          enabled: !fileBubbleRect.fileDownloading && !tooLarge
           fontSize: Style.font.caption
+          ToolTip.visible: roomSaveHover.containsMouse && tooLarge
+          ToolTip.text: "This file is larger than your " + Lanchat.attachmentMaxGiB
+            + " GiB max file size — raise Max file size in Settings to receive it."
+          MouseArea {
+            id: roomSaveHover
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+          }
           onClicked: Lanchat.acceptRoomAttachment(modelData.from,
             fileBubbleRect.att.fileId, fileBubbleRect.att.name,
             modelData.mid, fileBubbleRect.att.sha256 || "",
