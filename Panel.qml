@@ -1247,7 +1247,7 @@ Panel {
                     return "Save"
                   }
                   enabled: !root.pendingDownloading && !tooLarge
-                  ToolTip.visible: hintHover.containsMouse
+                  ToolTip.visible: hintHover.containsMouse && tooLarge
                   ToolTip.text: "This file is larger than your " + Lanchat.attachmentMaxGiB + " GiB max file size \u2014 raise Max file size in Settings to receive it."
                   MouseArea {
                     id: hintHover
