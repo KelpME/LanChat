@@ -1208,7 +1208,7 @@ Panel {
 
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
-                  width: Math.max(10, parent.width - Style.space(118))
+                  width: Math.max(10, parent.width - Style.space(300))
                   text: {
                     var p = root.pendingAttachment
                     if (p) {
@@ -1243,10 +1243,18 @@ Panel {
                   text: {
                     if (root.pendingDownloading) return "Saving\u2026"
                     if (tooLarge)
-                      return "Larger than your " + Lanchat.attachmentMaxGiB + " GiB max — raise Max file size in Settings"
+                      return "Too large \u2014 raise max in Settings"
                     return "Save"
                   }
                   enabled: !root.pendingDownloading && !tooLarge
+                  ToolTip.visible: hintHover.containsMouse
+                  ToolTip.text: "This file is larger than your " + Lanchat.attachmentMaxGiB + " GiB max file size \u2014 raise Max file size in Settings to receive it."
+                  MouseArea {
+                    id: hintHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                  }
                   onClicked: {
                     var p = root.pendingAttachment
                     if (p && !tooLarge && !root.pendingDownloading)
