@@ -5,7 +5,7 @@
   "version": "1.5.81",
   "author": "KelpME",
   "license": "MIT",
-  "description": "Private LAN messaging between your own machines. Automatic discovery over UDP, cert-fingerprint peer auth, message history per machine.",
+  "description": "Encrypted, friend-gated chat for your LAN. Your machines find each other automatically — TLS with cert-fingerprint identity, approved-friends handshake, group rooms, undoable sends, and LocalSend-style file attachments.",
   "kinds": [
     "service",
     "bar-widget"

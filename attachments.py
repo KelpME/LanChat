@@ -569,6 +569,20 @@ def refusal_error(reason):
     return ("cannot open download file", "cannot open download file")
 
 
+def set_expected_digest(file_id: str, peer_id: str, digest: str) -> None:
+    """Record an End-frame digest on a pending download — only if none yet.
+
+    Metadata-provided digests (older senders that hashed before sending) stay
+    authoritative: never overwrite a non-empty digest. Unknown fileId or wrong
+    peer is silently ignored."""
+    if not digest:
+        return
+    with STATE.dl_lock:
+        entry = _dl.get(file_id)
+        if entry and entry.get("peer") == peer_id and not entry.get("sha256"):
+            entry["sha256"] = digest
+
+
 def _dl_finish(file_id: str, peer_id: str, ok: bool):
     """Complete (or abort) a transfer. Returns (status, save_to, mid, total, room):
     status in ('saved','mismatch','aborted'), or None if the transfer was not
@@ -662,10 +676,13 @@ def _serve_attachment(peer_id: str, file_id: str, mid: str) -> None:
     try:
         with open(path, "rb") as f:
             seq = 0
+            h = hashlib.sha256()
             while True:
                 chunk = f.read(ATT_CHUNK_RAW)
                 if not chunk:
                     break
+                # Hash the raw bytes as we stream — no second read of the file.
+                h.update(chunk)
                 ok = server._write(peer_id, {
                     "t": "attachmentChunk", "from": server.host_id(), "to": peer_id,
                     "fileId": file_id, "mid": mid, "seq": seq, "total": size,
@@ -675,8 +692,11 @@ def _serve_attachment(peer_id: str, file_id: str, mid: str) -> None:
                          % (peer_id[:12], name))
                     return
                 seq += 1
+        # Carry the streamed digest so the receiver can verify without the
+        # sender having hashed the whole file up front.
         server._write(peer_id, {"t": "attachmentEnd", "from": server.host_id(), "to": peer_id,
-                         "fileId": file_id, "mid": mid, "total": size})
+                         "fileId": file_id, "mid": mid, "total": size,
+                         "sha256": h.hexdigest()})
         server._log("attachment-streamed peer=%s file=%s size=%s" % (peer_id[:12], name, size))
     except OSError as e:
         server._log("attachment-stream-failed peer=%s file=%s err=%s" % (peer_id[:12], name, e))

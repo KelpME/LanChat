@@ -419,7 +419,8 @@ def main():
         check("B sees room-file metadata (owner fan-out)",
               att_b.get("name") == "roomfile.txt" and att_b.get("fileId"))
         fid1, mid1 = att_b.get("fileId", ""), att_b.get("mid", "")
-        check("metadata has sha256", att_b.get("sha256") == sha)
+        check("metadata sha256 empty (digest streams on End frame)",
+              att_b.get("sha256") == "")
         fm_c = wait_message(c, 8, room=rid)
         check("C (non-friend of A) sees the metadata too",
               ((fm_c or {}).get("attachment") or {}).get("name") == "roomfile.txt")

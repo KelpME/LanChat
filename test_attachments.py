@@ -1169,7 +1169,8 @@ def main():
         msg = wait_message(b, with_attachment=True)
         assert msg and msg.get("attachment"), "B never got the attachment message"
         att = msg["attachment"]
-        assert att.get("name") == "hello.txt" and att.get("sha256"), "attachment metadata incomplete"
+        assert att.get("name") == "hello.txt" and att.get("sha256") == "", \
+            "attachment metadata: digest must be empty (it streams on End)"
 
         b.cmd(**{"cmd": "acceptAttachment", "from": ida, "fileId": att["fileId"], "name": att["name"],
                  "mid": msg["mid"], "sha256": att["sha256"]})

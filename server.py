@@ -68,6 +68,7 @@ from attachments import (  # noqa: F401
     get_attachment,
     refusal_error,
     register_attachment,
+    set_expected_digest,
 )
 
 # history.py — message history + at-rest crypto (constants re-exported: tests
@@ -2128,6 +2129,9 @@ def _handle_incoming(msg: dict, addr) -> None:
                 _emit({"event": "attachment-progress", "fileId": file_id, "mid": mid,
                        "bytes": written, "total": total})
         elif msg.get("t") == "attachmentEnd":
+            # End-frame digest populates the expected digest when metadata
+            # carried none (streamed-hash senders).
+            set_expected_digest(file_id, from_pid, str(msg.get("sha256", "")))
             _finalize_download(_dl_finish(file_id, from_pid, True), mid, file_id)
         else:
             # Sender replied with an error. If we have an active transfer for
@@ -2528,8 +2532,11 @@ def handle_command(cmd: dict) -> None:
                 att = None
                 att_refused = True
             else:
+                # Digest is computed while streaming (_serve_attachment) and
+                # carried on attachmentEnd — hashing here would block the send
+                # on a full read of the file.
                 att = {"name": name, "size": size, "mime": "application/octet-stream",
-                       "fileId": file_id, "sha256": _file_sha256(path)}
+                       "fileId": file_id, "sha256": ""}
         # A file-only send whose file was refused must not send a blank message
         # (the recipient drops empty messages; our own history would keep a
         # ghost bubble). Text + refused file still sends the text.
@@ -2586,8 +2593,9 @@ def handle_command(cmd: dict) -> None:
                     _diag("room-file-refused", name=fname, size=fsize,
                           limit=attachments.ATT_MAX_BYTES)
                 else:
+                    # Digest streams with the file (see the 1:1 send path).
                     att_f = {"name": fname, "size": fsize, "mime": "application/octet-stream",
-                             "fileId": fid, "sha256": _file_sha256(path_f)}
+                             "fileId": fid, "sha256": ""}
                     rooms.post_room_file(room_id_f, att_f, str(cmd.get("text", "")))
         else:
             rooms.post_room_file(room_id_f, att_f, str(cmd.get("text", "")))
