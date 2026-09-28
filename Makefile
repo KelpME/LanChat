@@ -11,7 +11,7 @@
 
 PY      ?= python3
 RUFF    ?= ruff
-TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py test_systemd_control.py test_cert_reload.py test_udp_resilience.py test_units.py test_groups.py test_config_race.py test_fingerprint_ledger.py
+TESTS   := test_server.py test_friends.py test_persistent.py test_attachments.py test_features.py test_discovery_visibility.py test_systemd_control.py test_cert_reload.py test_udp_resilience.py test_units.py test_groups.py test_config_race.py test_fingerprint_ledger.py test_size_refusal.py
 PYFILES := server.py naming.py $(TESTS) test_peer.py
 VERSION_SCRIPT := scripts/bump_version.py
 
@@ -47,6 +47,10 @@ test-persistent: ## run test_persistent.py (persistent socket, dedupe, reconnect
 ## test-attachments: just test_attachments.py
 test-attachments: ## run test_attachments.py (file transfer, sha256, path sanitize)
 	@$(PY) test_attachments.py
+
+## test-size-refusal: just test_size_refusal.py
+test-size-refusal: ## run test_size_refusal.py (receiver-side size refusal names the limit)
+	@$(PY) test_size_refusal.py
 
 ## test-features: just test_features.py
 test-features: ## run test_features.py (history, config, misc commands)

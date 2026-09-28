@@ -1231,13 +1231,25 @@ Panel {
 
                 Item { width: Style.space(10); height: 1 }
 
+                // Over the local per-file ceiling: show the raise-it hint
+                // instead of a dead Save — accepting could never succeed.
                 Button {
                   visible: root.pendingAttachment !== null
-                  text: root.pendingDownloading ? "Saving\u2026" : "Save"
-                  enabled: !root.pendingDownloading
+                  property bool tooLarge: {
+                    var p = root.pendingAttachment
+                    return p !== null && !root.pendingDownloading
+                           && (p.attachment.size || 0) > Lanchat.attachmentMaxBytes
+                  }
+                  text: {
+                    if (root.pendingDownloading) return "Saving\u2026"
+                    if (tooLarge)
+                      return "Larger than your " + Lanchat.attachmentMaxGiB + " GiB max — raise Max file size in Settings"
+                    return "Save"
+                  }
+                  enabled: !root.pendingDownloading && !tooLarge
                   onClicked: {
                     var p = root.pendingAttachment
-                    if (p)
+                    if (p && !tooLarge && !root.pendingDownloading)
                       Lanchat.acceptAttachment(p.from, p.attachment.fileId, p.attachment.name, p.mid, p.attachment.sha256 || "")
                   }
                 }

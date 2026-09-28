@@ -274,8 +274,8 @@ def test_attachment_limits():
                 ok = att._dl_begin("t4a-new", "peer1", save2, "", "m4a-new",
                                    total=100)
                 assert ok is False, "new transfer accepted over lowered cap"
-                assert att.last_refusal_reason == "disk-budget", \
-                    "expected disk-budget refusal, got %s" % att.last_refusal_reason
+                assert att.last_refusal_reason == "file-cap", \
+                    "expected file-cap refusal, got %s" % att.last_refusal_reason
                 # and a new transfer within the lowered cap still works.
                 ok = att._dl_begin("t4a-ok", "peer1", save2, "", "m4a-ok", total=40)
                 assert ok, "new transfer within lowered cap refused"
@@ -506,7 +506,10 @@ def _busy_error_mapping_body(att, logged_budget):
             ("per-peer", "busy", "attachment transfer busy — try again shortly"),
             ("max-concurrent", "busy", "attachment transfer busy — try again shortly"),
             ("disk-budget", "disk limit",
-             "attachment too large for the allowed disk space"),
+             "attachment refused: the allowed disk budget or free-space floor would be exceeded"),
+            ("file-cap", "file limit",
+             "file larger than the %s max file size — raise Max file size in Settings to receive it"
+             % att.fmt_bytes(att.ATT_MAX_BYTES)),
             ("disk-unknown", "cannot open download file",
              "cannot verify free disk space — download refused"),
             ("open-failed", "cannot open download file", "cannot open download file"),
@@ -592,8 +595,8 @@ def _busy_error_mapping_body(att, logged_budget):
         # before a single chunk is requested.
         s4 = os.path.join(tmp, "b4.bin")
         ok = att._dl_begin("budget_cap", "pcap", s4, "", "mb4", "", CAP + 1)
-        assert ok is False and att.last_refusal_reason == "disk-budget", \
-            "over-ceiling declared total must be refused at begin, got %r" % att.last_refusal_reason
+        assert ok is False and att.last_refusal_reason == "file-cap", \
+            "over-ceiling declared total must be refused as file-cap at begin, got %r" % att.last_refusal_reason
         assert not os.path.exists(s4 + ".part"), "over-ceiling begin left a .part"
         print("OK  declared total over the per-file cap refused before any byte")
 
@@ -1385,13 +1388,13 @@ def main():
         assert seen_args.get("total") == BIG, \
             "accept path must pass the advertised size into _dl_begin, got %r" % (seen_args,)
         assert seen_args.get("file_id") == "big1", "wrong transfer was targeted: %r" % (seen_args,)
-        assert _att.last_refusal_reason == "disk-budget", \
-            "over-capacity accept must refuse with disk-budget, got %r" % _att.last_refusal_reason
+        assert _att.last_refusal_reason == "file-cap", \
+            "over-capacity accept must refuse with file-cap, got %r" % _att.last_refusal_reason
         saved_ev = [e for e in captured if e.get("event") == "attachment-saved"]
         assert saved_ev and saved_ev[0].get("ok") is False, \
             "over-capacity accept must emit attachment-saved ok:false: %r" % (captured,)
-        assert "disk" in (saved_ev[0].get("error") or "").lower(), \
-            "user-facing error should name the disk limit: %r" % (saved_ev[0],)
+        assert "max file size" in (saved_ev[0].get("error") or ""), \
+            "user-facing error should name the max file size: %r" % (saved_ev[0],)
         # No bytes were requested: the recipient never sent attachmentRequest.
         assert not [w for w in writes if w.get("t") == "attachmentRequest"], \
             "recipient asked the sender to stream an over-capacity file: %r" % (writes,)
@@ -1401,7 +1404,7 @@ def main():
         assert not os.path.exists(os.path.join(cap_dir, "huge.bin")), "refused file was saved"
         assert not os.path.exists(os.path.join(cap_dir, "huge.bin.part")), "refused file left .part"
         assert not _att._dl, "refused transfer left a live reassembly entry"
-        assert any("reason=disk-budget" in m for m in logs), \
+        assert any("reason=file-cap" in m for m in logs), \
             "capacity refusal must be logged: %r" % (logs,)
         print("OK  over-capacity attachment refused at accept time "
               "(no attachmentRequest, no bytes, no .part)")

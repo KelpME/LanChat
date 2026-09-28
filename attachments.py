@@ -343,6 +343,7 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, r
 
     Returns True on success, False on any failure. On False,
     last_refusal_reason holds "per-peer", "max-concurrent", "disk-budget",
+    "file-cap",
     "disk-unknown" or "open-failed" so callers can distinguish a busy refusal
     from a capacity refusal from a local I/O error."""
     global last_refusal_reason
@@ -429,6 +430,9 @@ def _dl_begin(file_id: str, peer_id: str, save_to: str, sha256: str, mid: str, r
         # transfer is still bound by its own ceiling, the aggregate budget, and
         # the free-space floor.
         if total:
+            if total > cap:
+                detail = "total=%d cap=%d" % (total, cap)
+                return _refuse("file-cap", detail)
             if not _fits_reservation(reserved, total, free, cap):
                 detail = "total=%d cap=%d budget=%d free=%d floor=%d" % (
                     total, cap, ATT_MAX_RESERVED_BYTES, free, ATT_MIN_FREE_BYTES)
@@ -557,12 +561,19 @@ def _dl_abort_locked(file_id: str, d: dict, reason: str = "size-limit") -> None:
 def refusal_error(reason):
     """Map a _dl_begin refusal reason to (peerError, uiError). Busy refusals
     (per-peer / global cap) are transient and get a distinct, retryable
-    message; capacity refusals tell the user which limit was hit; local I/O
-    and unknown-capacity failures keep the historical strings."""
+    message; a per-file ceiling refusal names the max file size and the
+    Settings control that raises it; aggregate-budget and free-space
+    refusals name the disk limit; local I/O and unknown-capacity failures
+    keep the historical strings."""
     if reason in ("per-peer", "max-concurrent"):
         return ("busy", "attachment transfer busy — try again shortly")
+    if reason == "file-cap":
+        return ("file limit",
+                "file larger than the %s max file size — raise Max file size in Settings to receive it"
+                % fmt_bytes(ATT_MAX_BYTES))
     if reason == "disk-budget":
-        return ("disk limit", "attachment too large for the allowed disk space")
+        return ("disk limit",
+                "attachment refused: the allowed disk budget or free-space floor would be exceeded")
     if reason == "disk-unknown":
         return ("cannot open download file",
                 "cannot verify free disk space — download refused")
