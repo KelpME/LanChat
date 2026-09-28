@@ -109,7 +109,8 @@ def test_attachment_limits():
 
     Covers: over-ceiling cumulative write aborts + .part removed; written >
     declared total rejection; declared total over ceiling aborts; 5th
-    concurrent transfer rejected; over-ceiling register_attachment refusal."""
+    concurrent transfer rejected; register_attachment serveability gate
+    (oversized registers fine — ceiling is receiver-side; unreadable refuses)."""
     import tempfile
 
     import attachments as att
@@ -137,22 +138,30 @@ def test_attachment_limits():
         att.ATT_MAX_BYTES = 1024 * 1024
         tmp = tempfile.mkdtemp(prefix="lanchat-attlim-")
         try:
-            # ---- 1) register_attachment refuses over-ceiling files --------
+            # ---- 1) register_attachment is serveability-only: an oversized
+            # file REGISTERS (the per-file ceiling is enforced receiver-side
+            # at _dl_begin); a missing/unreadable path is refused.
             big = os.path.join(tmp, "big.bin")
             with open(big, "wb") as f:
                 f.seek(att.ATT_MAX_BYTES + 1)
                 f.write(b"\0")
             ok = att.register_attachment("bigid", big, "big.bin")
-            assert ok is False, "over-ceiling register_attachment must refuse"
+            assert ok is True, \
+                "oversized register_attachment must register (ceiling is receiver-side)"
             with st.att_lock:
-                assert "bigid" not in st.attachments, "refused file must not register"
+                assert "bigid" in st.attachments, "oversized file must register"
+            missing = os.path.join(tmp, "nope.bin")
+            ok = att.register_attachment("noid", missing, "nope.bin")
+            assert ok is False, "missing file must be refused at registration"
+            with st.att_lock:
+                assert "noid" not in st.attachments, "refused file must not register"
             small = os.path.join(tmp, "small.bin")
             with open(small, "wb") as f:
                 f.write(b"ok")
             ok = att.register_attachment("smallid", small, "small.bin")
-            assert ok is True, "under-ceiling register_attachment must succeed"
-            print("OK  register_attachment refuses %d-byte file, allows small" %
-                  (att.ATT_MAX_BYTES + 1))
+            assert ok is True, "readable file must register"
+            print("OK  register_attachment registers %d-byte file, refuses missing path"
+                  % (att.ATT_MAX_BYTES + 1))
 
             # ---- 1b) TTL scales with file size (1:1 with the extracted
             # formula, so the scaling is exercised at real sizes without
@@ -820,10 +829,12 @@ def test_attachment_limit_config():
 
 
 def test_sender_side_over_cap():
-    """Unit test (in-process daemon, isolated state): a SEND whose file is over
-    the per-file ceiling must surface an error event and must NOT send a message
-    carrying attachment metadata the recipient could never pull (the silent
-    half-send). Text + over-cap file still sends the text with no attachment."""
+    """Unit test (in-process daemon, isolated state): a SEND whose file is
+    over the per-file ceiling now REGISTERS AND SENDS — the ceiling is
+    enforced receiver-side (_dl_begin), so the sender must not gate it
+    (limits differ between machines; the receiver's disk is what matters).
+    An UNREADABLE file path is still refused visibly: error event, and a
+    file-only send of an unreadable file must not blank-send."""
     import tempfile
 
     import attachments as _att
@@ -855,35 +866,55 @@ def test_sender_side_over_cap():
     _s._write = lambda pid, obj: (sent.append(obj), True)[1]
     _s._emit = lambda e: captured.append(e)
     real_cap = _att.ATT_MAX_BYTES
-    _att.ATT_MAX_BYTES = 1024  # 1 KiB ceiling for this case
+    _att.ATT_MAX_BYTES = 1024  # 1 KiB ceiling — sender-side gate removed, so
+                               # this only exercises the registration path
     try:
         big = os.path.join(tmp, "toobig.bin")
         with open(big, "wb") as f:
             f.write(b"z" * 4096)
 
-        # (a) file-only send, over the cap -> error event, NO message sent.
+        # (a) file-only send, over the cap -> REGISTERS and SENDS with
+        # attachment metadata (receiver decides whether it fits).
         _s.handle_command({"cmd": "send", "to": peer, "text": "",
                            "attachment": {"path": big, "name": "toobig.bin"}})
-        errs = [e for e in captured if e.get("event") == "error"]
-        assert errs, "over-cap send must surface an error: %r" % (captured,)
-        assert "limit" in (errs[0].get("message") or "").lower(), \
-            "error must name the limit: %r" % (errs[0],)
-        assert not [m for m in sent if m.get("t") == "msg"], \
-            "over-cap file-only send must not emit a message: %r" % (sent,)
-        assert not any(m.get("attachment") for m in sent), \
-            "over-cap send must not advertise attachment metadata: %r" % (sent,)
+        msgs = [m for m in sent if m.get("t") == "msg"]
+        assert msgs and msgs[0].get("attachment", {}).get("name") == "toobig.bin", \
+            "over-cap file must send with attachment metadata: %r" % (sent,)
+        assert not [e for e in captured if e.get("event") == "error"], \
+            "over-cap send must not error sender-side: %r" % (captured,)
 
-        # (b) text + over-cap file -> the text still sends, attachment dropped.
+        # (b) text + over-cap file -> text AND attachment both send.
         sent.clear(); captured.clear()
         _s.handle_command({"cmd": "send", "to": peer, "text": "the note",
                            "attachment": {"path": big, "name": "toobig.bin"}})
         msgs = [m for m in sent if m.get("t") == "msg"]
-        assert msgs and msgs[0].get("text") == "the note", \
-            "text must still send alongside a refused file: %r" % (sent,)
-        assert not msgs[0].get("attachment"), \
-            "refused file must not be attached to the message: %r" % (msgs[0],)
+        assert msgs and msgs[0].get("text") == "the note" \
+            and msgs[0].get("attachment", {}).get("name") == "toobig.bin", \
+            "over-cap file must send alongside its text: %r" % (sent,)
 
-        # (c) an under-cap file still sends normally (no regression).
+        # (c) an UNREADABLE path is refused visibly: error event, and a
+        # file-only send must not blank-send (silent half-send guard).
+        sent.clear(); captured.clear()
+        _s.handle_command({"cmd": "send", "to": peer, "text": "",
+                           "attachment": {"path": os.path.join(tmp, "gone.bin"),
+                                          "name": "gone.bin"}})
+        errs = [e for e in captured if e.get("event") == "error"]
+        assert errs, "unreadable file must surface an error: %r" % (captured,)
+        assert not [m for m in sent if m.get("t") == "msg"], \
+            "unreadable file-only send must not emit a message: %r" % (sent,)
+
+        # (d) text + unreadable file -> the text still sends, no attachment.
+        sent.clear(); captured.clear()
+        _s.handle_command({"cmd": "send", "to": peer, "text": "the note",
+                           "attachment": {"path": os.path.join(tmp, "gone.bin"),
+                                          "name": "gone.bin"}})
+        msgs = [m for m in sent if m.get("t") == "msg"]
+        assert msgs and msgs[0].get("text") == "the note", \
+            "text must still send alongside an unreadable file: %r" % (sent,)
+        assert not msgs[0].get("attachment"), \
+            "unreadable file must not be attached: %r" % (msgs[0],)
+
+        # (e) a readable file still sends normally (no regression).
         sent.clear(); captured.clear()
         small = os.path.join(tmp, "ok.bin")
         with open(small, "wb") as f:
@@ -892,11 +923,11 @@ def test_sender_side_over_cap():
                            "attachment": {"path": small, "name": "ok.bin"}})
         msgs = [m for m in sent if m.get("t") == "msg"]
         assert msgs and msgs[0].get("attachment", {}).get("name") == "ok.bin", \
-            "under-cap file must still attach normally: %r" % (sent,)
+            "readable file must still attach normally: %r" % (sent,)
         assert not [e for e in captured if e.get("event") == "error"], \
-            "under-cap send must not error: %r" % (captured,)
-        print("OK  over-cap SEND is refused visibly (no silent half-send); "
-              "text survives; small files unaffected")
+            "normal send must not error: %r" % (captured,)
+        print("OK  over-cap file SENDS (ceiling is receiver-side); unreadable "
+              "file refuses visibly; text survives; small files unaffected")
     finally:
         _s._write, _s._emit = real_write, real_emit
         _att.ATT_MAX_BYTES = real_cap

@@ -2519,16 +2519,15 @@ def handle_command(cmd: dict) -> None:
             except OSError:
                 size = 0
             if not register_attachment(file_id, path, name):
-                # Over the per-file ceiling (or unreadable). Registration is
-                # what lets the receiver pull the bytes, so without it the
-                # message would arrive with an attachment that can never be
-                # saved — the classic silent half-send. Tell the user instead
-                # and drop the attachment; the text still sends.
+                # Unreadable/missing: registration is what lets the receiver
+                # pull the bytes, so without it the message would arrive with
+                # an attachment that can never be saved — the classic silent
+                # half-send. Tell the user instead and drop the attachment;
+                # the text still sends. (Oversized files register fine now —
+                # the per-file ceiling is enforced receiver-side.)
                 _emit({"event": "error",
-                       "message": "%s is larger than the %s attachment limit — not sent"
-                                  % (name, attachments.fmt_bytes(attachments.ATT_MAX_BYTES))})
-                _diag("attachment-send-refused", name=name, size=size,
-                      limit=attachments.ATT_MAX_BYTES)
+                       "message": "%s could not be read — not sent" % name})
+                _diag("attachment-send-unreadable", name=name, size=size)
                 att = None
                 att_refused = True
             else:
@@ -2584,14 +2583,13 @@ def handle_command(cmd: dict) -> None:
                 except OSError:
                     fsize = 0
                 if not register_attachment(fid, path_f, fname):
-                    # Same limit as a 1:1 send: posting metadata for a file no
-                    # member can ever pull would leave a dead 📎 bubble in the
-                    # room. Refuse with a visible reason instead.
+                    # Unreadable/missing: posting metadata for a file no
+                    # member can ever pull would leave a dead 📎 bubble in
+                    # the room. Refuse with a visible reason instead. (Size
+                    # is not a refusal here — the ceiling is receiver-side.)
                     _emit({"event": "error",
-                           "message": "%s is larger than the %s attachment limit — not posted"
-                                      % (fname, attachments.fmt_bytes(attachments.ATT_MAX_BYTES))})
-                    _diag("room-file-refused", name=fname, size=fsize,
-                          limit=attachments.ATT_MAX_BYTES)
+                           "message": "%s could not be read — not posted" % fname})
+                    _diag("room-file-unreadable", name=fname, size=fsize)
                 else:
                     # Digest streams with the file (see the 1:1 send path).
                     att_f = {"name": fname, "size": fsize, "mime": "application/octet-stream",

@@ -187,9 +187,12 @@ def _registration_ttl(size: int) -> float:
 
 
 def register_attachment(file_id: str, path: str, name: str, ttl: float = 0.0) -> bool:
-    """Register a local file for peer pull. Refuses (returns False) when the
-    file exceeds ATT_MAX_BYTES — callers ignore the return value today, so the
-    refusal must stay raise-free and silent-but-logged.
+    """Register a local file for peer pull. Refuses (returns False) only when
+    the file cannot be served — it is missing or unreadable (os.stat fails),
+    so no receiver could ever pull bytes for it. The per-file size ceiling is
+    enforced RECEIVER-side (_dl_begin / refusal_error); registration is
+    serveability-only and never refuses on size. Callers must stay
+    raise-free and silent-but-logged on refusal.
 
     ttl=0 (the default) scales the registration window with file size: the
     pull must start AND the sender must keep serving while the recipient's
@@ -199,10 +202,10 @@ def register_attachment(file_id: str, path: str, name: str, ttl: float = 0.0) ->
     try:
         size = os.stat(path).st_size
     except OSError:
-        size = 0  # same tolerance as the send/roomFile callers (size 0)
-    if size > ATT_MAX_BYTES:
-        server._log("attachment-register-refused file=%s size=%d max=%d"
-                    % (os.path.basename(path), size, ATT_MAX_BYTES))
+        # Unreadable/missing: no receiver could ever pull the bytes, so the
+        # registration itself is refused (serveability gate).
+        server._log("attachment-register-refused file=%s (unreadable)"
+                    % os.path.basename(path))
         return False
     if ttl <= 0:
         # Base 600s covers small files; every scaling step beyond the first
