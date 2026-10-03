@@ -88,7 +88,37 @@ def _disco(port, pid, name, pport):
     s.close()
 
 
+def _unsolicited_accept(victim_port, attacker_home, attacker_id, victim_id, name, victim_pport):
+    """Fire a VALID signed UDP friend-accept at the victim using the
+    attacker's own cert+key while the victim has NO outstanding request to
+    the attacker. This is the marketplace review #9076 attack: the signature
+    is genuine (it proves identity) but it asserts consent the victim never
+    requested."""
+    import secrets as _sec
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    cert_dir = os.path.join(attacker_home, ".config", "omarchy", "lanchat-certs")
+    with open(os.path.join(cert_dir, "key.pem"), "rb") as fh:
+        key = serialization.load_pem_private_key(fh.read(), None)
+    with open(os.path.join(cert_dir, "cert.pem"), "rb") as fh:
+        cert_pem = fh.read().decode()
+    nonce = _sec.token_hex(16)
+    sig = key.sign((attacker_id + nonce).encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
+    pkt = {"t": "friend-accept", "id": attacker_id, "name": name, "cert": cert_pem,
+           "nonce": nonce, "sig": sig.hex(), "port": victim_pport, "to": victim_id}
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.sendto(json.dumps(pkt).encode(), ("127.0.0.1", victim_port))
+    s.close()
+
+
 def _pair(name_a, name_b, pa, pb):
+    """Two isolated daemons that see each other via mutual discovery beats."""
+    a, b, ida, idb, _ha, _hb = _pair6(name_a, name_b, pa, pb)
+    return a, b, ida, idb
+
+
+def _pair6(name_a, name_b, pa, pb):
+    """Like _pair but also returns the two HOME dirs (for cert access)."""
     ha = make_home(name_a, pa, name_a); hb = make_home(name_b, pb, name_b)
     a = Daemon(ha, pa, name_a); b = Daemon(hb, pb, name_b)
     a.wait_event("ready"); b.wait_event("ready")
@@ -103,7 +133,7 @@ def _pair(name_a, name_b, pa, pb):
             time.sleep(2.0)
     threading.Thread(target=_beat, daemon=True).start()
     time.sleep(1.5)  # let the UDP listener register the peers
-    return a, b, ida, idb
+    return a, b, ida, idb, ha, hb
 
 
 def _confirmed(daemon, pid):
@@ -203,6 +233,33 @@ def main():
         check("M4b crossed requests: H confirmed with G", _confirmed(h, idg))
     finally:
         g.stop(); h.stop()
+
+    # ---- M5: unsolicited signed friend-accept is rejected ----------------
+    # Regression (marketplace review #9076): a valid signature proves WHO
+    # sent the accept, not that we ever asked. A LAN peer that never had an
+    # outstanding request from us must NOT be able to confirm itself as a
+    # friend by firing a signed UDP friend-accept out of the blue.
+    i, j, idi, idj, i_home, j_home = _pair6("forgeA", "forgeB", 4979, 4980)
+    try:
+        # j has NO idea i exists; i has no outbound intent for j.
+        _unsolicited_accept(i.port, j_home, idj, idi, "forgeB", i.port)
+        time.sleep(1.5)
+        check("M5a unsolicited friend-accept does NOT confirm the peer",
+              not _confirmed(i, idj))
+        check("M5b no friend-accepted event on the victim",
+              not i.events_of("friend-accepted"))
+        check("M5c rejected with reason=not-requested",
+              any("not-requested" in str(e) and idj[:12] in str(e)
+                  for e in i.events_of("diagnostic")))
+        # The legit handshake still works after the attack is dropped:
+        # mutual requests must still auto-accept both sides.
+        i.cmd(cmd="udpFriendRequest", to=idj, name="forgeB")
+        j.cmd(cmd="udpFriendRequest", to=idi, name="forgeA")
+        time.sleep(2.5)
+        check("M5d legit mutual handshake still confirms both sides",
+              _confirmed(i, idj) and _confirmed(j, idi))
+    finally:
+        i.stop(); j.stop()
 
     print()
     if all(checks):

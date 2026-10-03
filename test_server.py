@@ -144,15 +144,13 @@ def main():
                 time.sleep(2.0)
         threading.Thread(target=_beat, daemon=True).start()
 
-        # Become friends first (friend request + accept) so messages flow.
-        a.cmd(cmd="send", to=idb, text="friend me", friend_request=True)
+        # Become friends first (signed UDP friend request + accept) so
+        # messages flow. (The legacy TCP send...friend_request path was
+        # removed in a760353; the UDP handshake is the only one that exists.)
+        a.cmd(cmd="udpFriendRequest", to=idb, name="Beta-machine")
         b.wait_event("friend-request")
         b.cmd(cmd="acceptFriend", id=ida)
         a.wait_event("friend-accepted")
-        # Accepting reveals the held handshake message on both sides; drain them
-        # so the next wait_event("message") below sees the real message.
-        a.wait_event("message")  # A reveals its held outgoing "friend me"
-        b.wait_event("message")  # B reveals the held incoming "friend me"
 
         # Send from A -> B over real TLS, authenticated.
         a.cmd(cmd="send", to=idb, text="hello from alpha")

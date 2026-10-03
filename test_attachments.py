@@ -1290,12 +1290,12 @@ def main():
         threading.Thread(target=beat, daemon=True).start()
         time.sleep(1.0)
 
-        # Friend handshake.
-        a.cmd(cmd="send", to=idb, text="friend me", friend_request=True)
-        b.wait_event("friend-request")
+        # Friend handshake over the signed UDP path (the legacy TCP
+        # send...friend_request kwarg has been dead since a760353).
+        a.cmd(cmd="udpFriendRequest", to=idb, name="Beta")
+        b.wait_event("friend-request", timeout=6)
         b.cmd(cmd="acceptFriend", id=ida)
         assert a.wait_event("friend-accepted"), "friend handshake failed"
-        wait_message(a); wait_message(b)  # drain the reveal messages
 
         # Sender serves files; receiver picks a download dir.
         a.cmd(cmd="setHttp", enabled=True)

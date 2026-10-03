@@ -124,9 +124,12 @@ def main():
                 time.sleep(2.0)
         threading.Thread(target=_beat, daemon=True).start()
 
-        # Friend handshake (accept rides the persistent socket — no reverse dial).
-        a.cmd(cmd="send", to=idb, text="friend me", friend_request=True)
-        b.wait_event("friend-request")
+        # Friend handshake over the SIGNED UDP path (the real one since the
+        # legacy TCP friend-request was removed in a760353): A requests, B
+        # sees the verified banner event, B accepts locally, and B's accept
+        # notification rides back so A confirms.
+        a.cmd(cmd="udpFriendRequest", to=idb, name="Beta")
+        assert b.wait_event("friend-request", timeout=6), "B never saw A's request"
         b.cmd(cmd="acceptFriend", id=ida)
         assert a.wait_event("friend-accepted"), "A never saw B's accept"
         a.wait_event("message"); b.wait_event("message")  # drain reveals

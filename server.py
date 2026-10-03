@@ -276,7 +276,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.81"
+VERSION = "1.5.82"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -1236,6 +1236,21 @@ def _handle_udp_friend_accept(sock: socket.socket, pkt: dict, addr: str) -> None
         return
     if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
         _diag("udp-friend-accept-rejected", from_id=claimed[:12], reason="bad-signature")
+        return
+    # Consent gate: a valid signature proves WHO sent the accept, not that we
+    # ever ASKED for one. Only confirm a peer when we hold consent locally:
+    #   - request_outgoing: we sent them a UDP friend request that is still
+    #     outstanding, or
+    #   - is_pending: their inbound request was recorded (TCP handshake path
+    #     or accepted banner) and we have a held unconfirmed entry for them.
+    # Note is_friend() is deliberately NOT consent: an unfriended peer must
+    # not be able to re-confirm itself by replaying an accept. Without this
+    # gate any LAN device could sign a friend-accept for a freshly generated
+    # keypair and add itself as a permanent confirmed friend (review #9076).
+    with STATE.pending_lock:
+        requested = claimed in STATE.request_outgoing
+    if not (requested or is_pending(claimed)):
+        _diag("udp-friend-accept-rejected", from_id=claimed[:12], reason="not-requested")
         return
     # Confirm the friendship locally and reveal any held messages.
     peer = find_peer(claimed)

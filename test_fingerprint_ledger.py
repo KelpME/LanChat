@@ -116,10 +116,11 @@ def main():
         if not a.wait_event("ready") or not b.wait_event("ready"):
             print("FAIL: daemons not ready"); return 1
         ida, idb = _cert_fp(ha), _cert_fp(hb)
+        time.sleep(1.5)  # let the discovery beat register each peer's address
 
-        # 1. befriend A <-> B (UDP accept, confirmed)
-        a.cmd(cmd="send", to=idb, text="hi", friend_request=True)
-        b.wait_event("friend-request")
+        # 1. befriend A <-> B (signed UDP handshake, both confirmed)
+        a.cmd(cmd="udpFriendRequest", to=idb, name="B")
+        b.wait_event("friend-request", timeout=6)
         b.cmd(cmd="acceptFriend", id=ida)
         if not (a.wait_event("friend-accepted") and b.wait_event("friend-accepted")):
             print("FAIL: handshake not completed"); return 1

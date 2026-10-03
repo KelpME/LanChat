@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "kelpme.lanchat",
   "name": "Lanchat",
-  "version": "1.5.81",
+  "version": "1.5.82",
   "author": "KelpME",
   "license": "MIT",
   "description": "Encrypted, friend-gated chat for your LAN. Your machines find each other automatically — TLS with cert-fingerprint identity, approved-friends handshake, group rooms, undoable sends, and LocalSend-style file attachments.",
