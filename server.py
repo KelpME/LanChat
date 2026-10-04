@@ -282,7 +282,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.84"
+VERSION = "1.5.85"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -1815,7 +1815,9 @@ def _reader_outbound(pid: str, c: dict, sock) -> None:
                     if t == "identity":
                         # Peer's server announcing itself; we already trust it.
                         continue
-                    _handle_incoming(msg, src)
+                    # We dialed `pid` and verified its TLS cert fingerprint at
+                    # connect time — that proven identity owns this socket.
+                    _handle_incoming(msg, src, verified=pid)
     except (OSError, ssl.SSLError):
         pass
     finally:
@@ -1905,16 +1907,17 @@ def _reader_inbound(sock) -> None:
                         auth_state = "ok"
                         active = _maybe_set_active(pid, sock, initiator=pid)
                         for m in deferred:
-                            _handle_incoming(m, src)
+                            _handle_incoming(m, src, verified=pid or "")
                         deferred = []
                     else:
                         # While awaiting proof, hold any other messages (e.g. a
                         # friend request the dialer sent right after identity).
                         deferred.append(msg)
                     continue
-                # Authenticated: normal inbound handling.
+                # Authenticated: normal inbound handling. `pid` is the identity
+                # proven by the challenge-response handshake above.
                 if pid is not None:
-                    _handle_incoming(msg, src)
+                    _handle_incoming(msg, src, verified=pid or "")
     except (OSError, ssl.SSLError):
         pass
     finally:
@@ -2062,7 +2065,36 @@ def _reveal(held, outgoing: bool = False) -> None:
         _emit({"event": "message", "message": m})
 
 
-def _handle_incoming(msg: dict, addr) -> None:
+def _handle_incoming(msg: dict, addr, verified: str = "") -> None:
+    """Dispatch an authenticated connection's message.
+
+    `verified` is the connection's PROVEN identity — the dial target whose
+    TLS cert fingerprint we checked (_reader_outbound), or the id proven by
+    the challenge-response handshake (_reader_inbound). Every dispatch binds
+    to it: a message whose `from` field disagrees with the connection's
+    proven identity is dropped (a LAN peer authenticated with its own key
+    must not be able to act as a confirmed friend by writing someone else's
+    fingerprint into `from` — including friendRemove clearing a friendship).
+    """
+    src_from = str(msg.get("from", ""))
+    if verified and src_from and src_from != verified:
+        # Room envelopes are the one legitimate exception: the room OWNER
+        # relays a roomFile envelope on the original sender's behalf (sender
+        # -> owner -> all members), so `from` may name the sender while the
+        # connection belongs to the owner. The rooms handlers enforce that
+        # (only roomFile may relay, and only from the room's owner); every
+        # other message type must carry the connection's proven identity.
+        if msg.get("t") in ("room", "roomFile"):
+            if msg.get("t") == "room":
+                rooms.handle_room_msg(msg, addr, verified)
+            else:
+                rooms.handle_room_file_msg(msg, addr, verified)
+            return
+        _diag("inbound-identity-mismatch", claimed=src_from[:12], verified=verified[:12])
+        return
+    # The dispatch identity is the VERIFIED one, not the payload's claim.
+    if verified:
+        msg["from"] = verified
     if msg.get("t") == "friendAccept":
         pid = str(msg.get("from", ""))
         pname = _clean_name(str(msg.get("fromName") or "")) or friendly_name(pid)

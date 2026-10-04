@@ -501,15 +501,26 @@ def forget_room(room_id: str) -> bool:
 # Inbound wire kinds (t:"room") — server.py's _handle_incoming calls these
 # --------------------------------------------------------------------------
 
-def handle_room_msg(msg: dict, addr) -> None:
+def handle_room_msg(msg: dict, addr, verified: str = "") -> None:
     """Route an inbound t:"room" envelope. The connection is already
-    authenticated (from = proven fingerprint), same trust level as chat."""
+    authenticated; `verified` is the connection's proven identity (see
+    server._handle_incoming). Every kind must be authored by the connection
+    itself — EXCEPT roomFile, where the room OWNER legitimately relays the
+    original sender's envelope during authoritative fan-out (and only from
+    the owner's own connection)."""
     import server  # deferred, late-bound
     kind = str(msg.get("kind", ""))
     from_pid = str(msg.get("from", ""))
     room_id = str(msg.get("roomId", ""))
     if not room_id:
         return
+    if verified and from_pid and from_pid != verified:
+        room = (STATE.rooms or {}).get(room_id) or (STATE.rooms_cache or {}).get(room_id)
+        owner = str((room or {}).get("owner") or "")
+        if not (kind == "roomFile" and owner and verified == owner):
+            server._diag("room-envelope-mismatch", kind=kind,
+                         claimed=from_pid[:12], verified=verified[:12])
+            return
     if kind == "roomState":
         # Authoritative snapshot from the room owner: replace our cache copy
         # unless ours is somehow newer (strict LWW on seq for the deferred
@@ -685,16 +696,26 @@ def emit_room_file_local(room: dict, envelope: dict) -> None:
     server._emit({"event": "message", "message": message})
 
 
-def handle_room_file_msg(msg: dict, addr) -> None:
+def handle_room_file_msg(msg: dict, addr, verified: str = "") -> None:
     """Inbound roomFile metadata (from the owner's authoritative broadcast).
     Carried as a room message bubble with its caption; bytes are NOT here —
     they are pulled from the original sender via the existing
-    attachmentRequest flow."""
+    attachmentRequest flow. `verified` is the connection's proven identity:
+    direct from the sender, or the room OWNER relaying the sender's
+    envelope (the only sanctioned relay)."""
     import server  # deferred, late-bound
     att = msg.get("att")
     if not isinstance(att, dict):
         return
     room_id = str(msg.get("roomId", ""))
+    from_pid = str(msg.get("from", ""))
+    if verified and from_pid and from_pid != verified:
+        room = (STATE.rooms or {}).get(room_id) or (STATE.rooms_cache or {}).get(room_id)
+        owner = str((room or {}).get("owner") or "")
+        if not (owner and verified == owner):
+            server._diag("room-envelope-mismatch", kind="roomFile",
+                         claimed=from_pid[:12], verified=verified[:12])
+            return
     message = {
         "from": str(msg.get("from", "")),
         "fromName": str(msg.get("fromName") or server.friendly_name(msg.get("from", ""))),

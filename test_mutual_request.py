@@ -328,6 +328,72 @@ def main():
     finally:
         n.stop(); o.stop()
 
+    # ---- M8: dispatch binds to the connection's PROVEN identity -----------
+    # Regression (marketplace review #9076 round 4): the server proves the
+    # connection's certificate identity but dispatched on the payload's
+    # `from` field. A LAN peer authenticated with its OWN key could write a
+    # confirmed friend's fingerprint into `from` and act as them — including
+    # friendRemove, which dropped the friendship and cleared its history.
+    kv, jv = make_home("bindK", 4991, "BindK"), make_home("bindJ", 4992, "BindJ")
+    atk = make_home("bindA", 4993, "BindA")
+    # Attacker daemon runs just long enough to generate its cert/keypair;
+    # the attack itself is a raw TLS client using those certs.
+    a0 = Daemon(atk, 4993, "BindA"); a0.wait_event("ready"); a0.stop()
+    k = Daemon(kv, 4991, "BindK"); j = Daemon(jv, 4992, "BindJ")
+    try:
+        k.wait_event("ready"); j.wait_event("ready")
+        idk, idj, ida = _cert_fp(kv), _cert_fp(jv), _cert_fp(atk)
+        def _beat2():
+            while True:
+                try:
+                    _disco(k.port, idj, "BindJ", 4992)
+                    _disco(j.port, idk, "BindK", 4991)
+                except OSError:
+                    return
+                time.sleep(2.0)
+        threading.Thread(target=_beat2, daemon=True).start()
+        time.sleep(1.5)
+        # Legit friendship k <-> j (signed UDP handshake).
+        k.cmd(cmd="udpFriendRequest", to=idj, name="BindJ")
+        j.wait_event("friend-request", timeout=6)
+        j.cmd(cmd="acceptFriend", id=idk)
+        assert k.wait_event("friend-accepted", timeout=6), "M8 setup: handshake failed"
+        time.sleep(0.8)
+        check("M8a setup: j is confirmed friend of k", _confirmed(k, idj))
+        # Attacker authenticates with its OWN key (challenge-response passes),
+        # then rewrites `from` to the friend's fingerprint on the wire.
+        import test_peer as _tp
+        with open(os.path.join(atk, ".config", "omarchy", "lanchat-certs", "cert.pem")) as fh:
+            a_cert = fh.read()
+        with open(os.path.join(atk, ".config", "omarchy", "lanchat-certs", "key.pem")) as fh:
+            a_key = fh.read()
+        s = _tp.authed_connect("127.0.0.1", k.port, a_cert, a_key)
+        s.sendall((json.dumps({"t": "friendRemove", "from": idj}) + "\n").encode())
+        s.sendall((json.dumps({"t": "msg", "from": idj, "fromName": "BindJ",
+                               "text": "impersonated", "mid": "imp1"}) + "\n").encode())
+        # Relay forgery: attacker is NOT a room owner, so it may not relay a
+        # roomFile envelope naming someone else as the sender.
+        s.sendall((json.dumps({"t": "roomFile", "roomId": "f0f0f0f0f0f0",
+                               "from": idj, "att": {"name": "evil.txt", "fileId": "x",
+                                                    "mid": "evil1"}}) + "\n").encode())
+        s.close()
+        time.sleep(1.5)
+        check("M8b forged friendRemove did NOT drop the friendship", _confirmed(k, idj))
+        check("M8c no friend-removed event on the victim",
+              not any(ev.get("id") == idj for ev in k.events_of("friend-removed")))
+        check("M8d impersonated message NOT recorded in history",
+              not any(ev.get("event") == "message" and ev["message"].get("from") == idj
+                      for ev in k.events_of("message")))
+        check("M8f non-owner relay of roomFile envelope dropped",
+              not any(ev.get("event") == "message" and (ev["message"].get("attachment") or {}).get("name") == "evil.txt"
+                      for ev in k.events_of("message")))
+        check("M8e mismatch diagnostic emitted",
+              any("inbound-identity-mismatch" in str(e.get("message", "")) or
+                  e.get("message") == "inbound-identity-mismatch"
+                  for e in k.events_of("diagnostic")))
+    finally:
+        k.stop(); j.stop()
+
     print()
     if all(checks):
         print("ALL MUTUAL-REQUEST TESTS PASSED (%d checks)" % len(checks))
