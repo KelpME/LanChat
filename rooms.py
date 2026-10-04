@@ -365,7 +365,10 @@ def member_set_color(room: dict, peer_id: str, token: str, hexv: str) -> bool:
     """A member (or the owner themselves) sets THEIR color: a palette token
     (or the literal 'theme' = match my theme accent) + the current resolved
     hex so every viewer renders the identical color. The owner validates and
-    rebroadcasts."""
+    rebroadcasts. Owner-authority boundary (review #9076 round 5): a member
+    must NOT overwrite other peers' cached rooms directly — the proposal is
+    forwarded to the room OWNER, who applies it to the authoritative copy
+    and rebroadcasts the roomState themselves."""
     import server  # deferred, late-bound
     if peer_id not in room.get("members", {}):
         return False
@@ -373,19 +376,28 @@ def member_set_color(room: dict, peer_id: str, token: str, hexv: str) -> bool:
     hexv = str(hexv or "")
     if token != "theme" and not (hexv.startswith("#") and len(hexv) in (4, 7)):
         return False
+    if _is_owner(room, peer_id):
+        _apply_member_color(room, peer_id, token, hexv)
+        return True
+    # Member: forward the proposal to the owner over their friend socket.
+    return bool(server._write(str(room.get("owner") or ""), {
+        "t": "room", "kind": "roomColorSet", "roomId": room["roomId"],
+        "from": server.host_id(), "fromName": server.display_name(),
+        "token": token, "hex": hexv}))
+
+
+def _apply_member_color(room: dict, peer_id: str, token: str, hexv: str) -> None:
+    """OWNER: apply a member's color to the authoritative copy and broadcast
+    the roomState (from = the owner, so member-side authority checks pass)."""
+    import server  # deferred, late-bound
     with rooms_lock():
         room["members"][peer_id]["color"] = {"token": token, "hex": hexv}
         _bump(room)
-        if _is_owner(room, peer_id):
-            _persist_owner()
-        else:
-            STATE.rooms_cache[room["roomId"]] = room
-            _persist_cache()
+        _persist_owner()
     _send_room_state(room)
     server._emit({"event": "room-state", "room": room})
     _emit_room_list()
     server._diag("room-color-set", roomId=room["roomId"][:12], peer=peer_id[:12], token=token)
-    return True
 
 
 def owner_toggle_colors(room: dict, enabled: bool) -> bool:
@@ -501,6 +513,17 @@ def forget_room(room_id: str) -> bool:
 # Inbound wire kinds (t:"room") — server.py's _handle_incoming calls these
 # --------------------------------------------------------------------------
 
+def _recorded_room(room_id: str):
+    """The local record for a room: authoritative (we own it) or cached copy.
+    None when STATE is not initialized or the room is unknown locally."""
+    if STATE is None:
+        return None
+    mine = getattr(STATE, "rooms", None) or {}
+    cached = getattr(STATE, "rooms_cache", None) or {}
+    rec = mine.get(room_id) or cached.get(room_id)
+    return rec or None
+
+
 def handle_room_msg(msg: dict, addr, verified: str = "") -> None:
     """Route an inbound t:"room" envelope. The connection is already
     authenticated; `verified` is the connection's proven identity (see
@@ -515,8 +538,8 @@ def handle_room_msg(msg: dict, addr, verified: str = "") -> None:
     if not room_id:
         return
     if verified and from_pid and from_pid != verified:
-        room = (STATE.rooms or {}).get(room_id) or (STATE.rooms_cache or {}).get(room_id)
-        owner = str((room or {}).get("owner") or "")
+        recorded = _recorded_room(room_id)
+        owner = str((recorded or {}).get("owner") or "")
         if not (kind == "roomFile" and owner and verified == owner):
             server._diag("room-envelope-mismatch", kind=kind,
                          claimed=from_pid[:12], verified=verified[:12])
@@ -525,10 +548,19 @@ def handle_room_msg(msg: dict, addr, verified: str = "") -> None:
         # Authoritative snapshot from the room owner: replace our cache copy
         # unless ours is somehow newer (strict LWW on seq for the deferred
         # owner-transfer follow-up).
+        # Owner authority: the sender must BE the room's recorded owner. A
+        # snapshot from anyone else (even a connection-identity match) must
+        # not overwrite the cached room (review #9076 round 5). No local
+        # record -> no recorded owner to authorize the writer -> drop.
         room = msg.get("room")
         if not isinstance(room, dict) or str(room.get("roomId", "")) != room_id:
             return
         with rooms_lock():
+            recorded = _recorded_room(room_id)
+            if not recorded or str(recorded.get("owner") or "") != verified:
+                server._diag("room-owner-mismatch", kind=kind,
+                             verified=verified[:12], roomId=room_id[:12])
+                return
             mine = STATE.rooms_cache.get(room_id)
             if STATE.rooms.get(room_id) is not None:
                 return  # we are the owner; our copy is authoritative
@@ -572,7 +604,7 @@ def handle_room_msg(msg: dict, addr, verified: str = "") -> None:
         if room is not None and _is_owner(room, server.host_id()):
             fan_out_room_file(room, msg)
         else:
-            handle_room_file_msg(msg, addr)
+            handle_room_file_msg(msg, addr, verified)
         return
     if kind == "roomLeave":
         # A member resigned: we own this room, so the authoritative roster
@@ -615,9 +647,33 @@ def handle_room_msg(msg: dict, addr, verified: str = "") -> None:
             return
         owner_invite(room, peer_id)
         return
+    if kind == "roomColorSet":
+        # A member proposing its OWN color. Only the room OWNER applies it
+        # (to the authoritative copy) and rebroadcasts; members ignore it.
+        # The proposer must be the connection itself (binding enforced
+        # from == verified above) and a member of this room.
+        room = _recorded_room(room_id)
+        if room is None or not _is_owner(room, server.host_id()):
+            return
+        if from_pid not in room.get("members", {}):
+            return
+        token = str(msg.get("token", "theme"))[:32]
+        hexv = str(msg.get("hex", ""))
+        if token != "theme" and not (hexv.startswith("#") and len(hexv) in (4, 7)):
+            return
+        _apply_member_color(room, from_pid, token, hexv)
+        return
     if kind == "roomRemove":
         # We were removed (or the room was disbanded by the owner leaving).
+        # Owner authority: only the room's recorded owner may delete our
+        # cached copy — an authenticated member claiming a remove must not
+        # be able to evict someone else's room (review #9076 round 5).
         with rooms_lock():
+            recorded = _recorded_room(room_id)
+            if not recorded or str(recorded.get("owner") or "") != verified:
+                server._diag("room-owner-mismatch", kind=kind,
+                             verified=verified[:12], roomId=room_id[:12])
+                return
             removed = STATE.rooms_cache.pop(room_id, None)
             _persist_cache()
         if removed is not None:
@@ -710,8 +766,8 @@ def handle_room_file_msg(msg: dict, addr, verified: str = "") -> None:
     room_id = str(msg.get("roomId", ""))
     from_pid = str(msg.get("from", ""))
     if verified and from_pid and from_pid != verified:
-        room = (STATE.rooms or {}).get(room_id) or (STATE.rooms_cache or {}).get(room_id)
-        owner = str((room or {}).get("owner") or "")
+        recorded = _recorded_room(room_id)
+        owner = str((recorded or {}).get("owner") or "")
         if not (owner and verified == owner):
             server._diag("room-envelope-mismatch", kind="roomFile",
                          claimed=from_pid[:12], verified=verified[:12])

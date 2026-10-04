@@ -394,6 +394,80 @@ def main():
     finally:
         k.stop(); j.stop()
 
+    # ---- M9: room-owner authority boundary --------------------------------
+    # Regression (marketplace review #9076 round 5): connection-identity
+    # binding alone let an authenticated member overwrite another owner's
+    # cached room (roomState) or delete it (roomRemove) — neither handler
+    # checked the sender against the recorded owner. The sender must BE the
+    # room's recorded owner for both kinds.
+    ro = make_home("ownO", 4997, "OwnerO")
+    kv2 = make_home("ownK", 4998, "OwnK")
+    atk2 = make_home("ownA", 4999, "OwnA")
+    o0 = Daemon(ro, 4997, "OwnerO"); o0.wait_event("ready"); o0.stop()  # certs
+    a0 = Daemon(atk2, 4999, "OwnA"); a0.wait_event("ready"); a0.stop()  # certs
+    kw = Daemon(kv2, 4998, "OwnK")
+    ow = Daemon(ro, 4997, "OwnerO")
+    try:
+        kw.wait_event("ready"); ow.wait_event("ready")
+        idk2, ido2, ida2 = _cert_fp(kv2), _cert_fp(ro), _cert_fp(atk2)
+        def _beat3():
+            while True:
+                try:
+                    _disco(kw.port, ido2, "OwnerO", 4997)
+                    _disco(ow.port, idk2, "OwnK", 4998)
+                except OSError:
+                    return
+                time.sleep(2.0)
+        threading.Thread(target=_beat3, daemon=True).start()
+        time.sleep(1.5)
+        # Legit friendship o <-> k first (room admission rule: every member
+        # must be a confirmed friend of the owner).
+        ow.cmd(cmd="udpFriendRequest", to=idk2, name="OwnK")
+        kw.wait_event("friend-request", timeout=6)
+        kw.cmd(cmd="acceptFriend", id=ido2)
+        assert kw.wait_event("friend-accepted", timeout=6), "M9 setup: handshake failed"
+        time.sleep(0.8)
+        # Real owner o creates a room and adds k; k joins (cache seeded).
+        ow.cmd(cmd="createRoom", name="authroom")
+        rid9 = ow.wait_event("room-created", timeout=6)["roomId"]
+        ow.cmd(cmd="roomAdd", roomId=rid9, peer=idk2)
+        kw.wait_event("room-invite", timeout=8)
+        kw.cmd(cmd="roomJoin", roomId=rid9)
+        time.sleep(1.0)
+        cache_owner = [e for e in kw.events_of("room-state") if e.get("room", {}).get("roomId") == rid9]
+        check("M9a setup: k holds a cached room owned by the real owner",
+              bool(cache_owner) and cache_owner[-1]["room"].get("owner") == ido2)
+        # Attacker (own key, identity proven) claims roomState + roomRemove
+        # for the owner's room, with its OWN id as from (binding passes).
+        import test_peer as _tp2
+        with open(os.path.join(atk2, ".config", "omarchy", "lanchat-certs", "cert.pem")) as fh:
+            a_cert2 = fh.read()
+        with open(os.path.join(atk2, ".config", "omarchy", "lanchat-certs", "key.pem")) as fh:
+            a_key2 = fh.read()
+        s9 = _tp2.authed_connect("127.0.0.1", kw.port, a_cert2, a_key2)
+        forged_state = {"t": "room", "kind": "roomState", "roomId": rid9,
+                        "from": ida2, "seq": 99,
+                        "room": {"roomId": rid9, "name": "hijacked",
+                                 "owner": ida2, "seq": 99, "members": {}}}
+        s9.sendall((json.dumps(forged_state) + "\n").encode())
+        s9.sendall((json.dumps({"t": "room", "kind": "roomRemove",
+                                "roomId": rid9, "from": ida2}) + "\n").encode())
+        s9.close()
+        time.sleep(1.5)
+        # The cached room is untouched: same owner, no hijack, still present.
+        states9 = [e for e in kw.events_of("room-state") if e.get("room", {}).get("roomId") == rid9]
+        check("M9b forged roomState did NOT overwrite the cached room",
+              all(e["room"].get("owner") == ido2 and e["room"].get("name") != "hijacked"
+                  for e in states9))
+        check("M9c no hijacked room-state event", not states9 or states9[-1]["room"].get("name") != "hijacked")
+        check("M9d forged roomRemove did NOT delete the cached room",
+              any(e.get("room", {}).get("roomId") == rid9 for e in kw.events_of("room-list"))
+              or not any("room-removed-locally" in str(e.get("message", "")) for e in kw.events_of("diagnostic")))
+        check("M9e owner-authority diagnostic emitted",
+              any("room-owner-mismatch" in str(e.get("message", "")) for e in kw.events_of("diagnostic")))
+    finally:
+        kw.stop(); ow.stop()
+
     print()
     if all(checks):
         print("ALL MUTUAL-REQUEST TESTS PASSED (%d checks)" % len(checks))

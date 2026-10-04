@@ -282,7 +282,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.85"
+VERSION = "1.5.86"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2150,10 +2150,10 @@ def _handle_incoming(msg: dict, addr, verified: str = "") -> None:
     # ---- attachment file transfer (over the authenticated socket) ----
     # ---- room envelope (group chat rooms) ----
     if msg.get("t") == "room":
-        rooms.handle_room_msg(msg, addr)
+        rooms.handle_room_msg(msg, addr, verified)
         return
     if msg.get("t") == "roomFile":
-        rooms.handle_room_file_msg(msg, addr)
+        rooms.handle_room_file_msg(msg, addr, verified)
         return
     if msg.get("t") == "attachmentRequest":
         # Recipient wants a file we registered. Stream it back over the socket
