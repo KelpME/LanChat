@@ -276,7 +276,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.82"
+VERSION = "1.5.83"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -1238,18 +1238,15 @@ def _handle_udp_friend_accept(sock: socket.socket, pkt: dict, addr: str) -> None
         _diag("udp-friend-accept-rejected", from_id=claimed[:12], reason="bad-signature")
         return
     # Consent gate: a valid signature proves WHO sent the accept, not that we
-    # ever ASKED for one. Only confirm a peer when we hold consent locally:
-    #   - request_outgoing: we sent them a UDP friend request that is still
-    #     outstanding, or
-    #   - is_pending: their inbound request was recorded (TCP handshake path
-    #     or accepted banner) and we have a held unconfirmed entry for them.
-    # Note is_friend() is deliberately NOT consent: an unfriended peer must
-    # not be able to re-confirm itself by replaying an accept. Without this
-    # gate any LAN device could sign a friend-accept for a freshly generated
-    # keypair and add itself as a permanent confirmed friend (review #9076).
+    # ever ASKED for one. The ONLY consent is locally recorded OUTBOUND
+    # intent: a friend request WE sent that is still outstanding. An inbound
+    # pending entry is NOT consent — a stranger can create one themselves
+    # (TCP friendRequest) and then confirm it with this packet (review #9076
+    # round 2). is_friend() is NOT consent either: an unfriended peer must not
+    # re-confirm itself by replaying an accept.
     with STATE.pending_lock:
         requested = claimed in STATE.request_outgoing
-    if not (requested or is_pending(claimed)):
+    if not requested:
         _diag("udp-friend-accept-rejected", from_id=claimed[:12], reason="not-requested")
         return
     # Confirm the friendship locally and reveal any held messages.
@@ -2062,14 +2059,25 @@ def _handle_incoming(msg: dict, addr) -> None:
     if msg.get("t") == "friendAccept":
         pid = str(msg.get("from", ""))
         pname = str(msg.get("fromName") or friendly_name(pid))
-        if is_pending(pid) or is_friend(pid):
+        # Same consent rule as the UDP accept path (review #9076 round 2):
+        # only a locally recorded OUTBOUND request counts. A pending inbound
+        # entry is not consent — the peer created it themselves and cannot
+        # use it to confirm; is_friend() is not consent either (post-unfriend
+        # replay). Genuine flow: WE requested them, they clicked Accept, and
+        # their notification (UDP with TCP fallback) lands here.
+        with STATE.pending_lock:
+            requested = pid in STATE.request_outgoing
+        if requested:
             add_friend(pid, addr[0], pname, confirmed=True)
             _emit({"event": "friend-accepted", "id": pid, "name": pname})
             # They accepted: reveal the messages we held until then.
             with STATE.pending_lock:
+                STATE.request_outgoing.discard(pid)
                 held = STATE.pending_sent.pop(pid, [])
             _diag("inbound-friend-accept", peer=pid[:12], name=pname, revealed=len(held))
             _reveal(held)
+        else:
+            _diag("inbound-friend-accept-rejected", from_id=pid[:12], reason="not-requested")
         return
     if msg.get("t") == "friendReject":
         pid = str(msg.get("from", ""))

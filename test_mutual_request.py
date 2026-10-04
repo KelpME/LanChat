@@ -261,6 +261,42 @@ def main():
     finally:
         i.stop(); j.stop()
 
+    # ---- M6: stranger-created pending entry is NOT consent ----------------
+    # Regression (marketplace review #9076 round 2): with requests enabled a
+    # stranger can authenticate over TCP, send a friendRequest to create its
+    # own unconfirmed pending entry, then follow with a valid signed UDP
+    # accept. The pending entry was remotely created, so it must NOT satisfy
+    # the consent gate — only our own outbound intent does.
+    k, m, idk, idm, k_home, m_home = _pair6("chainA", "chainB", 4983, 4984)
+    try:
+        # Stranger m opens an authenticated TCP connection to victim k and
+        # files a friendRequest (banner surfaces on k; no confirmation).
+        import test_peer as _tp
+        with open(os.path.join(m_home, ".config", "omarchy", "lanchat-certs", "cert.pem")) as fh:
+            m_cert = fh.read()
+        with open(os.path.join(m_home, ".config", "omarchy", "lanchat-certs", "key.pem")) as fh:
+            m_key = fh.read()
+        s = _tp.authed_connect("127.0.0.1", k.port, m_cert, m_key)
+        s.sendall((json.dumps({"t": "msg", "from": idm, "fromName": "chainB",
+                               "text": "be my friend", "friendRequest": True}) + "\n").encode())
+        s.close()
+        got_k = _wait_inbound(k, idm, 8.0)
+        check("M6a stranger TCP friendRequest surfaces as banner", bool(got_k))
+        # Same trick as M5: genuine signed UDP accept, no outbound intent.
+        _unsolicited_accept(k.port, m_home, idm, idk, "chainB", k.port)
+        time.sleep(1.5)
+        check("M6b self-created pending + UDP accept does NOT confirm",
+              not _confirmed(k, idm))
+        check("M6c no friend-accepted event on the victim",
+              not k.events_of("friend-accepted"))
+        # The legit path through the same pending state still works: the
+        # USER accepts the banner -> confirm happens locally on k.
+        k.cmd(cmd="acceptFriend", id=idm)
+        time.sleep(1.0)
+        check("M6d explicit user acceptance still confirms", _confirmed(k, idm))
+    finally:
+        k.stop(); m.stop()
+
     print()
     if all(checks):
         print("ALL MUTUAL-REQUEST TESTS PASSED (%d checks)" % len(checks))
