@@ -125,7 +125,13 @@ from identity import (  # noqa: F401
     ensure_tls,
     host_id,
 )
-from naming import _SKATE_TRICKS, _TRICK_MODIFIERS, friendly_name  # noqa: E402
+from naming import _SKATE_TRICKS, _TRICK_MODIFIERS, clean_name, friendly_name  # noqa: E402
+
+
+def _clean_name(raw: str) -> str:
+    """Sanitize a peer-supplied name (see naming.clean_name). Falls back to
+    an empty string — callers pair it with friendly_name for the default."""
+    return clean_name(raw)
 
 # --------------------------------------------------------------------------
 # Paths & config
@@ -276,7 +282,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.83"
+VERSION = "1.5.84"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -996,9 +1002,10 @@ def _udp_listener(sock: socket.socket) -> None:
                 # network — it just doesn't announce itself or reply, so those peers
                 # don't see it back. Confirmed friends are always accepted too.
                 hidden = visibility() != "open"
-                # Prefer the peer's broadcast display name; fall back to a
-                # deterministic friendly name derived from its id.
-                name = str(pkt.get("name") or friendly_name(pid))
+                # Prefer the peer's broadcast display name (sanitized — see
+                # naming.clean_name); fall back to a deterministic friendly
+                # name derived from its id.
+                name = _clean_name(str(pkt.get("name") or "")) or friendly_name(pid)
                 upsert_peer(
                     pid,
                     name,
@@ -1133,7 +1140,7 @@ def _handle_udp_friend_request(sock: socket.socket, pkt: dict, addr: str) -> Non
     cert_pem = str(pkt.get("cert") or "")
     nonce = str(pkt.get("nonce") or "")
     sig = str(pkt.get("sig") or "")
-    name = str(pkt.get("name") or friendly_name(claimed))
+    name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
     pport = int(pkt.get("port") or DEFAULT_PORT)
     # Reject our own request echoing back.
     if not claimed or claimed == host_id():
@@ -1227,7 +1234,7 @@ def _handle_udp_friend_accept(sock: socket.socket, pkt: dict, addr: str) -> None
     cert_pem = str(pkt.get("cert") or "")
     nonce = str(pkt.get("nonce") or "")
     sig = str(pkt.get("sig") or "")
-    name = str(pkt.get("name") or friendly_name(claimed))
+    name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
     # We only accept a friend-accept for someone we actually requested.
     if not claimed or claimed == host_id():
         return
@@ -1313,7 +1320,7 @@ def _handle_udp_friend_cancel(sock: socket.socket, pkt: dict, addr: str) -> None
     cert_pem = str(pkt.get("cert") or "")
     nonce = str(pkt.get("nonce") or "")
     sig = str(pkt.get("sig") or "")
-    name = str(pkt.get("name") or friendly_name(claimed))
+    name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
     if not claimed or claimed == host_id():
         return
     if _cert_fingerprint_of_pem(cert_pem) != claimed:
@@ -1422,7 +1429,7 @@ def _handle_udp_friend_reject(sock: socket.socket, pkt: dict, addr: str) -> None
     cert_pem = str(pkt.get("cert") or "")
     nonce = str(pkt.get("nonce") or "")
     sig = str(pkt.get("sig") or "")
-    name = str(pkt.get("name") or friendly_name(claimed))
+    name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
     if not claimed or claimed == host_id():
         return
     if _cert_fingerprint_of_pem(cert_pem) != claimed:
@@ -1455,7 +1462,7 @@ def _handle_udp_friend_unfriend(sock: socket.socket, pkt: dict, addr: str) -> No
     cert_pem = str(pkt.get("cert") or "")
     nonce = str(pkt.get("nonce") or "")
     sig = str(pkt.get("sig") or "")
-    name = str(pkt.get("name") or friendly_name(claimed))
+    name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
     if not claimed or claimed == host_id():
         return
     if _cert_fingerprint_of_pem(cert_pem) != claimed:
@@ -2058,7 +2065,7 @@ def _reveal(held, outgoing: bool = False) -> None:
 def _handle_incoming(msg: dict, addr) -> None:
     if msg.get("t") == "friendAccept":
         pid = str(msg.get("from", ""))
-        pname = str(msg.get("fromName") or friendly_name(pid))
+        pname = _clean_name(str(msg.get("fromName") or "")) or friendly_name(pid)
         # Same consent rule as the UDP accept path (review #9076 round 2):
         # only a locally recorded OUTBOUND request counts. A pending inbound
         # entry is not consent — the peer created it themselves and cannot
@@ -2087,7 +2094,7 @@ def _handle_incoming(msg: dict, addr) -> None:
             STATE.pending_sent.pop(pid, None)
             STATE.request_outgoing.discard(pid)
         _unfriend_if_unconfirmed(pid)
-        _emit({"event": "friend-rejected", "id": pid, "name": str(msg.get("fromName") or friendly_name(pid))})
+        _emit({"event": "friend-rejected", "id": pid, "name": _clean_name(str(msg.get("fromName") or "")) or friendly_name(pid)})
         _diag("inbound-friend-reject", peer=pid[:12])
         return
     if msg.get("t") == "friendRemove":
@@ -2100,7 +2107,7 @@ def _handle_incoming(msg: dict, addr) -> None:
             _diag("inbound-friend-remove", peer=pid[:12])
         return
     if msg.get("t") == "typing":
-        _emit({"event": "typing", "from": str(msg.get("from", "")), "fromName": str(msg.get("fromName") or friendly_name(msg.get("from", "")))})
+        _emit({"event": "typing", "from": str(msg.get("from", "")), "fromName": _clean_name(str(msg.get("fromName") or "")) or friendly_name(msg.get("from", ""))})
         return
     if msg.get("t") == "typingStopped":
         _emit({"event": "typing-stopped", "from": str(msg.get("from", ""))})
@@ -2213,7 +2220,7 @@ def _handle_incoming(msg: dict, addr) -> None:
         return
     # Use the sender's broadcast name if present; otherwise fall back to a
     # deterministic friendly name for their id.
-    from_name = str(msg.get("fromName") or friendly_name(pid))
+    from_name = _clean_name(str(msg.get("fromName") or "")) or friendly_name(pid)
     ts = int(time.time() * 1000)
     message = {
         "from": pid,

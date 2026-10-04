@@ -79,3 +79,25 @@ def friendly_name(peer_id: str) -> str:
     trick = _SKATE_TRICKS[digest[0] % len(_SKATE_TRICKS)]
     modifier = _TRICK_MODIFIERS[digest[1] % len(_TRICK_MODIFIERS)]
     return f"{modifier}{trick}"
+
+
+def clean_name(name: str, max_len: int = 64) -> str:
+    """Reduce a peer-supplied display name to inert plain text.
+
+    Names arrive from UNAUTHENTICATED LAN broadcasts and render in QML Text
+    labels whose default format (AutoText) runs the rich-text engine: a name
+    like `![x](http://attacker/x.png)` makes Qt fetch that URL the moment the
+    peer list is displayed, leaking the viewer's reachability and render
+    timing to the peer before any friendship exists. Strip everything that
+    can trigger markup — angle brackets (HTML), square brackets (markdown
+    image/link syntax `![..](..)`, which needs the `](` pairing), backticks,
+    and control characters — and cap the length. Plain display names never
+    legitimately use these characters.
+    """
+    if not isinstance(name, str):
+        return ""
+    cleaned = "".join(
+        ch for ch in name
+        if ch.isprintable() and ch not in "<>[]`"
+    )
+    return cleaned[:max_len]

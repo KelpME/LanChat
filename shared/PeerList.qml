@@ -147,6 +147,9 @@ Item {
         anchors.leftMargin: Style.spacing.sm + Style.space(9) + Style.spacing.xs
         anchors.right: roomAddBadge.visible ? roomAddBadge.left : friendBadge.left
         anchors.rightMargin: Style.spacing.md
+        // Peer names arrive from UNAUTHENTICATED LAN broadcasts; force plain
+        // text so the rich-text engine can never act on markup in the name.
+        textFormat: Text.PlainText
         text: modelData.name
         color: modelData.id === selectedPeerId
           ? Color.accent

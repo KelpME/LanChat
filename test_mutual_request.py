@@ -297,6 +297,37 @@ def main():
     finally:
         k.stop(); m.stop()
 
+    # ---- M7: discovery name is sanitized before it reaches the UI ---------
+    # Regression (marketplace review #9076 round 3): unauthenticated LAN
+    # discovery names pass into the peer-list labels. QML Text defaults to
+    # AutoText (the rich-text engine), so a name like `![x](http://att/x.png)`
+    # makes Qt FETCH the URL when the list renders — a viewer-side leak
+    # (reachability + render timing) before any friendship. The daemon must
+    # strip markup from peer names at ingestion.
+    n, o, idn, idn2 = _pair("cleanA", "cleanB", 4985, 4986)
+    try:
+        evil = "![x](http://attacker.example/x.png) <b>t</b>"
+        _disco(n.port, idn2, evil, o.port)
+        time.sleep(1.0)
+        snap = n.wait_event("peer", timeout=5)
+        got = None
+        dl = time.time() + 5
+        while time.time() < dl and not got:
+            got = next((e for e in n.events_of("peer")
+                        if e.get("peer", {}).get("id") == idn2), None)
+            if not got:
+                time.sleep(0.05)
+        check("M7a crafted discovery name is peer-visible", bool(got))
+        nm = (got or {}).get("peer", {}).get("name", "")
+        check("M7b markup stripped from the stored name",
+              bool(nm) and "![" not in nm and "<" not in nm and ">" not in nm
+              and "[" not in nm and "]" not in nm)
+        check("M7c readable text survives sanitization", "t" in nm and nm != "")
+        check("M7d name length capped at 64",
+              len((got or {}).get("peer", {}).get("name", "")) <= 64)
+    finally:
+        n.stop(); o.stop()
+
     print()
     if all(checks):
         print("ALL MUTUAL-REQUEST TESTS PASSED (%d checks)" % len(checks))
