@@ -149,6 +149,18 @@ FINGERPRINTS_PATH = os.path.join(
     os.path.expanduser("~"), ".local", "state", "lanchat", "fingerprints.json"
 )
 
+# Persisted record of CONSUMED signed UDP friend-handshake nonces. A signed
+# packet is a bearer token: the ONLY thing separating first delivery from a
+# replay is remembering what we already honored. If that memory were in-RAM
+# only, killing the daemon (crash, update, reboot) would hand a LAN eavesdropper
+# a fresh replay window on any packet they captured inside the validity window
+# (marketplace review #9076 round 7). Entries are keyed by the packet's signed
+# expiry, so once a packet can no longer verify, its entry is pruned: the file
+# is self-bounding and never grows past a window's worth of handshakes.
+UDP_SEEN_PATH = os.path.join(
+    os.path.expanduser("~"), ".local", "state", "lanchat", "udp-seen.json"
+)
+
 DEFAULT_PORT = 4812
 DEFAULT_HTTP_PORT = 4814
 PEER_TIMEOUT_S = 6.0       # drop a peer after this long without a hello
@@ -282,7 +294,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.87"
+VERSION = "1.5.88"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -324,14 +336,18 @@ class State:
         # that ends the request (accept/reject/cancel/unfriend) discards the
         # entry so a stale intent can never auto-accept a future request.
         self.request_outgoing = set()
-        # Consumed UDP friend-handshake nonces: (sender_id, nonce) -> ts. A
-        # signed packet is a bearer token — without replay tracking, capturing
-        # one genuine packet lets the attacker re-send it (or a type-swapped
-        # variant, which the v2 signature blob also blocks) as many times as
-        # they like. Guarded by udp_seen_lock; entries purge past the TTL.
+        # Consumed UDP friend-handshake nonces: "sender:nonce" -> signed
+        # expiry (epoch secs). A signed packet is a bearer token — without
+        # replay tracking, capturing one genuine packet lets the attacker
+        # re-send it (or a type-swapped variant, which the signature blob
+        # also blocks) as many times as they like. Persisted to UDP_SEEN_PATH
+        # so a daemon restart cannot reopen the window on a captured packet
+        # (review #9076 round 7). Guarded by udp_seen_lock; entries drop
+        # once their signed expiry passes (an expired packet can never verify,
+        # so the file is self-bounding).
         self.udp_seen = {}
+        self.udp_seen_loaded = False
         self.udp_seen_lock = threading.Lock()
-        self.udp_seen_purge_ts = 0.0
         self.udp_sock = None
         self.stdout = sys.stdout
         self.socket_clients = set()
@@ -1094,47 +1110,91 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
 _udp_fail_window = [0, 0.0, 0.0]  # [count since last log, last_fail_time, last_log_time]
 
 
-# ---- signed UDP friend-handshake packets: v2 signature binding -----------
+# ---- signed UDP friend-handshake packets: v3 signature binding -----------
 # v1 signed only (id + nonce): the SAME valid signature was accepted for any
-# friend packet type and any recipient. A captured signed friend-request could
-# therefore be re-sent as `friend-unfriend` (type swap) and remove the
-# friendship + history without the sender ever authorizing that operation
-# (marketplace review #9076 round 6). v2 binds the signature to the FULL
-# operation: type, sender, recipient, and nonce — a captured packet can be
-# replayed only as exactly what it was, and nonce tracking rejects even that.
-_UDP_SIG_TTL = 600.0  # seconds a consumed (sender, nonce) stays remembered
+# friend packet type and any recipient (type swap, review #9076 round 6).
+# v2 bound type + sender + recipient + nonce but carried NO expiry, and the
+# consumed-nonce memory lived in RAM with a 600 s TTL: a captured genuine
+# friend-unfriend stayed replayable for its whole (unbounded) lifetime once the
+# cache aged out or the daemon restarted (review #9076 round 7). v3 signs the
+# issuance/expiry instants into the blob — every packet is a SHORT-LIVED bearer
+# token — and the consumed-nonce map is persisted to disk, so the only thing an
+# eavesdropper keeps after the window closes is bytes that can never verify.
+_UDP_SIG_VALIDITY = 120.0  # a signed packet verifies only inside this window
+_UDP_SIG_CLOCK_SLACK = 30.0  # tolerance for skew between peers' clocks
 
 
-def _udp_friend_sig_blob(kind: str, sender_id: str, to_id: str, nonce: str) -> bytes:
-    """Canonical v2 signature blob — length-prefixed so no field boundary can
-    be shifted to make two different operations hash to the same bytes."""
-    parts = ["v2", kind, sender_id, to_id, nonce]
+def _udp_friend_sig_blob(kind: str, sender_id: str, to_id: str,
+                         nonce: str, iat: float, exp: float) -> bytes:
+    """Canonical v3 signature blob — length-prefixed so no field boundary can
+    be shifted to make two different operations hash to the same bytes.
+
+    Binds the FULL operation: type, sender, recipient, nonce, AND the signed
+    issuance/expiry instants (integer seconds, canonical decimal form on both
+    sides so sender and verifier always agree byte-for-byte)."""
+    parts = ["v3", kind, sender_id, to_id, nonce, str(int(iat)), str(int(exp))]
     return "".join("%d:%s" % (len(p), p) for p in parts).encode("utf-8")
 
 
-def _udp_seen_check(sender_id: str, nonce: str) -> bool:
+def _udp_seen_key(sender_id: str, nonce: str) -> str:
+    # Length-prefixed so no (sender, nonce) pair can be re-split into a key
+    # belonging to a different pair.
+    return "%d:%s%s" % (len(sender_id), sender_id, nonce)
+
+
+def _udp_seen_load() -> None:
+    """Load the persisted consumed-nonce map (caller holds udp_seen_lock).
+    Corrupt/unreadable state loads EMPTY but is still marked loaded; replay
+    safety then rests on the signed expiry window alone."""
+    STATE.udp_seen_loaded = True
+    try:
+        with open(UDP_SEEN_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            STATE.udp_seen = {str(k): float(v)
+                              for k, v in data.items() if isinstance(v, (int, float))}
+    except (OSError, ValueError):
+        pass
+
+
+def _udp_seen_save_locked() -> None:
+    """Atomically persist the consumed-nonce map (caller holds udp_seen_lock).
+    Best-effort like the fingerprint ledger: the signed expiry window bounds
+    replay even if the write fails."""
+    try:
+        os.makedirs(os.path.dirname(UDP_SEEN_PATH), exist_ok=True)
+        atomic_write(UDP_SEEN_PATH, json.dumps(STATE.udp_seen) + "\n")
+    except OSError:
+        pass
+
+
+def _udp_seen_check(sender_id: str, nonce: str, exp: float) -> bool:
     """True if this (sender, nonce) has NOT been consumed yet; records it.
 
     A genuine packet's signature is a bearer token over a fixed blob, so the
     only thing separating first delivery from a replay is remembering what we
     already honored. First-use-wins: the first handler to consume the nonce
-    acts, every later copy is dropped. Entries purge past the TTL so the map
-    cannot grow without bound."""
+    acts, every later copy is dropped. Entries are keyed by the packet's
+    SIGNED expiry: once it passes, the packet can never verify again, so the
+    entry is pruned — the map holds at most one validity window of handshakes.
+    The map is persisted so a daemon restart cannot reopen the window on a
+    captured packet (review #9076 round 7)."""
     now = time.time()
     with STATE.udp_seen_lock:
-        if now - STATE.udp_seen_purge_ts > _UDP_SIG_TTL:
-            STATE.udp_seen_purge_ts = now
-            for key in [k for k, ts in STATE.udp_seen.items() if now - ts > _UDP_SIG_TTL]:
-                STATE.udp_seen.pop(key, None)
-        key = (sender_id, nonce)
+        if not STATE.udp_seen_loaded:
+            _udp_seen_load()
+        for key in [k for k, e in STATE.udp_seen.items() if e + _UDP_SIG_CLOCK_SLACK < now]:
+            STATE.udp_seen.pop(key, None)
+        key = _udp_seen_key(sender_id, nonce)
         if key in STATE.udp_seen:
             return False
-        STATE.udp_seen[key] = now
+        STATE.udp_seen[key] = exp
+        _udp_seen_save_locked()
         return True
 
 
 def _send_udp_friend_packet(sock: socket.socket, kind: str, pid: str, diag_tag: str) -> bool:
-    """Send a signed v2 friend-handshake packet ({kind}) over UDP to peer pid.
+    """Send a signed v3 friend-handshake packet ({kind}) over UDP to peer pid.
 
     Shared by request/accept/cancel/reject/unfriend: resolve the peer's address
     (peer list, then friend record), sign the FULL operation blob
@@ -1154,14 +1214,18 @@ def _send_udp_friend_packet(sock: socket.socket, kind: str, pid: str, diag_tag: 
         _diag("udp-%s-failed" % diag_tag, to=pid[:12], reason="no-address")
         return False
     nonce = secrets.token_hex(16)
+    iat = int(time.time())
+    exp = iat + int(_UDP_SIG_VALIDITY)
     payload = {"t": kind,
                "id": host_id(),
                "name": display_name(),
                "cert": _our_cert_pem(),
                "nonce": nonce,
-               "sig": _sign(_udp_friend_sig_blob(kind, host_id(), pid, nonce)),
+               "sig": _sign(_udp_friend_sig_blob(kind, host_id(), pid, nonce, iat, exp)),
                "port": port(),
-               "to": pid}
+               "to": pid,
+               "iat": iat,
+               "exp": exp}
     try:
         sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
         _diag("udp-%s-sent" % diag_tag, to=target, port=tport, nonce=nonce[:8])
@@ -1172,13 +1236,16 @@ def _send_udp_friend_packet(sock: socket.socket, kind: str, pid: str, diag_tag: 
 
 
 def _verify_udp_friend_packet(kind: str, pkt: dict, diag_tag: str) -> str:
-    """Verify a v2-signed inbound friend packet of exactly `kind`.
+    """Verify a v3-signed inbound friend packet of exactly `kind`.
 
     Returns the VERIFIED sender id, or "" to drop the packet. Checks, in
-    order: cert matches claimed id; signature covers the exact operation
-    (type + claimed sender + US as recipient + nonce) so a captured packet
-    cannot be type-swapped or aimed at another host; and the (sender, nonce)
-    pair has never been honored before (replay rejection)."""
+    order: cert matches claimed id; packet addressed to us; the signed
+    issuance/expiry instants fall inside the validity window (a captured
+    packet dies on its own — review #9076 round 7); the signature covers the
+    exact operation (type + claimed sender + US as recipient + nonce + iat +
+    exp) so it cannot be type-swapped, retargeted, or date-shifted; and the
+    (sender, nonce) pair has never been honored before (persisted replay
+    rejection)."""
     claimed = str(pkt.get("id") or "")
     cert_pem = str(pkt.get("cert") or "")
     nonce = str(pkt.get("nonce") or "")
@@ -1193,10 +1260,25 @@ def _verify_udp_friend_packet(kind: str, pkt: dict, diag_tag: str) -> str:
     if str(pkt.get("to") or "") != host_id():
         _diag("udp-%s-rejected" % diag_tag, from_id=claimed[:12], reason="not-addressed-to-us")
         return ""
-    if not nonce or not _verify(cert_pem, _udp_friend_sig_blob(kind, claimed, host_id(), nonce), sig):
+    # Signed validity window: iat/exp are part of the signed blob, so an
+    # attacker cannot extend them — re-signing is impossible without the
+    # sender's private key. Reject anything stale, from the future, or with a
+    # malformed/inverted window BEFORE paying for an RSA verify.
+    try:
+        iat = int(pkt.get("iat") or "")
+        exp = int(pkt.get("exp") or "")
+    except (TypeError, ValueError):
+        _diag("udp-%s-rejected" % diag_tag, from_id=claimed[:12], reason="bad-window")
+        return ""
+    now = time.time()
+    if (exp <= iat or exp > iat + _UDP_SIG_VALIDITY + _UDP_SIG_CLOCK_SLACK
+            or now > exp + _UDP_SIG_CLOCK_SLACK or now < iat - _UDP_SIG_CLOCK_SLACK):
+        _diag("udp-%s-rejected" % diag_tag, from_id=claimed[:12], reason="expired")
+        return ""
+    if not nonce or not _verify(cert_pem, _udp_friend_sig_blob(kind, claimed, host_id(), nonce, iat, exp), sig):
         _diag("udp-%s-rejected" % diag_tag, from_id=claimed[:12], reason="bad-signature")
         return ""
-    if not _udp_seen_check(claimed, nonce):
+    if not _udp_seen_check(claimed, nonce, float(exp)):
         _diag("udp-%s-rejected" % diag_tag, from_id=claimed[:12], reason="replay")
         return ""
     return claimed
@@ -1224,7 +1306,7 @@ def _handle_udp_friend_request(sock: socket.socket, pkt: dict, addr: str) -> Non
     The sender signs the FULL operation (type + its id + us + nonce) with the
     key matching its claimed cert id:
       - sha256(cert) == id            (the cert matches the claimed identity)
-      - verify(sig, v2 blob, cert)    (they hold the key AND authorized THIS
+      - verify(sig, v3 blob, cert)    (they hold the key AND authorized THIS
         request to US — a captured signature cannot be type-swapped)
       - (id, nonce) never consumed    (replay rejection)
     This prevents a UDP spoof from impersonating someone. On success the

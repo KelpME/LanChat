@@ -227,23 +227,28 @@ def main():
             cert = _x509.load_pem_x509_certificate(f.read())
         cert_der = cert.public_bytes(serialization.Encoding.DER)
         ida_fp = hashlib.sha256(cert_der).hexdigest()
-        # Sign the FULL v2 operation blob (type+sender+recipient+nonce,
-        # length-prefixed) with A's private key — marketplace review #9076
-        # round 6: the signature must bind the exact operation, not id+nonce.
+        # Sign the FULL v3 operation blob (type+sender+recipient+nonce+signed
+        # iat/exp window, length-prefixed) with A's private key — marketplace
+        # review #9076 rounds 6-7: the signature must bind the exact operation
+        # AND a short validity window, not id+nonce.
         with open(ca_key, "rb") as f:
             key = serialization.load_pem_private_key(f.read(), password=None)
         nonce = "deadbeef" * 4
+        iat9 = int(time.time())
+        exp9 = iat9 + 120
 
-        def _v2_sig(kind, frm, to):
+        def _v2_sig(kind, frm, to, n=None, iat=None, exp=None):
             blob = "".join("%d:%s" % (len(p), p)
-                           for p in ("v2", kind, frm, to, nonce)).encode()
+                           for p in ("v3", kind, frm, to, n or nonce,
+                                     str(iat if iat is not None else iat9),
+                                     str(exp if exp is not None else exp9))).encode()
             return key.sign(blob, padding.PKCS1v15(), hashes.SHA256())
         import binascii
         # Send the signed UDP friend request to B's port.
         req = {"t": "friend-request", "id": ida_fp,
                "name": "AlphaUDP", "cert": open(ca_cert).read(),
                "nonce": nonce, "sig": binascii.hexlify(_v2_sig("friend-request", ida_fp, idb)).decode(),
-               "port": a.port, "to": idb}
+               "port": a.port, "to": idb, "iat": iat9, "exp": exp9}
         _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
             _json.dumps(req).encode(), ("127.0.0.1", b.port))
         fr3 = b.wait_event("friend-request")
@@ -255,7 +260,8 @@ def main():
         bad_sig = binascii.hexlify(b"0" * 256).decode()[:256]
         req_bad = {"t": "friend-request", "id": ida_fp, "name": "Forged",
                    "cert": open(ca_cert).read(), "nonce": nonce + "f00d",
-                   "sig": bad_sig, "port": a.port, "to": idb}
+                   "sig": bad_sig, "port": a.port, "to": idb,
+                   "iat": iat9, "exp": exp9}
         _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
             _json.dumps(req_bad).encode(), ("127.0.0.1", b.port))
         time.sleep(0.6)
@@ -419,6 +425,174 @@ def main():
         finally:
             e.stop(); f.stop()
             shutil.rmtree(he, ignore_errors=True); shutil.rmtree(hf, ignore_errors=True)
+
+        # ------------------------------------------------------------------
+        # 15) DELAYED REPLAY of a genuine friend-unfriend across a daemon
+        #     restart (review #9076 round 7). v2 signatures carried no expiry
+        #     and the consumed-nonce memory was RAM-only: a LAN eavesdropper
+        #     who captured one genuine unfriend could re-send it after the
+        #     cache aged out or the daemon restarted — even after the two
+        #     users had RECONCILED — dissolving the renewed friendship and its
+        #     chat history without any new authorization. v3 signs a short
+        #     validity window into the packet AND persists consumed nonces,
+        #     so both doors are shut.
+        hg = make_home("g", 4981, "Golf"); hh = make_home("h", 4982, "Hotel")
+        g = Daemon(hg, 4981, "Golf"); h = Daemon(hh, 4982, "Hotel")
+        try:
+            g.wait_event("ready"); h.wait_event("ready")
+            idg = _cert_fp(hg); idh = _cert_fp(hh)
+
+            def disco4(port, pid, name, pport):
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.sendto(json.dumps({"t": "hello", "id": pid, "name": name,
+                                     "port": pport}).encode(), ("127.0.0.1", port))
+                s.close()
+            # Tap between G and H: G will LEARN H behind a forwarder, so every
+            # signed friend packet G sends to H passes the tap — the exact
+            # bytes a LAN eavesdropper sees.
+            import select as _select
+            import threading as _thr
+            cap_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            cap_sock.bind(("127.0.0.1", 0))
+            cap_port = cap_sock.getsockname()[1]
+            fwd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            fwd.bind(("127.0.0.1", 0))
+            fwd_port = fwd.getsockname()[1]
+            captured = []
+            _cap_deadline = time.time() + 120
+
+            def _capture():
+                while time.time() < _cap_deadline:
+                    r, _, _ = _select.select([cap_sock], [], [], 0.2)
+                    if r:
+                        captured.append(r[0].recv(65535))
+
+            def _forward():
+                while time.time() < _cap_deadline:
+                    r, _, _ = _select.select([fwd], [], [], 0.2)
+                    if not r:
+                        continue
+                    data, _src = r[0].recvfrom(65535)
+                    cap_sock.sendto(data, ("127.0.0.1", cap_port))  # tap copy
+                    relay = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    relay.sendto(data, ("127.0.0.1", h.port))       # real H
+                    relay.close()
+            _thr.Thread(target=_capture, daemon=True).start()
+            _thr.Thread(target=_forward, daemon=True).start()
+
+            disco4(g.port, idh, "Hotel", fwd_port)  # G resolves H through the tap
+            disco4(h.port, idg, "Golf", 4981)
+            time.sleep(1.5)
+
+            # Establish the friendship the normal way: G -> H request, H accept.
+            g.cmd(cmd="udpFriendRequest", to=idh, name="Hotel")
+            frg = h.wait_event("friend-request")
+            assert frg and frg.get("from") == idg, "H did not receive G's request"
+            h.cmd(cmd="acceptFriend", id=idg)
+            assert g.wait_event("friend-accepted"), "G did not confirm H"
+            time.sleep(0.5)
+            print("OK  15a. G<->H friends established")
+
+            # G unfriends H. The signed friend-unfriend notification rides the
+            # tap: the capture holds the EXACT authenticated wire bytes.
+            g.cmd(cmd="unfriend", id=idh)
+            hrm = None
+            _dl = time.time() + 6
+            while time.time() < _dl and not hrm:
+                for ev in h.events_of("friend-removed"):
+                    if ev.get("id") == idg:
+                        hrm = ev
+                        break
+                time.sleep(0.1)
+            assert hrm, "H never received the real unfriend through the tap"
+            unfriend_pkt = None
+            _dl = time.time() + 4
+            while time.time() < _dl and unfriend_pkt is None:
+                for raw in captured:
+                    try:
+                        p = json.loads(raw.decode("utf-8"))
+                    except (UnicodeDecodeError, ValueError):
+                        continue
+                    if p.get("t") == "friend-unfriend" and p.get("id") == idg:
+                        unfriend_pkt = p
+                        break
+                time.sleep(0.1)
+            assert unfriend_pkt, "tap did not capture the genuine signed unfriend"
+            baseline = len([ev for ev in h.events_of("friend-removed") if ev.get("id") == idg])
+            assert baseline == 1, "expected exactly one genuine unfriend, got %d" % baseline
+            print("OK  15b. captured the genuine signed friend-unfriend on the wire")
+
+            # The users reconcile: H re-adds G (request + accept, both
+            # directions re-confirmed). G re-learns H's tap address first —
+            # the unfriend cleared the peer entry that resolves it.
+            disco4(g.port, idh, "Hotel", fwd_port)
+            time.sleep(0.8)
+            g.cmd(cmd="udpFriendRequest", to=idh, name="Hotel")
+            frg2 = h.wait_event("friend-request")
+            assert frg2 and frg2.get("from") == idg, "H did not receive G's renewed request"
+            h.cmd(cmd="acceptFriend", id=idg)
+            assert g.wait_event("friend-accepted"), "G did not re-confirm H"
+            time.sleep(0.5)
+            print("OK  15c. G<->H friendship renewed")
+
+            # REPLAY 1 — same daemon, later: the consumed-nonce memory must
+            # still hold. Re-send the byte-identical captured unfriend.
+            _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
+                json.dumps(unfriend_pkt).encode(), ("127.0.0.1", 4982))
+            time.sleep(0.8)
+            assert len([ev for ev in h.events_of("friend-removed")
+                        if ev.get("id") == idg]) == baseline, \
+                "same-process replay of a consumed unfriend dissolved the renewed friendship!"
+            print("OK  15d. same-process replay of the captured unfriend is rejected")
+
+            # REPLAY 2 — RESTART the victim daemon, then replay. This is the
+            # exact round-7 attack: v2 forgot consumed nonces on restart.
+            h.stop()
+            h = Daemon(hh, 4982, "Hotel")
+            rdy = h.wait_event("ready", timeout=8)
+            disco4(h.port, idg, "Golf", 4981)
+            time.sleep(1.0)
+            _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
+                json.dumps(unfriend_pkt).encode(), ("127.0.0.1", 4982))
+            time.sleep(0.8)
+            assert not any(ev.get("id") == idg for ev in h.events_of("friend-removed")), \
+                "post-RESTART replay of a captured unfriend dissolved the friendship (nonce memory was not persisted)!"
+            ready_friends = (rdy or {}).get("friends", [])
+            assert any(f.get("id") == idg and f.get("confirmed") for f in ready_friends), \
+                "restarted H lost G as a confirmed friend for some other reason; test inconclusive"
+            print("OK  15e. post-restart replay is rejected (consumed nonces survive on disk)")
+
+            # REPLAY 3 — EXPIRY: an unfriend signed for a window that has
+            # ALREADY CLOSED must die on its own, even with a fresh nonce the
+            # victim has never seen (no consumed-nonce memory needed). The
+            # signed iat/exp make the packet short-lived by construction.
+            key_h = serialization.load_pem_private_key(
+                open(os.path.join(hg, ".config", "omarchy", "lanchat-certs", "key.pem"), "rb").read(),
+                password=None)
+            old_iat = int(time.time()) - 10_000
+            old_exp = old_iat + 120
+            blob = "".join("%d:%s" % (len(p), p) for p in
+                           ("v3", "friend-unfriend", idg, idh, "cafe" * 8,
+                            str(old_iat), str(old_exp))).encode()
+            old_sig = binascii.hexlify(
+                key_h.sign(blob, padding.PKCS1v15(), hashes.SHA256())).decode()
+            expired = {"t": "friend-unfriend", "id": idg, "name": "Golf",
+                       "cert": open(os.path.join(hg, ".config", "omarchy", "lanchat-certs", "cert.pem")).read(),
+                       "nonce": "cafe" * 8, "sig": old_sig, "port": 4981, "to": idh,
+                       "iat": old_iat, "exp": old_exp}
+            _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
+                json.dumps(expired).encode(), ("127.0.0.1", 4982))
+            time.sleep(0.8)
+            assert not any(ev.get("id") == idg for ev in h.events_of("friend-removed")), \
+                "a genuinely-signed but EXPIRED unfriend was honored — signatures must carry a validity window!"
+            expired_diag = [e for e in h.events_of("diagnostic")
+                            if e.get("message") == "udp-friend-unfriend-rejected"
+                            and e.get("reason") == "expired"]
+            assert expired_diag, "expired unfriend should surface reason=expired diagnostic"
+            print("OK  15f. genuine-signature-but-expired unfriend is rejected (signed validity window)")
+        finally:
+            g.stop(); h.stop()
+            shutil.rmtree(hg, ignore_errors=True); shutil.rmtree(hh, ignore_errors=True)
 
         print("\nALL FRIEND TESTS PASSED")
         return 0

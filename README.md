@@ -378,14 +378,23 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 - **Access** — discovery is open (any LAN machine is visible); the
   friend/handshake gates messaging. Only confirmed friends (or peers you've
   requested) can reach you.
-- **Signed UDP friend handshake** (1.5.87) — friend-request/accept/cancel/
-  reject/unfriend packets sent over UDP without a live connection sign a
-  **full-operation blob** (`type + sender + recipient + nonce`, length-prefixed):
-  a captured packet cannot be replayed (each `sender+nonce` is consumed once,
-  with a TTL'd seen-cache), retargeted (the handler requires `to` == your own
-  id), or type-swapped (a captured `friend-request` signature is worthless as
-  a `friend-unfriend`). Rejected packets surface as diagnostics, never as
-  friendship changes.
+- **Signed UDP friend handshake** (1.5.87, hardened 1.5.88) — friend-request/
+  accept/cancel/reject/unfriend packets sent over UDP without a live
+  connection sign a **full-operation blob** (`type + sender + recipient +
+  nonce + issuance/expiry`, length-prefixed):
+  - *Short-lived by construction* — the signed `iat`/`exp` give every packet a
+    2-minute validity window (30 s clock skew tolerated). A captured packet
+    **dies on its own**: an eavesdropper who records a genuine `friend-unfriend`
+    and re-sends it hours later — or after the users reconcile — hits an
+    expiry wall, with no memory needed on the victim's side.
+  - *Replay-proof across restarts* — each `sender+nonce` is consumed once, and
+    the consumed-nonce record is **persisted to disk** (self-pruning: entries
+    drop once their signed expiry passes), so restarting or updating the daemon
+    cannot reopen a replay window.
+  - *Cannot be retargeted or type-swapped* — the handler requires `to` == your
+    own id, and a captured `friend-request` signature is worthless as a
+    `friend-unfriend`. Rejected packets surface as diagnostics, never as
+    friendship changes.
 - **Rendered peer content is data** (1.5.87) — every label that shows
   peer-supplied text (message bubbles, room/member/file names, invitations,
   download bars, diagnostics) sets `textFormat: Text.PlainText`, so received
