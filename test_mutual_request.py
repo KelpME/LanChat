@@ -103,7 +103,11 @@ def _unsolicited_accept(victim_port, attacker_home, attacker_id, victim_id, name
     with open(os.path.join(cert_dir, "cert.pem"), "rb") as fh:
         cert_pem = fh.read().decode()
     nonce = _sec.token_hex(16)
-    sig = key.sign((attacker_id + nonce).encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
+    # v2 blob: type + sender + recipient + nonce, length-prefixed — the
+    # signature is bound to exactly this operation (review #9076 round 6).
+    blob = "".join("%d:%s" % (len(p), p) for p in
+                   ("v2", "friend-accept", attacker_id, victim_id, nonce)).encode("utf-8")
+    sig = key.sign(blob, padding.PKCS1v15(), hashes.SHA256())
     pkt = {"t": "friend-accept", "id": attacker_id, "name": name, "cert": cert_pem,
            "nonce": nonce, "sig": sig.hex(), "port": victim_pport, "to": victim_id}
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

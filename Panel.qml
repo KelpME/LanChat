@@ -981,6 +981,8 @@ Panel {
                   }
                   return (root.selectedPeer ? root.selectedPeer.name : root.selectedPeerId) + "'s chat"
                 }
+                // Header carries a peer/room name: literal text (#9076).
+                textFormat: Text.PlainText
                 color: Color.popups.text
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
@@ -1223,6 +1225,8 @@ Panel {
                     }
                     return ""
                   }
+                  // Bar carries a peer-supplied file name: literal text (#9076).
+                  textFormat: Text.PlainText
                   color: Color.popups.text
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption

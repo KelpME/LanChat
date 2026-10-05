@@ -165,6 +165,8 @@ Column {
             width: parent.width - Style.space(130)
             anchors.verticalCenter: parent.verticalCenter
             text: (modelData.fromName || "Someone") + " invited you to " + (modelData.name || "a room")
+            // Peer-supplied names: literal text, never markup (review #9076).
+            textFormat: Text.PlainText
             color: Color.popups.text
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
@@ -261,6 +263,9 @@ Column {
             anchors.rightMargin: Style.spacing.sm
             anchors.verticalCenter: parent.verticalCenter
             text: "# " + modelData.name
+            // Room names are peer-supplied: literal text, never markup
+            // (review #9076 — no AutoText remote loads).
+            textFormat: Text.PlainText
             color: Color.popups.text
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -377,6 +382,8 @@ Column {
                       + (memberLine.member.name || "Unknown")
                       + (memberLine.lineIsMe ? " (you)" : "")
                       + (memberLine.member.canInvite && !memberLine.lineIsOwner ? " · can add" : "")
+                // Member names are peer-supplied: literal text only (#9076).
+                textFormat: Text.PlainText
                 color: memberLine.lineIsMe ? Color.accent : Color.popups.text
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption

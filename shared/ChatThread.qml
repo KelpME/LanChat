@@ -90,6 +90,8 @@ ListView {
       text: chatThread.selectedPeer
         ? "No messages with " + chatThread.selectedPeer.name + " yet."
         : ""
+      // Peer name is data, never markup (review #9076).
+      textFormat: Text.PlainText
       color: Color.muted
       font.family: Style.font.family
       font.pixelSize: Style.font.caption

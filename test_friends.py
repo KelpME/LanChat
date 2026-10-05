@@ -227,17 +227,23 @@ def main():
             cert = _x509.load_pem_x509_certificate(f.read())
         cert_der = cert.public_bytes(serialization.Encoding.DER)
         ida_fp = hashlib.sha256(cert_der).hexdigest()
-        # Sign id+nonce with A's private key.
+        # Sign the FULL v2 operation blob (type+sender+recipient+nonce,
+        # length-prefixed) with A's private key — marketplace review #9076
+        # round 6: the signature must bind the exact operation, not id+nonce.
         with open(ca_key, "rb") as f:
             key = serialization.load_pem_private_key(f.read(), password=None)
         nonce = "deadbeef" * 4
-        sig = key.sign((ida_fp + nonce).encode(), padding.PKCS1v15(), hashes.SHA256())
+
+        def _v2_sig(kind, frm, to):
+            blob = "".join("%d:%s" % (len(p), p)
+                           for p in ("v2", kind, frm, to, nonce)).encode()
+            return key.sign(blob, padding.PKCS1v15(), hashes.SHA256())
         import binascii
         # Send the signed UDP friend request to B's port.
         req = {"t": "friend-request", "id": ida_fp,
                "name": "AlphaUDP", "cert": open(ca_cert).read(),
-               "nonce": nonce, "sig": binascii.hexlify(sig).decode(),
-               "port": a.port}
+               "nonce": nonce, "sig": binascii.hexlify(_v2_sig("friend-request", ida_fp, idb)).decode(),
+               "port": a.port, "to": idb}
         _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
             _json.dumps(req).encode(), ("127.0.0.1", b.port))
         fr3 = b.wait_event("friend-request")
@@ -248,8 +254,8 @@ def main():
         # 10) Forged UDP request (wrong signature) must be rejected.
         bad_sig = binascii.hexlify(b"0" * 256).decode()[:256]
         req_bad = {"t": "friend-request", "id": ida_fp, "name": "Forged",
-                   "cert": open(ca_cert).read(), "nonce": nonce,
-                   "sig": bad_sig, "port": a.port}
+                   "cert": open(ca_cert).read(), "nonce": nonce + "f00d",
+                   "sig": bad_sig, "port": a.port, "to": idb}
         _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
             _json.dumps(req_bad).encode(), ("127.0.0.1", b.port))
         time.sleep(0.6)
@@ -258,6 +264,48 @@ def main():
                     if e.get("name") == "Forged"]
         assert not bad_reqs, "forged UDP friend request was accepted!"
         print("OK  10. forged UDP friend request rejected (bad signature)")
+
+        # 10b) REPLAY of the exact valid request packet must be rejected —
+        #      a signed packet is a bearer token; first use wins, later
+        #      copies drop (review #9076 round 6).
+        # NOTE: wait_event REMOVES its event, so the count here starts at 0 —
+        # the invariant is that the replay adds NOTHING.
+        before = len(b.events_of("friend-request"))
+        _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
+            _json.dumps(req).encode(), ("127.0.0.1", b.port))
+        time.sleep(0.6)
+        replays = [e for e in b.events_of("diagnostic")
+                   if e.get("message") == "udp-friend-request-rejected"
+                   and e.get("reason") == "replay"]
+        assert replays, "replayed (byte-identical) signed request was honored again!"
+        assert len(b.events_of("friend-request")) == before, \
+            "replay surfaced a duplicate request banner"
+        print("OK  10b. byte-identical replay of a consumed request is rejected")
+
+        # 10c) TYPE-SWAP of a captured signature must be rejected — the v1
+        #      signature covered only id+nonce, so the SAME sig authenticated
+        #      any friend op: a captured friend-request could be re-sent as
+        #      friend-unfriend and dissolve the friendship without the
+        #      sender's authorization (review #9076 round 6). v2 binds type +
+        #      sender + recipient + nonce, so the swapped packet fails
+        #      verification and the friendship survives.
+        swapped = dict(req)
+        swapped["t"] = "friend-unfriend"
+        swapped["name"] = "SwappedUnfriend"
+        swapped["nonce"] = nonce + "beef"   # fresh nonce: only the type swap is forged
+        _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM).sendto(
+            _json.dumps(swapped).encode(), ("127.0.0.1", b.port))
+        time.sleep(0.6)
+        swaps = [e for e in b.events_of("diagnostic")
+                 if e.get("message") == "udp-friend-unfriend-rejected"
+                 and e.get("reason") == "bad-signature"]
+        assert swaps, "type-swapped signature was accepted as friend-unfriend!"
+        # A must STILL be a confirmed friend of B (the swap did not unfriend).
+        fl = [e for e in b.events_of("friends")]
+        assert fl and any(f.get("id") == ida and f.get("confirmed")
+                          for f in fl[-1]["friends"]), \
+            "type-swapped unfriend dissolved the friendship!"
+        print("OK  10c. captured request signature cannot be type-swapped into unfriend")
 
         # 11) End-to-end via the daemon command: A sends udpFriendRequest to B
         #     (by B's ID, as the UI does). The daemon must resolve B's address

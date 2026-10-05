@@ -178,6 +178,8 @@ Rectangle {
                 width: parent.width - Style.space(36) - Style.space(56)
                 anchors.verticalCenter: parent.verticalCenter
                 text: modelData.name
+                // File names are data, never markup (review #9076).
+                textFormat: Text.PlainText
                 color: Color.popups.text
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption

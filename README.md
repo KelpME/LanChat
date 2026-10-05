@@ -378,6 +378,22 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
 - **Access** — discovery is open (any LAN machine is visible); the
   friend/handshake gates messaging. Only confirmed friends (or peers you've
   requested) can reach you.
+- **Signed UDP friend handshake** (1.5.87) — friend-request/accept/cancel/
+  reject/unfriend packets sent over UDP without a live connection sign a
+  **full-operation blob** (`type + sender + recipient + nonce`, length-prefixed):
+  a captured packet cannot be replayed (each `sender+nonce` is consumed once,
+  with a TTL'd seen-cache), retargeted (the handler requires `to` == your own
+  id), or type-swapped (a captured `friend-request` signature is worthless as
+  a `friend-unfriend`). Rejected packets surface as diagnostics, never as
+  friendship changes.
+- **Rendered peer content is data** (1.5.87) — every label that shows
+  peer-supplied text (message bubbles, room/member/file names, invitations,
+  download bars, diagnostics) sets `textFormat: Text.PlainText`, so received
+  text can never be interpreted as markup. Qt's default `AutoText` would
+  promote HTML-looking text and **fetch external images automatically** the
+  moment a message displayed — a sender could otherwise make your client dial
+  their server (IP/UA leak) with no consent. Display names are additionally
+  sanitized at ingestion.
 - **Presence** — the online toggle stops broadcasts and drops inbound while off.
 - **Optional HTTP API** — token-authenticated, **loopback-only by default**
   (1.2.1+; `httpBind: "0.0.0.0"` opts into LAN exposure), with rate limits on

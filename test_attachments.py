@@ -1206,6 +1206,70 @@ def test_stale_attachment_gone():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_cross_peer_end_is_noop():
+    """Regression (marketplace review #9076 round 6): _dl_finish used to POP
+    the download entry BEFORE checking its recorded peer, so any authenticated
+    peer that learned a fileId (room-file pulls broadcast it to the whole
+    room) could send a stray attachmentEnd/attachmentError and CANCEL another
+    sender's live transfer. Ownership must be verified before mutating the
+    entry: a wrong-peer end frame is a pure no-op and the transfer survives."""
+    import tempfile
+
+    import attachments as _att
+    import history as _h
+    import server as _s
+
+    tmp = tempfile.mkdtemp(prefix="lanchat-xpeer-")
+    iso = os.path.join(tmp, "state"); os.makedirs(iso, exist_ok=True)
+    saved = (_h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH)
+    _h.STATE_DIR = iso
+    _h.HISTORY_PATH = os.path.join(iso, "history.json")
+    _h.HISTORY_KEY = os.path.join(iso, "history.key")
+    _s.STATE_DIR = iso
+    _s._LOG_PATH = os.path.join(iso, "daemon.log")
+    _s.CONFIG["token"] = TOKEN
+    _s.STATE.stdout = open(os.devnull, "w")
+    _att.init(_s.STATE)
+
+    owner = "cafe000000000001"      # the peer actually streaming the file
+    attacker = "dead000000000002"   # a different authenticated peer
+    dl_dir = os.path.join(tmp, "dl"); os.makedirs(dl_dir)
+    captured = []
+    real_emit = _s._emit
+    _s._emit = lambda e: captured.append(e)
+    try:
+        # A live download owned by `owner`.
+        assert _s._dl_begin("xf1", owner, os.path.join(dl_dir, "f.bin"), "", "mxf1")
+        assert "xf1" in _att._dl, "transfer must be registered"
+        # (a) attacker sends attachmentEnd for a fileId it does not own:
+        #     must be a NO-OP — no event, and the transfer stays alive.
+        _s._handle_incoming({"t": "attachmentEnd", "from": attacker,
+                             "fileId": "xf1", "mid": "mxf1", "sha256": ""},
+                            ("127.0.0.1", 1))
+        assert not [e for e in captured if e.get("event") == "attachment-saved"], \
+            "wrong-peer attachmentEnd must not finalize/abort: %r" % (captured,)
+        assert "xf1" in _att._dl, "wrong-peer end frame KILLED another peer's download"
+        # (b) attacker sends attachmentError: same no-op.
+        _s._handle_incoming({"t": "attachmentError", "from": attacker,
+                             "fileId": "xf1", "mid": "mxf1",
+                             "error": "sender aborted"}, ("127.0.0.1", 1))
+        assert "xf1" in _att._dl, "wrong-peer error frame KILLED another peer's download"
+        # (c) the OWNER's frames still work: its End completes normally
+        #     (zero bytes vs declared none -> the saved path runs).
+        captured.clear()
+        _s._handle_incoming({"t": "attachmentEnd", "from": owner,
+                             "fileId": "xf1", "mid": "mxf1", "sha256": ""},
+                            ("127.0.0.1", 1))
+        evs = [e for e in captured if e.get("event") == "attachment-saved"]
+        assert evs, "owner's own end frame must still finalize: %r" % (captured,)
+        assert "xf1" not in _att._dl, "owner's end frame left the entry registered"
+        print("OK  wrong-peer attachmentEnd/Error is a no-op; owner's frames still work")
+    finally:
+        _s._emit = real_emit
+        _h.STATE_DIR, _h.HISTORY_PATH, _h.HISTORY_KEY, _s.STATE_DIR, _s._LOG_PATH = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_attachment_dismiss():
     """Unit test: the Save-bar ✕ (dismissAttachment) flags the message's
     attachment dismissed in history (persisted across reloads) and echoes an
@@ -1271,6 +1335,7 @@ def main():
     test_settings_attachment_max()
     test_settings_per_peer_downloads()
     test_stale_attachment_gone()
+    test_cross_peer_end_is_noop()
     test_attachment_dismiss()
     test_attachment_limits()
     test_http_attachment_streaming()

@@ -135,6 +135,8 @@ Column {
       Text {
         width: parent.width
         text: "\uD83D\uDCCE " + (parent.parent.att.name || "file")
+        // Peer-supplied file name: literal characters only (review #9076).
+        textFormat: Text.PlainText
         color: parent.parent.fileInk
         font.family: Style.font.family
         font.pixelSize: Style.font.body
@@ -146,6 +148,9 @@ Column {
         visible: (parent.parent.parent.modelData.text || "") !== ""
         width: parent.width
         text: parent.parent.parent.modelData.text
+        // Received text is DATA, never markup: PlainText blocks AutoText's
+        // remote <img> fetch (review #9076 round 6).
+        textFormat: Text.PlainText
         color: parent.parent.fileInk
         font.family: Style.font.family
         font.pixelSize: Style.font.body
@@ -232,6 +237,8 @@ Column {
           visible: !fileBubbleRect.senderIsFriend
           text: "⚠ Befriend " + (modelData.fromName || "the sender")
                 + " to accept this file"
+          // Peer-supplied name: literal text, never markup (review #9076).
+          textFormat: Text.PlainText
           color: Color.urgent
           font.family: Style.font.family
           font.pixelSize: Style.font.caption

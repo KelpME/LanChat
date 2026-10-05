@@ -1424,6 +1424,9 @@ Item {
                         Text {
                           width: parent.width
                           text: settingsPanel.diagLine(modelData)
+                          // Diag fields embed peer names: literal text only
+                          // (review #9076 — no AutoText remote loads).
+                          textFormat: Text.PlainText
                           color: Color.muted
                           font.family: Style.font.family
                           font.pixelSize: Style.font.caption

@@ -629,9 +629,15 @@ def _dl_finish(file_id: str, peer_id: str, ok: bool):
     registered for this peer (unknown/stale). room = the room id of a room-file
     pull ('' for a plain 1:1 attachment)."""
     with STATE.dl_lock:
-        d = _dl.pop(file_id, None)
-    if not d or d.get("peer") != peer_id:
-        return None
+        # Verify the RECORDED peer before removing the entry. A room-file pull
+        # broadcasts its fileId to the whole room, so any authenticated peer
+        # could otherwise send a stray attachmentEnd/attachmentError carrying a
+        # foreign fileId and pop (cancel) a download that belongs to someone
+        # else. Wrong-peer (or unknown) end frames must be pure no-ops.
+        d = _dl.get(file_id)
+        if not d or d.get("peer") != peer_id:
+            return None
+        _dl.pop(file_id, None)
     try:
         d["fh"].close()
     except OSError:

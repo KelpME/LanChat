@@ -130,6 +130,14 @@ Item {
              ? ((modelData.text ? modelData.text + "\n" : "") + "\uD83D\uDCCE " + modelData.attachment.name)
              : modelData.text)
           : (modelData.text || "")
+        // PlainText ONLY — never the default AutoText. AutoText promotes
+        // HTML-looking text, so a sender could embed <img src=http://...>
+        // and Qt would fetch that external image the moment the message is
+        // displayed (marketplace review #9076 round 6: remote-resource load
+        // without consent + IP/UA leak to the sender's server). Received
+        // text is data, not markup: render every character literally.
+        // (Rich text stays available only where WE build it ourselves.)
+        textFormat: Text.PlainText
         color: messageBubble.textColor
         font.family: Style.font.family
         font.pixelSize: Style.font.body

@@ -21,6 +21,8 @@ Column {
   Text {
     anchors.horizontalCenter: parent.horizontalCenter
     text: turnDivider.topLabel
+    // Labels carry peer names — data, never markup (review #9076).
+    textFormat: Text.PlainText
     color: Color.popups.text
     font.family: Style.font.family
     font.pixelSize: Style.font.caption
@@ -35,6 +37,8 @@ Column {
   Text {
     anchors.horizontalCenter: parent.horizontalCenter
     text: turnDivider.bottomLabel
+    // Labels carry peer names — data, never markup (review #9076).
+    textFormat: Text.PlainText
     color: Color.popups.text
     font.family: Style.font.family
     font.pixelSize: Style.font.caption

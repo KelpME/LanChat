@@ -282,7 +282,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.86"
+VERSION = "1.5.87"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -324,6 +324,14 @@ class State:
         # that ends the request (accept/reject/cancel/unfriend) discards the
         # entry so a stale intent can never auto-accept a future request.
         self.request_outgoing = set()
+        # Consumed UDP friend-handshake nonces: (sender_id, nonce) -> ts. A
+        # signed packet is a bearer token — without replay tracking, capturing
+        # one genuine packet lets the attacker re-send it (or a type-swapped
+        # variant, which the v2 signature blob also blocks) as many times as
+        # they like. Guarded by udp_seen_lock; entries purge past the TTL.
+        self.udp_seen = {}
+        self.udp_seen_lock = threading.Lock()
+        self.udp_seen_purge_ts = 0.0
         self.udp_sock = None
         self.stdout = sys.stdout
         self.socket_clients = set()
@@ -1086,18 +1094,53 @@ def _udp_send(sock: socket.socket, pkt: dict, target: str = "") -> None:
 _udp_fail_window = [0, 0.0, 0.0]  # [count since last log, last_fail_time, last_log_time]
 
 
-def _send_udp_friend_request(sock: socket.socket, pid: str) -> bool:
-    """Send a SIGNED friend request to a peer over UDP (no TCP needed).
+# ---- signed UDP friend-handshake packets: v2 signature binding -----------
+# v1 signed only (id + nonce): the SAME valid signature was accepted for any
+# friend packet type and any recipient. A captured signed friend-request could
+# therefore be re-sent as `friend-unfriend` (type swap) and remove the
+# friendship + history without the sender ever authorizing that operation
+# (marketplace review #9076 round 6). v2 binds the signature to the FULL
+# operation: type, sender, recipient, and nonce — a captured packet can be
+# replayed only as exactly what it was, and nonce tracking rejects even that.
+_UDP_SIG_TTL = 600.0  # seconds a consumed (sender, nonce) stays remembered
 
-    Friendship is the bootstrap — the first contact between strangers who have
-    no TCP trust yet. So the request goes over the discovery channel (UDP).
-    Because UDP is unauthenticated, the request is signed with our private key
-    over (id + nonce): the recipient verifies we own the key for our claimed
-    cert id, exactly like the TCP challenge-response but without needing an
-    established connection. Returns True if sent.
-    """
-    # Resolve the peer's IP from the peer list (or friend record) — the sender
-    # passes the peer's ID (fingerprint), not its address.
+
+def _udp_friend_sig_blob(kind: str, sender_id: str, to_id: str, nonce: str) -> bytes:
+    """Canonical v2 signature blob — length-prefixed so no field boundary can
+    be shifted to make two different operations hash to the same bytes."""
+    parts = ["v2", kind, sender_id, to_id, nonce]
+    return "".join("%d:%s" % (len(p), p) for p in parts).encode("utf-8")
+
+
+def _udp_seen_check(sender_id: str, nonce: str) -> bool:
+    """True if this (sender, nonce) has NOT been consumed yet; records it.
+
+    A genuine packet's signature is a bearer token over a fixed blob, so the
+    only thing separating first delivery from a replay is remembering what we
+    already honored. First-use-wins: the first handler to consume the nonce
+    acts, every later copy is dropped. Entries purge past the TTL so the map
+    cannot grow without bound."""
+    now = time.time()
+    with STATE.udp_seen_lock:
+        if now - STATE.udp_seen_purge_ts > _UDP_SIG_TTL:
+            STATE.udp_seen_purge_ts = now
+            for key in [k for k, ts in STATE.udp_seen.items() if now - ts > _UDP_SIG_TTL]:
+                STATE.udp_seen.pop(key, None)
+        key = (sender_id, nonce)
+        if key in STATE.udp_seen:
+            return False
+        STATE.udp_seen[key] = now
+        return True
+
+
+def _send_udp_friend_packet(sock: socket.socket, kind: str, pid: str, diag_tag: str) -> bool:
+    """Send a signed v2 friend-handshake packet ({kind}) over UDP to peer pid.
+
+    Shared by request/accept/cancel/reject/unfriend: resolve the peer's address
+    (peer list, then friend record), sign the FULL operation blob
+    (type+sender+recipient+nonce — not just id+nonce), and send. Friendship is
+    the bootstrap, so these ride the discovery channel with no TCP connection;
+    the signature is what authenticates them."""
     peer = find_peer(pid)
     target = (peer or {}).get("address", "")
     tport = int((peer or {}).get("port") or DEFAULT_PORT)
@@ -1108,51 +1151,90 @@ def _send_udp_friend_request(sock: socket.socket, pid: str) -> bool:
                 tport = int(f.get("port") or DEFAULT_PORT)
                 break
     if not target:
-        _diag("udp-friend-request-failed", to=pid[:12], reason="no-address")
+        _diag("udp-%s-failed" % diag_tag, to=pid[:12], reason="no-address")
         return False
     nonce = secrets.token_hex(16)
-    payload = {"t": "friend-request",
+    payload = {"t": kind,
                "id": host_id(),
                "name": display_name(),
                "cert": _our_cert_pem(),
                "nonce": nonce,
-               "sig": _sign((host_id() + nonce).encode("utf-8")),
-               "port": port()}
+               "sig": _sign(_udp_friend_sig_blob(kind, host_id(), pid, nonce)),
+               "port": port(),
+               "to": pid}
     try:
         sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
-        _diag("udp-friend-request-sent", to=target, port=tport, nonce=nonce[:8])
+        _diag("udp-%s-sent" % diag_tag, to=target, port=tport, nonce=nonce[:8])
         return True
     except OSError as e:
-        _diag("udp-friend-request-failed", to=target, errno=getattr(e, "errno", None))
+        _diag("udp-%s-failed" % diag_tag, to=target, errno=getattr(e, "errno", None))
         return False
+
+
+def _verify_udp_friend_packet(kind: str, pkt: dict, diag_tag: str) -> str:
+    """Verify a v2-signed inbound friend packet of exactly `kind`.
+
+    Returns the VERIFIED sender id, or "" to drop the packet. Checks, in
+    order: cert matches claimed id; signature covers the exact operation
+    (type + claimed sender + US as recipient + nonce) so a captured packet
+    cannot be type-swapped or aimed at another host; and the (sender, nonce)
+    pair has never been honored before (replay rejection)."""
+    claimed = str(pkt.get("id") or "")
+    cert_pem = str(pkt.get("cert") or "")
+    nonce = str(pkt.get("nonce") or "")
+    sig = str(pkt.get("sig") or "")
+    if not claimed or claimed == host_id():
+        return ""
+    if _cert_fingerprint_of_pem(cert_pem) != claimed:
+        _diag("udp-%s-rejected" % diag_tag, from_id=claimed[:12], reason="bad-identity")
+        return ""
+    # The packet must be addressed to US. A friend-accept/reject/etc. meant
+    # for another host is not ours to act on.
+    if str(pkt.get("to") or "") != host_id():
+        _diag("udp-%s-rejected" % diag_tag, from_id=claimed[:12], reason="not-addressed-to-us")
+        return ""
+    if not nonce or not _verify(cert_pem, _udp_friend_sig_blob(kind, claimed, host_id(), nonce), sig):
+        _diag("udp-%s-rejected" % diag_tag, from_id=claimed[:12], reason="bad-signature")
+        return ""
+    if not _udp_seen_check(claimed, nonce):
+        _diag("udp-%s-rejected" % diag_tag, from_id=claimed[:12], reason="replay")
+        return ""
+    return claimed
+
+
+def _send_udp_friend_request(sock: socket.socket, pid: str) -> bool:
+    """Send a SIGNED friend request to a peer over UDP (no TCP needed).
+
+    Friendship is the bootstrap — the first contact between strangers who have
+    no TCP trust yet. So the request goes over the discovery channel (UDP).
+    Because UDP is unauthenticated, the request signs the FULL operation
+    (type + sender + recipient + nonce): the recipient verifies we own the key
+    for our claimed cert id AND that the signature covers exactly this
+    request, so it cannot be replayed as another friend operation.
+    Returns True if sent.
+    """
+    # A request is an unsolicited open — there is no prior handshake to bind
+    # a nonce against, so the recipient's nonce tracking keys on the sender.
+    return _send_udp_friend_packet(sock, "friend-request", pid, "friend-request")
 
 
 def _handle_udp_friend_request(sock: socket.socket, pkt: dict, addr: str) -> None:
     """Verify + register an inbound UDP friend request.
 
-    The sender must prove they own the private key for the claimed cert id:
-      - sha256(cert) == id          (the cert matches the claimed identity)
-      - verify(sig, id+nonce, cert) (they hold the key for that cert)
+    The sender signs the FULL operation (type + its id + us + nonce) with the
+    key matching its claimed cert id:
+      - sha256(cert) == id            (the cert matches the claimed identity)
+      - verify(sig, v2 blob, cert)    (they hold the key AND authorized THIS
+        request to US — a captured signature cannot be type-swapped)
+      - (id, nonce) never consumed    (replay rejection)
     This prevents a UDP spoof from impersonating someone. On success the
     request is surfaced (verified fingerprint) for the user to accept.
     """
-    claimed = str(pkt.get("id") or "")
-    cert_pem = str(pkt.get("cert") or "")
-    nonce = str(pkt.get("nonce") or "")
-    sig = str(pkt.get("sig") or "")
+    claimed = _verify_udp_friend_packet("friend-request", pkt, "friend-request")
+    if not claimed:
+        return
     name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
     pport = int(pkt.get("port") or DEFAULT_PORT)
-    # Reject our own request echoing back.
-    if not claimed or claimed == host_id():
-        return
-    # Verify the cert matches the claimed id, and the signature proves key
-    # ownership. Both must hold or the request is forged — drop it.
-    if _cert_fingerprint_of_pem(cert_pem) != claimed:
-        _diag("udp-friend-request-rejected", from_id=claimed[:12], reason="bad-identity")
-        return
-    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
-        _diag("udp-friend-request-rejected", from_id=claimed[:12], reason="bad-signature")
-        return
     # Honored requests: only if we accept incoming requests.
     if not accept_requests():
         _diag("udp-friend-request-rejected", from_id=claimed[:12], reason="requests-disabled")
@@ -1189,61 +1271,26 @@ def _send_udp_friend_accept(sock: socket.socket, pid: str) -> bool:
     The friend handshake is bidirectional bootstrap: the requester sends a
     signed UDP request, and the accepter must reply over the SAME channel —
     a TCP reply is held forever when no connection exists yet (the one-way
-    bug). Like the request, the accept is signed so the recipient can verify
-    it's genuinely from the peer they friended.
+    bug). Like the request, the accept signs the FULL operation so the
+    recipient can verify it's genuinely from the peer they friended AND that
+    the signature cannot be replayed as a different friend operation.
     """
-    peer = find_peer(pid)
-    target = (peer or {}).get("address", "")
-    tport = int((peer or {}).get("port") or DEFAULT_PORT)
-    if not target:
-        for f in STATE.config.get("friends", []):
-            if f.get("id") == pid and f.get("address"):
-                target = f.get("address")
-                tport = int(f.get("port") or DEFAULT_PORT)
-                break
-    if not target:
-        _diag("udp-friend-accept-failed", to=pid[:12], reason="no-address")
-        return False
-    nonce = secrets.token_hex(16)
-    payload = {"t": "friend-accept",
-               "id": host_id(),
-               "name": display_name(),
-               "cert": _our_cert_pem(),
-               "nonce": nonce,
-               "sig": _sign((host_id() + nonce).encode("utf-8")),
-               "port": port(),
-               "to": pid}
-    try:
-        sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
-        _diag("udp-friend-accept-sent", to=target, port=tport, nonce=nonce[:8])
-        return True
-    except OSError as e:
-        _diag("udp-friend-accept-failed", to=target, errno=getattr(e, "errno", None))
-        return False
+    return _send_udp_friend_packet(sock, "friend-accept", pid, "friend-accept")
 
 
 def _handle_udp_friend_accept(sock: socket.socket, pkt: dict, addr: str) -> None:
     """Verify + process an inbound UDP friend-accept.
 
-    The accepter proves ownership of its claimed cert id (same signature
-    scheme as the request). On success we mark the peer as a CONFIRMED friend
-    and reveal any held messages — completing the handshake on our side
-    without needing a TCP connection.
+    The accepter signs the FULL operation (type + its id + us + nonce) with
+    the key matching its claimed cert id, and the (id, nonce) pair must never
+    have been consumed before. On success we mark the peer as a CONFIRMED
+    friend and reveal any held messages — completing the handshake on our
+    side without needing a TCP connection.
     """
-    claimed = str(pkt.get("id") or "")
-    cert_pem = str(pkt.get("cert") or "")
-    nonce = str(pkt.get("nonce") or "")
-    sig = str(pkt.get("sig") or "")
+    claimed = _verify_udp_friend_packet("friend-accept", pkt, "friend-accept")
+    if not claimed:
+        return
     name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
-    # We only accept a friend-accept for someone we actually requested.
-    if not claimed or claimed == host_id():
-        return
-    if _cert_fingerprint_of_pem(cert_pem) != claimed:
-        _diag("udp-friend-accept-rejected", from_id=claimed[:12], reason="bad-identity")
-        return
-    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
-        _diag("udp-friend-accept-rejected", from_id=claimed[:12], reason="bad-signature")
-        return
     # Consent gate: a valid signature proves WHO sent the accept, not that we
     # ever ASKED for one. The ONLY consent is locally recorded OUTBOUND
     # intent: a friend request WE sent that is still outstanding. An inbound
@@ -1275,60 +1322,24 @@ def _send_udp_friend_cancel(sock: socket.socket, pid: str) -> bool:
     The handshake is bidirectional bootstrap: the requester sent a signed UDP
     request, so a withdrawal must ride the SAME channel — a TCP cancel is
     dropped when no connection exists yet (the one-way bug). Like the request,
-    the cancel is signed so the recipient can verify it's genuinely from the
-    peer who originally requested them. Returns True if sent.
+    the cancel signs the FULL operation so the recipient can verify it's
+    genuinely from the peer who originally requested them. Returns True if sent.
     """
-    peer = find_peer(pid)
-    target = (peer or {}).get("address", "")
-    tport = int((peer or {}).get("port") or DEFAULT_PORT)
-    if not target:
-        for f in STATE.config.get("friends", []):
-            if f.get("id") == pid and f.get("address"):
-                target = f.get("address")
-                tport = int(f.get("port") or DEFAULT_PORT)
-                break
-    if not target:
-        _diag("udp-friend-cancel-failed", to=pid[:12], reason="no-address")
-        return False
-    nonce = secrets.token_hex(16)
-    payload = {"t": "friend-cancel",
-               "id": host_id(),
-               "name": display_name(),
-               "cert": _our_cert_pem(),
-               "nonce": nonce,
-               "sig": _sign((host_id() + nonce).encode("utf-8")),
-               "port": port(),
-               "to": pid}
-    try:
-        sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
-        _diag("udp-friend-cancel-sent", to=target, port=tport, nonce=nonce[:8])
-        return True
-    except OSError as e:
-        _diag("udp-friend-cancel-failed", to=target, errno=getattr(e, "errno", None))
-        return False
+    return _send_udp_friend_packet(sock, "friend-cancel", pid, "friend-cancel")
 
 
 def _handle_udp_friend_cancel(sock: socket.socket, pkt: dict, addr: str) -> None:
     """Verify + process an inbound UDP friend-cancel (a request that was withdrawn).
 
-    The canceller proves ownership of its claimed cert id (same signature scheme
-    as the request). On success we drop the pending request: discard the peer's
-    held messages and clear the incoming banner so the user no longer sees a
-    request they could Accept.
+    The canceller signs the FULL operation (type + its id + us + nonce) and the
+    (id, nonce) pair must be fresh. On success we drop the pending request:
+    discard the peer's held messages and clear the incoming banner so the user
+    no longer sees a request they could Accept.
     """
-    claimed = str(pkt.get("id") or "")
-    cert_pem = str(pkt.get("cert") or "")
-    nonce = str(pkt.get("nonce") or "")
-    sig = str(pkt.get("sig") or "")
+    claimed = _verify_udp_friend_packet("friend-cancel", pkt, "friend-cancel")
+    if not claimed:
+        return
     name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
-    if not claimed or claimed == host_id():
-        return
-    if _cert_fingerprint_of_pem(cert_pem) != claimed:
-        _diag("udp-friend-cancel-rejected", from_id=claimed[:12], reason="bad-identity")
-        return
-    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
-        _diag("udp-friend-cancel-rejected", from_id=claimed[:12], reason="bad-signature")
-        return
     # Withdrawn: drop the peer's held inbound messages and clear the incoming
     # banner. If the canceller was merely a pending (unconfirmed) request we
     # recorded, remove that record too — but NEVER unfriend a confirmed friend
@@ -1348,34 +1359,7 @@ def _send_udp_friend_reject(sock: socket.socket, pid: str) -> bool:
     no connection exists yet, so the requester would never learn they were denied
     (the one-way bug) and its "Waiting to accept" banner would stick forever.
     """
-    peer = find_peer(pid)
-    target = (peer or {}).get("address", "")
-    tport = int((peer or {}).get("port") or DEFAULT_PORT)
-    if not target:
-        for f in STATE.config.get("friends", []):
-            if f.get("id") == pid and f.get("address"):
-                target = f.get("address")
-                tport = int(f.get("port") or DEFAULT_PORT)
-                break
-    if not target:
-        _diag("udp-friend-reject-failed", to=pid[:12], reason="no-address")
-        return False
-    nonce = secrets.token_hex(16)
-    payload = {"t": "friend-reject",
-               "id": host_id(),
-               "name": display_name(),
-               "cert": _our_cert_pem(),
-               "nonce": nonce,
-               "sig": _sign((host_id() + nonce).encode("utf-8")),
-               "port": port(),
-               "to": pid}
-    try:
-        sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
-        _diag("udp-friend-reject-sent", to=target, port=tport, nonce=nonce[:8])
-        return True
-    except OSError as e:
-        _diag("udp-friend-reject-failed", to=target, errno=getattr(e, "errno", None))
-        return False
+    return _send_udp_friend_packet(sock, "friend-reject", pid, "friend-reject")
 
 
 def _send_udp_friend_unfriend(sock: socket.socket, pid: str) -> bool:
@@ -1384,60 +1368,26 @@ def _send_udp_friend_unfriend(sock: socket.socket, pid: str) -> bool:
     When we unfriend someone, we notify the peer over the SAME bootstrap
     channel (UDP) so BOTH sides drop the link — otherwise B would keep us as a
     friend after we unfriend them (the one-way bug, mirror of the handshake).
-    Like the other friend packets, it's signed so the recipient can verify
-    it's genuinely from the peer they friended. Returns True if sent.
+    Like the other friend packets, the signature covers the FULL operation so
+    a captured signature for one friend op cannot be replayed as unfriend.
+    Returns True if sent.
     """
-    peer = find_peer(pid)
-    target = (peer or {}).get("address", "")
-    tport = int((peer or {}).get("port") or DEFAULT_PORT)
-    if not target:
-        for f in STATE.config.get("friends", []):
-            if f.get("id") == pid and f.get("address"):
-                target = f.get("address")
-                tport = int(f.get("port") or DEFAULT_PORT)
-                break
-    if not target:
-        _diag("udp-friend-unfriend-failed", to=pid[:12], reason="no-address")
-        return False
-    nonce = secrets.token_hex(16)
-    payload = {"t": "friend-unfriend",
-               "id": host_id(),
-               "name": display_name(),
-               "cert": _our_cert_pem(),
-               "nonce": nonce,
-               "sig": _sign((host_id() + nonce).encode("utf-8")),
-               "port": port(),
-               "to": pid}
-    try:
-        sock.sendto(json.dumps(payload).encode("utf-8"), (target, tport))
-        _diag("udp-friend-unfriend-sent", to=target, port=tport, nonce=nonce[:8])
-        return True
-    except OSError as e:
-        _diag("udp-friend-unfriend-failed", to=target, errno=getattr(e, "errno", None))
-        return False
+    return _send_udp_friend_packet(sock, "friend-unfriend", pid, "friend-unfriend")
 
 
 def _handle_udp_friend_reject(sock: socket.socket, pkt: dict, addr: str) -> None:
     """Verify + process an inbound UDP friend-reject (the request was declined).
 
-    We were the requester and the peer declined. The peer proves ownership of its
-    claimed cert id (same signature scheme). On success we drop our outbound
-    pending state and clear the "Waiting to accept" banner — the peer is NOT
-    added as a friend, and we never confirm them.
+    We were the requester and the peer declined. The peer signs the FULL
+    operation (type + its id + us + nonce) and the (id, nonce) pair must be
+    fresh. On success we drop our outbound pending state and clear the
+    "Waiting to accept" banner — the peer is NOT added as a friend, and we
+    never confirm them.
     """
-    claimed = str(pkt.get("id") or "")
-    cert_pem = str(pkt.get("cert") or "")
-    nonce = str(pkt.get("nonce") or "")
-    sig = str(pkt.get("sig") or "")
+    claimed = _verify_udp_friend_packet("friend-reject", pkt, "friend-reject")
+    if not claimed:
+        return
     name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
-    if not claimed or claimed == host_id():
-        return
-    if _cert_fingerprint_of_pem(cert_pem) != claimed:
-        _diag("udp-friend-reject-rejected", from_id=claimed[:12], reason="bad-identity")
-        return
-    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
-        _diag("udp-friend-reject-rejected", from_id=claimed[:12], reason="bad-signature")
-        return
     # Declined: drop our held-outgoing content and clear the banner. Never add
     # or confirm them as a friend.
     with STATE.pending_lock:
@@ -1451,26 +1401,18 @@ def _handle_udp_friend_reject(sock: socket.socket, pkt: dict, addr: str) -> None
 def _handle_udp_friend_unfriend(sock: socket.socket, pkt: dict, addr: str) -> None:
     """Verify + process an inbound UDP friend-unfriend (we were unfriended).
 
-    The peer proves ownership of its claimed cert id (same signature scheme as
-    the other friend packets). On success we remove them as a CONFIRMED friend
+    The peer signs the FULL operation (type + its id + us + nonce) with the key
+    matching its claimed cert id, and the (id, nonce) pair must never have been
+    consumed before. On success we remove them as a CONFIRMED friend
     unconditionally and clear their history — mirroring the local unfriend so
-    both sides drop the link even when no TCP connection exists. A spurious
-    (unverified) packet is dropped: we never remove a friend on unauthenticated
-    UDP.
+    both sides drop the link even when no TCP connection exists. A spurious,
+    replayed, or type-swapped (unverified) packet is dropped: we never remove a
+    friend on unauthenticated UDP.
     """
-    claimed = str(pkt.get("id") or "")
-    cert_pem = str(pkt.get("cert") or "")
-    nonce = str(pkt.get("nonce") or "")
-    sig = str(pkt.get("sig") or "")
+    claimed = _verify_udp_friend_packet("friend-unfriend", pkt, "friend-unfriend")
+    if not claimed:
+        return
     name = _clean_name(str(pkt.get("name") or "")) or friendly_name(claimed)
-    if not claimed or claimed == host_id():
-        return
-    if _cert_fingerprint_of_pem(cert_pem) != claimed:
-        _diag("udp-friend-unfriend-rejected", from_id=claimed[:12], reason="bad-identity")
-        return
-    if not nonce or not _verify(cert_pem, (claimed + nonce).encode("utf-8"), sig):
-        _diag("udp-friend-unfriend-rejected", from_id=claimed[:12], reason="bad-signature")
-        return
     # Verified: they unfriended us. Drop the confirmed friend + clear history.
     _do_unfriend(claimed)
     _diag("udp-friend-unfriended", peer=claimed[:12], name=name)
