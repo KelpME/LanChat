@@ -440,6 +440,79 @@ def test_removed_member_injection(o2, a2, b, c, ido, ida, idb, idc, check, wait_
     check("inject: removed member receives no room text",
           not [e for e in b.events_of("message")
                if (e.get("message") or {}).get("text") == "member-ok"])
+    return rid
+
+
+def test_removed_member_rejoin(o2, a2, b, c, ido, idb, idc, rid, check, wait_for):
+    """Review #9076 round 9: a removed member who remains a direct friend
+    must NOT be re-admitted by an authenticated roomJoin alone — admission
+    requires a CURRENT owner-issued invitation. b was removed from rid by o2
+    (test_removed_member_injection) and remains o2's friend.
+      - a raw authenticated roomJoin (b's own cert — the shape a re-syncing
+        member sends, indistinguishable on the wire) must be REFUSED: no
+        roster change, room-join-refused reason=no-invitation
+      - a fresh owner invite + the normal join path must re-admit b
+      - re-admitted b's room traffic must flow again (access truly restored)
+    """
+    import test_peer as tp
+
+    # A current member's raw re-join (roomStateReq-shaped) is always allowed
+    # and must not trip the gate (positive control before the negative).
+    cert_c = open(os.path.join(c.home, ".config", "omarchy",
+                               "lanchat-certs", "cert.pem")).read()
+    key_c = open(os.path.join(c.home, ".config", "omarchy",
+                              "lanchat-certs", "key.pem")).read()
+    tp.authed_send("127.0.0.1", 4971, cert_c, key_c,
+                   {"t": "room", "kind": "roomJoin", "roomId": rid,
+                    "from": idc, "fromName": "Charlie"})
+    time.sleep(0.8)
+    check("rejoin: current member's raw re-join is not refused",
+          not [e for e in o2.events_of("diagnostic")
+               if e.get("message") == "room-join-refused"
+               and e.get("peer") == idc[:12]])
+
+    # The attack: b replays a roomJoin over its own authenticated connection.
+    cert_b = open(os.path.join(b.home, ".config", "omarchy",
+                               "lanchat-certs", "cert.pem")).read()
+    key_b = open(os.path.join(b.home, ".config", "omarchy",
+                              "lanchat-certs", "key.pem")).read()
+    tp.authed_send("127.0.0.1", 4971, cert_b, key_b,
+                   {"t": "room", "kind": "roomJoin", "roomId": rid,
+                    "from": idb, "fromName": "Beta"})
+    refused = wait_for(lambda: [e for e in o2.events_of("diagnostic")
+                                if e.get("message") == "room-join-refused"
+                                and e.get("roomId") == rid[:12]
+                                and e.get("peer") == idb[:12]
+                                and e.get("reason") == "no-invitation"], 6)
+    check("rejoin: removed friend's raw roomJoin refused (no invitation)",
+          bool(refused))
+    time.sleep(0.6)  # a wrongly-admitted peer would have rebroadcast by now
+    snap = [e for e in o2.events_of("room-state")
+            if (e.get("room") or {}).get("roomId") == rid][-1:]
+    roster = ((snap or [{}])[-1].get("room") or {}).get("members", {})
+    check("rejoin: refused peer never reaches the roster", idb not in roster)
+
+    # The sanctioned path: a NEW owner invitation re-opens admission.
+    # Count-window (not a bare search): b's queue holds the round-8 preamble
+    # invite for this same room, which would pass a history scan vacuously.
+    n_snap = len(c.events_of("room-state"))
+    n_inv = len(b.events_of("room-invite"))
+    o2.cmd(cmd="roomInvite", roomId=rid, peer=idb)
+    inv = wait_for(lambda: [e for e in b.events_of("room-invite")[n_inv:]
+                            if e.get("roomId") == rid], 6)
+    check("rejoin: fresh invite reaches the removed peer", bool(inv))
+    b.cmd(cmd="roomJoin", roomId=rid)
+    back = wait_for(lambda: [e for e in c.events_of("room-state")[n_snap:]
+                             if idb in ((e.get("room") or {}).get("members") or {})], 10)
+    check("rejoin: fresh invitation re-admits the peer", bool(back))
+
+    # Access is truly restored: re-admitted b's room text flows to members.
+    # a2 (a confirmed friend of b with live sockets both ways) is the
+    # observer: b<->c are not friends, so b's fan-out to c would legitimately
+    # hold on a socket that never exists.
+    b.cmd(cmd="roomSend", roomId=rid, text="back-in-room")
+    mb = wait_message(a2, 8, room=rid, text="back-in-room")
+    check("rejoin: re-admitted member's room text is delivered", mb is not None)
 
 
 def main():
@@ -674,8 +747,12 @@ def main():
         # ---- 10b. removed-member injection gate (review #9076 round 8).
         # Runs LAST on the restarted daemons: fresh event queues, so its
         # invites/room-states never pollute earlier tests' wait_event pops.
-        test_removed_member_injection(o2, a2, b, c, ido, ida, idb, idc,
-                                      check, wait_for)
+        gate_rid = test_removed_member_injection(o2, a2, b, c, ido, ida, idb, idc,
+                                                 check, wait_for)
+        # ---- 10c. removed-member REJOIN gate (review #9076 round 9), on the
+        # same GateRoom: b was removed there and stays o2's friend.
+        test_removed_member_rejoin(o2, a2, b, c, ido, idb, idc, gate_rid,
+                                   check, wait_for)
         # Daemon responsive after all the room traffic (version-skew class).
         a2.cmd(cmd="roomList")
         check("daemon responsive after room traffic",

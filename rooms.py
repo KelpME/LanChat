@@ -243,12 +243,15 @@ def _send_room_state(room: dict, to_pid: str = "") -> None:
     re-syncs via roomJoin/roomState on reconnect."""
     import server  # deferred, late-bound
     targets = [to_pid] if to_pid else [m for m in room.get("members", {}) if m != room.get("owner")]
+    # The invitation ledger authorizes admission on OUR copy only — peers get
+    # the roster, not who else holds (or held) a ticket (review #9076 round 9).
+    wire_room = {k: v for k, v in room.items() if k != "invited"}
     for pid in targets:
         if not pid:
             continue
         server._write(pid, {"t": "room", "kind": "roomState", "roomId": room["roomId"],
                             "from": server.host_id(), "fromName": server.display_name(),
-                            "room": room})
+                            "room": wire_room})
 
 
 def _broadcast_room_state(room: dict) -> None:
@@ -298,6 +301,13 @@ def owner_invite(room: dict, peer_id: str) -> bool:
                                  "from": server.host_id(), "fromName": server.display_name(),
                                  "name": room.get("name", ""), "ownerName": server.display_name()})
     if ok:
+        # Record the ticket on OUR authoritative copy (review #9076 round 9):
+        # a roomJoin is only admitted while a CURRENT owner-issued invitation
+        # exists. Delivery-success gating means an undelivered invite leaves
+        # no dangling authorization; the owner simply re-invites.
+        with rooms_lock():
+            room.setdefault("invited", {})[peer_id] = int(time.time())
+            _persist_owner()
         server._diag("room-invite-sent", roomId=room["roomId"][:12], peer=peer_id[:12], name=pname)
     else:
         _err("%s is offline; they can be invited once their connection returns" % pname)
@@ -334,6 +344,10 @@ def owner_remove(room: dict, peer_id: str) -> bool:
         if peer_id not in room["members"]:
             return False
         del room["members"][peer_id]
+        # Removal REVOKES any standing invitation (review #9076 round 9): the
+        # removed peer must hold a NEW owner invitation to be re-admitted —
+        # remaining a direct friend is not a re-entry ticket.
+        (room.get("invited") or {}).pop(peer_id, None)
         _bump(room)
         _persist_owner()
     server._write(peer_id, {"t": "room", "kind": "roomRemove", "roomId": room["roomId"],
@@ -640,6 +654,30 @@ def handle_room_msg(msg: dict, addr, verified: str = "") -> None:
             _err("Cannot add %s — befriend each other first" %
                  (server.find_peer(from_pid) or {}).get("name", server.friendly_name(from_pid)))
             return
+        # Owner-authorization gate (review #9076 round 9): friendship alone
+        # is NOT an entry ticket. An existing member may re-join freely (their
+        # roster entry never changed — re-sync grants nothing new), but a
+        # NON-member (never invited, removed, or kicked) is admitted ONLY on a
+        # CURRENT invitation the owner delivered (owner_invite records it here
+        # on delivery; owner_remove/member-leave revoke it). One-shot: the
+        # ticket is consumed on admission, so a captured roomJoin cannot be
+        # replayed to re-enter after a later removal.
+        with rooms_lock():
+            invited = room.get("invited")
+            if from_pid not in room.get("members", {}):
+                if not invited or from_pid not in invited:
+                    server._diag("room-join-refused", roomId=room_id[:12],
+                                 peer=from_pid[:12], reason="no-invitation")
+                    _err("%s was not invited to this room" %
+                         (server.find_peer(from_pid) or {}).get("name",
+                                                                server.friendly_name(from_pid)))
+                    return
+            # Consume the ticket on ANY join path (even the member re-sync
+            # path): a stale ticket must never survive a join to later enable
+            # re-entry after a removal.
+            if invited and from_pid in invited:
+                invited.pop(from_pid, None)
+                _persist_owner()
         owner_admit(room, from_pid, str(msg.get("fromName") or ""))
         return
     if kind == "roomAdd":

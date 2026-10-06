@@ -405,6 +405,16 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
   owner's authoritative `roomState`/`roomRemove`, so the owner's decision is
   enforced on the wire, not just in the interface. Drops are diagnostics
   (`not-room-member`), never silent.
+- **Re-entry needs a fresh invitation** (1.5.90) — joining a room you are not
+  on the roster of requires a **current invitation the owner delivered**. The
+  owner's authoritative copy keeps an invitation ledger: `roomInvite` records
+  a ticket when the invite is delivered, and removal (kick or applied leave)
+  revokes it. A roomJoin from a non-member without a ticket is refused
+  (`room-join-refused reason=no-invitation`); a current member re-syncing
+  after a reconnect joins freely, and a ticket is consumed the moment it is
+  used, so a captured `roomJoin` cannot be replayed to re-enter after a later
+  removal. Friendship alone was never a re-entry ticket: a removed member is
+  back in only if the owner invites them again.
 - **Rendered peer content is data** (1.5.87) — every label that shows
   peer-supplied text (message bubbles, room/member/file names, invitations,
   download bars, diagnostics) sets `textFormat: Text.PlainText`, so received
