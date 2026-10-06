@@ -170,6 +170,14 @@ BROADCAST_INTERVAL_S = 3.0
 # and the number of concurrent inbound connections, so a malicious/flooding LAN
 # peer can't exhaust memory or threads.
 MAX_FRAME_BUF = 512 * 1024   # a peer must send a newline within this many bytes
+# Pre-authentication holdback: messages that arrive before the identity
+# challenge-response completes are buffered so a dialer may pipeline traffic
+# (e.g. a friend request right after `identity`). The holdback is HARD-BOUNDED
+# per connection — an unauthenticated peer that floods messages instead of
+# completing proof gets dropped, so one TLS connection cannot exhaust the
+# daemon's memory (issue #9076).
+DEFERRED_MAX_MSGS = 64           # max messages held pre-authentication
+DEFERRED_MAX_BYTES = 256 * 1024  # max raw bytes held pre-authentication
 MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 
 # Version of the plugin/daemon. This is the SINGLE source of truth; manifest.json
@@ -294,7 +302,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.90"
+VERSION = "1.5.91"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -1882,7 +1890,8 @@ def _reader_inbound(sock) -> None:
     auth_state = "idle"     # idle -> awaiting identity; challenged -> awaiting proof; ok -> done
     auth_cert = ""          # peer's cert (PEM) once identity is accepted
     nonce = ""              # the challenge we sent
-    deferred = []           # messages arriving before proof completes
+    deferred = []           # messages arriving before proof completes (hard-bounded below)
+    deferred_bytes = 0      # raw bytes held in `deferred` (for the byte bound)
     try:
         while True:
             chunk = sock.recv(4096)
@@ -1933,10 +1942,21 @@ def _reader_inbound(sock) -> None:
                         for m in deferred:
                             _handle_incoming(m, src, verified=pid or "")
                         deferred = []
+                        deferred_bytes = 0
                     else:
                         # While awaiting proof, hold any other messages (e.g. a
                         # friend request the dialer sent right after identity).
+                        # HARD BOUND: this queue is reachable by a fully
+                        # UNauthenticated peer, so an unauthenticated flood
+                        # drops the connection instead of growing memory
+                        # (issue #9076). Legitimate dialers pipeline at most a
+                        # couple of messages before the proof lands.
                         deferred.append(msg)
+                        deferred_bytes += len(line)
+                        if len(deferred) > DEFERRED_MAX_MSGS or deferred_bytes > DEFERRED_MAX_BYTES:
+                            _log("inbound-deferred-overflow addr=%s msgs=%d bytes=%d"
+                                 % (addr, len(deferred), deferred_bytes))
+                            return
                     continue
                 # Authenticated: normal inbound handling. `pid` is the identity
                 # proven by the challenge-response handshake above.

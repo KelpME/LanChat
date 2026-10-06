@@ -429,7 +429,10 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
   `/send` and a brute-force guard on failed auth, plus a request-body cap.
 - **Transport hardening** (1.2.2) — per-connection buffered input is bounded
   (512 KB) and concurrent inbound connections are capped (64), so a flooding
-  LAN peer can't exhaust memory or threads.
+  LAN peer can't exhaust memory or threads. The pre-authentication message
+  holdback (1.5.91) is hard-bounded per connection too — 64 messages / 256 KB
+  — so an unauthenticated peer that floods messages instead of completing the
+  identity proof gets dropped rather than growing an unbounded queue.
 - **Attachment disk limits** — being a friend does not entitle a peer to fill
   your disk. Accepting a file is gated by a per-file ceiling (4 GiB), an
   aggregate budget across concurrent transfers (8 GiB), and a keep-free floor

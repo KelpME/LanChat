@@ -235,6 +235,47 @@ def main():
         assert m and m["message"]["text"] == "after flood", "message after flood not delivered"
         print("OK  transport still delivers after flood dropped")
 
+        # --- Pre-auth holdback bound (1.5.91, issue #9076): messages that
+        # arrive before the identity proof completes are queued so honest
+        # dialers can pipeline. The queue must be HARD-BOUNDED per connection:
+        # an unauthenticated peer that sends `identity`, then floods messages
+        # instead of proving, must get the connection DROPPED — not an
+        # unbounded `deferred` list exhausting daemon memory.
+        dfd = _ctx.wrap_socket(socket.create_connection(("127.0.0.1", b.port), timeout=3))
+        dfd.settimeout(5)
+        dfd.sendall((json.dumps({"t": "identity", "from": ida, "cert": a_pem}) + "\n").encode())
+        time.sleep(0.4)
+        # Ignore the challenge; never send identityProof. Flood holdback messages.
+        for i in range(300):
+            dfd.sendall((json.dumps({"t": "msg", "from": ida, "fromName": "Alpha",
+                                     "text": "DEFER-FLOOD-%d" % i}) + "\n").encode())
+        time.sleep(0.8)
+        dfd_dropped = False
+        try:
+            dfd.sendall(b'{"t":"msg","from":"x","text":"tail"}\n')
+            try:
+                if dfd.recv(1) == b"":
+                    dfd_dropped = True
+            except Exception:
+                dfd_dropped = True
+        except OSError:
+            dfd_dropped = True
+        dfd.close()
+        assert dfd_dropped, "pre-auth deferred flood connection was not dropped (queue unbounded)"
+        assert not _has_message(b, "DEFER-FLOOD"), "pre-auth flood message leaked through"
+        print("OK  pre-auth deferred flood dropped (holdback queue bounded)")
+
+        # The honest pipelining path still works: a legitimate dialer that
+        # sends `identity` + a message, then completes the proof, has its
+        # held message delivered after authentication.
+        import test_peer as _tp
+        key_pem = open(os.path.join(home_a, ".config", "omarchy", "lanchat-certs", "key.pem")).read()
+        _tp.authed_send("127.0.0.1", b.port, a_pem, key_pem,
+                        {"t": "msg", "from": ida, "fromName": "Alpha", "text": "after defer bound"})
+        m = b.wait_event("message")
+        assert m and m["message"]["text"] == "after defer bound", "post-bound message not delivered"
+        print("OK  auth flow still works after deferred-bound drop")
+
         # Persistence (1.2.3): B's history file is AES-GCM encrypted, so the
         # delivered message text is NOT readable as plaintext on disk.
         hist_path = os.path.join(home_b, ".local", "state", "lanchat", "history.json")
