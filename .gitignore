@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 plans/
+
+# internal screenshot bench (stays local; the generated preview.png IS tracked)
+scripts/qml_gate/shotbench.qml
