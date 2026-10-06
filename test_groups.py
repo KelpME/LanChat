@@ -303,6 +303,145 @@ def test_forget(oo, aa, ido, ida, live_room_id, check, wait_for):
     check("forget: live-member room still listed", bool(still))
 
 
+def test_removed_member_injection(o2, a2, b, c, ido, ida, idb, idc, check, wait_for):
+    """Review #9076 round 8: a REMOVED room member who remains a direct
+    friend must not be able to inject authenticated room-scoped traffic
+    (t:"msg" with room, or direct t:"roomFile") into the group's history and
+    UI on any daemon whose roster no longer lists them. Room existence is
+    not authorization — RECORDED MEMBERSHIP is.
+
+    Runs LAST on the restarted daemons (fresh event queues — no room-invite
+    pollution for other tests' consuming wait_event calls). o2 owns a fresh
+    room; members a2, b, c (friendships O-A, O-B, O-C, A-B, A-C all survive
+    the restart via persisted state). o2 removes b, then we inject AS b over
+    a raw authenticated TLS connection (b's own cert — still a genuine
+    friend of a2):
+      - room text   -> a2 drops it (inbound-dropped reason=not-room-member)
+      - room file   -> a2 drops it (room-drop reason=not-room-member)
+      - 1:1 text    -> a2 still accepts it (friendship intact, untouched)
+      - room text from a2 -> c (still a member) still receives it
+    """
+    import test_peer as tp
+    cert_b = open(os.path.join(b.home, ".config", "omarchy",
+                               "lanchat-certs", "cert.pem")).read()
+    key_b = open(os.path.join(b.home, ".config", "omarchy",
+                              "lanchat-certs", "key.pem")).read()
+
+    o2.cmd(cmd="createRoom", name="GateRoom")
+    created = o2.wait_event("room-created", timeout=6)
+    rid = (created or {}).get("roomId", "")
+    check("inject: gate room created", bool(rid))
+
+    # test_unfriend_leave (step 8b3) dissolved O–B; roomJoin admission needs
+    # owner friendship, so restore it (A–B, the injection-relevant friendship,
+    # was never touched).
+    friend_pair(o2, b, ido, idb, "Owner", "Beta")
+
+    # Direction proof per member: X->o2 room envelopes FREEZE while that
+    # direction has no socket (no hold for t:"room"), so before joining we
+    # PROVE each X->o2 path with held 1:1 pings (they flush on reconnect —
+    # arrival IS the proof). Re-ping every 2s until all arrive (a restarted
+    # owner's dials sit behind up to 16s backoff per peer).
+    need = {"ping-a2", "ping-b", "ping-c"}
+    peers = {"ping-a2": a2, "ping-b": b, "ping-c": c}
+    pinged, proof_deadline = set(), time.time() + 60
+    while need and time.time() < proof_deadline:
+        for tag in [t for t in need if t not in pinged]:
+            peers[tag].cmd(cmd="send", to=ido, text=tag, friend_request=False)
+            pinged.add(tag)
+        got = {str((e.get("message") or {}).get("text"))
+               for e in o2.events_of("message")}
+        need -= got
+        if need:
+            time.sleep(2)
+    check("inject: X->owner paths proven for all members", not need,
+          "missing=%s" % sorted(need))
+
+    # Invite all (seeds the cache stub roomJoin needs), wait for landings,
+    # then join. With proven sockets one round suffices; bounded re-invite +
+    # re-join covers a rare blip.
+    members_full = None
+    deadline = time.time() + 45
+    while time.time() < deadline and not members_full:
+        for pid in (ida, idb, idc):
+            o2.cmd(cmd="roomInvite", roomId=rid, peer=pid)
+        landed = wait_for(lambda: all(
+            [e for e in p.events_of("room-invite") if e.get("roomId") == rid]
+            for p in (a2, b, c)), 6)
+        if not landed:
+            continue
+        for x in (a2, b, c):
+            x.cmd(cmd="roomJoin", roomId=rid)
+        members_full = wait_for(lambda: [e for e in o2.events_of("room-state")
+                                         if (e.get("room") or {}).get("roomId") == rid
+                                         and all(p in ((e.get("room") or {}).get("members") or {})
+                                                 for p in (ida, idb, idc))], 4)
+    check("inject: all three members on the roster", bool(members_full))
+
+    # Owner removes b. Roster change propagates: b's cache drops the room,
+    # a2's cached roster loses b. (Brief settle first: the convergence loop
+    # may have invites in flight, and a late invite would re-seed b's stub.)
+    time.sleep(1.0)
+    n_blist = len(b.events_of("room-list"))
+    gone_b = None
+    rm_deadline = time.time() + 30
+    while time.time() < rm_deadline and not gone_b:
+        o2.cmd(cmd="roomRemove", roomId=rid, peer=idb)
+        gone_b = wait_for(lambda: [e for e in b.events_of("room-list")[n_blist:]
+                                   if all(r.get("roomId") != rid for r in e.get("rooms", []))], 3)
+    check("inject: removed member's cache drops the room", bool(gone_b))
+    lost_b = wait_for(lambda: [e for e in a2.events_of("room-state")
+                               if (e.get("room") or {}).get("roomId") == rid
+                               and idb not in ((e.get("room") or {}).get("members") or {})], 8)
+    check("inject: remaining member's roster drops the removed peer", bool(lost_b))
+
+    # Raw injection AS b (authenticated connection, b's own identity): room
+    # text straight into a2's socket — bypasses send_room_text's own lookup.
+    tp.authed_send("127.0.0.1", 4972, cert_b, key_b,
+                   {"t": "msg", "from": idb, "fromName": "Beta", "room": rid,
+                    "mid": "inj8text", "text": "INJECTED-ROOM-TEXT"})
+    drop1 = wait_for(lambda: [e for e in a2.events_of("diagnostic")
+                              if e.get("message") == "inbound-dropped"
+                              and e.get("reason") == "not-room-member"], 6)
+    check("inject: removed member's room TEXT dropped (not-room-member)", bool(drop1))
+    time.sleep(0.6)
+    check("inject: no injected room-text bubble in UI/history",
+          not [e for e in a2.events_of("message")
+               if (e.get("message") or {}).get("mid") == "inj8text"])
+
+    # Direct roomFile packet AS b.
+    tp.authed_send("127.0.0.1", 4972, cert_b, key_b,
+                   {"t": "roomFile", "roomId": rid, "from": idb, "fromName": "Beta",
+                    "text": "INJECTED-FILE",
+                    "att": {"fileId": "inj8file", "mid": "inj8att",
+                            "name": "evil.bin", "size": 42,
+                            "mime": "application/octet-stream"}})
+    drop2 = wait_for(lambda: [e for e in a2.events_of("diagnostic")
+                              if e.get("message") == "room-drop"
+                              and e.get("reason") == "not-room-member"], 6)
+    check("inject: removed member's room FILE dropped (not-room-member)", bool(drop2))
+    time.sleep(0.6)
+    check("inject: no injected room-file bubble in UI/history",
+          not [e for e in a2.events_of("message")
+               if (e.get("message") or {}).get("mid") == "inj8att"])
+
+    # Removed-but-still-friend: plain 1:1 text must still flow (the fix
+    # gates ROOM traffic only — friendship is untouched by room removal).
+    b.cmd(cmd="send", to=ida, text="still-friends-1to1", friend_request=False)
+    m11 = wait_message(a2, 8, text="still-friends-1to1")
+    check("inject: 1:1 friendship unaffected by room removal", m11 is not None)
+
+    # Positive control: a CURRENT member's room text still reaches members...
+    a2.cmd(cmd="roomSend", roomId=rid, text="member-ok")
+    mc = wait_message(c, 8, room=rid, text="member-ok")
+    check("inject: current member's room text still delivered", mc is not None)
+    # ...and NOT the removed member.
+    time.sleep(0.6)
+    check("inject: removed member receives no room text",
+          not [e for e in b.events_of("message")
+               if (e.get("message") or {}).get("text") == "member-ok"])
+
+
 def main():
     ho = make_home("o", 4971, "Owner")
     ha = make_home("a", 4972, "Alpha")
@@ -524,10 +663,19 @@ def main():
         ready = o2.wait_event("ready", timeout=8) or {}
         check("owner rooms persist across restart",
               any(r.get("roomId") == rid for r in ready.get("rooms", [])))
+        a.stop()
+        stopped.append(a)
+        time.sleep(0.5)
         a2 = Daemon(ha, 4972, "Alpha")
         ready_a = a2.wait_event("ready", timeout=8) or {}
         check("member cache persists across restart",
               any(r.get("roomId") == rid for r in ready_a.get("rooms", [])))
+
+        # ---- 10b. removed-member injection gate (review #9076 round 8).
+        # Runs LAST on the restarted daemons: fresh event queues, so its
+        # invites/room-states never pollute earlier tests' wait_event pops.
+        test_removed_member_injection(o2, a2, b, c, ido, ida, idb, idc,
+                                      check, wait_for)
         # Daemon responsive after all the room traffic (version-skew class).
         a2.cmd(cmd="roomList")
         check("daemon responsive after room traffic",

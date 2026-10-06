@@ -294,7 +294,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.88"
+VERSION = "1.5.89"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2295,11 +2295,21 @@ def _handle_incoming(msg: dict, addr, verified: str = "") -> None:
     room_id = str(msg.get("room") or "")
     if room_id:
         message["room"] = room_id
-        # A room message only renders if the sender is in one of OUR room
-        # copies (authoritative or cached). Enforce so a stranger can't inject
-        # room-scoped content into the UI by claiming a room id.
-        if rooms.get_room(room_id) is None:
+        # A room message renders only when the sender is CURRENTLY on OUR
+        # record of that room's roster (authoritative or cached). Existence
+        # alone is not authorization (review #9076 round 8): a member the
+        # owner removed — or the owner themselves after the roster dropped
+        # them — who remains a direct friend must not inject authenticated
+        # traffic into the group's history and UI. A roster change reaches
+        # every daemon via the owner's authoritative roomState/roomRemove,
+        # so enforcing membership here enforces the owner's decision on the
+        # wire, not just in the UI.
+        _room = rooms.get_room(room_id)
+        if _room is None:
             _diag("inbound-dropped", from_id=pid[:12], reason="unknown-room", room=room_id[:12])
+            return
+        if pid not in (_room.get("members") or {}):
+            _diag("inbound-dropped", from_id=pid[:12], reason="not-room-member", room=room_id[:12])
             return
     # Carry the attachment metadata (name/size/mime/fileId/sha256) through so
     # the receiver can present the accept bar and download the file.

@@ -395,6 +395,16 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
     own id, and a captured `friend-request` signature is worthless as a
     `friend-unfriend`. Rejected packets surface as diagnostics, never as
     friendship changes.
+- **Room membership authorizes room traffic** (1.5.89) — a room-scoped packet
+  (`t:"msg"` carrying a `room`, or a room-file announcement) is recorded and
+  rendered only while OUR record of that room — authoritative copy or synced
+  cache — lists the sender as a CURRENT member. The room merely existing is
+  not authorization: a member the owner removed (or left), who stays a direct
+  friend, can no longer inject authenticated traffic into the group's history
+  or UI, on any daemon that learned the roster change. Roster changes ride the
+  owner's authoritative `roomState`/`roomRemove`, so the owner's decision is
+  enforced on the wire, not just in the interface. Drops are diagnostics
+  (`not-room-member`), never silent.
 - **Rendered peer content is data** (1.5.87) — every label that shows
   peer-supplied text (message bubbles, room/member/file names, invitations,
   download bars, diagnostics) sets `textFormat: Text.PlainText`, so received

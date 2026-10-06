@@ -600,6 +600,19 @@ def handle_room_msg(msg: dict, addr, verified: str = "") -> None:
         # Room-file metadata. The OWNER rebroadcasts to every member
         # (authoritative fan-out, approved decision #2); a member renders the
         # offer bubble. Bytes stay sender-served (attachmentRequest flow).
+        # Membership gate FIRST (review #9076 round 8): both the owner who
+        # rebroadcasts and the member whose bubble this is must be on OUR
+        # recorded roster. Existence alone let a removed member who remains a
+        # direct friend inject file offers into the room's history and UI.
+        rec = _recorded_room(room_id)
+        if rec is None:
+            server._diag("room-drop", kind=kind, reason="unknown-room",
+                         roomId=room_id[:12], verified=verified[:12])
+            return
+        if (verified or from_pid) not in (rec.get("members") or {}):
+            server._diag("room-drop", kind=kind, reason="not-room-member",
+                         roomId=room_id[:12], verified=verified[:12])
+            return
         room = STATE.rooms.get(room_id)
         if room is not None and _is_owner(room, server.host_id()):
             fan_out_room_file(room, msg)
@@ -765,6 +778,23 @@ def handle_room_file_msg(msg: dict, addr, verified: str = "") -> None:
         return
     room_id = str(msg.get("roomId", ""))
     from_pid = str(msg.get("from", ""))
+    # Membership gate (review #9076 round 8): a room-file bubble is recorded
+    # only while OUR record of the room lists both the author AND the writer
+    # of this packet as current members (in the sanctioned owner-relay case
+    # those are two different identities — the roster includes the owner, so
+    # a genuine relay passes; a member the owner removed fails here, whether
+    # they send direct t:"roomFile" or ride someone else's connection).
+    # Existence alone is not authorization.
+    rec = _recorded_room(room_id)
+    if rec is None:
+        server._diag("room-drop", kind="roomFile", reason="unknown-room",
+                     roomId=room_id[:12], verified=(verified or "")[:12])
+        return
+    members = rec.get("members") or {}
+    if (verified or from_pid) not in members or (from_pid and from_pid not in members):
+        server._diag("room-drop", kind="roomFile", reason="not-room-member",
+                     roomId=room_id[:12], verified=(verified or "")[:12])
+        return
     if verified and from_pid and from_pid != verified:
         recorded = _recorded_room(room_id)
         owner = str((recorded or {}).get("owner") or "")
