@@ -179,6 +179,12 @@ MAX_FRAME_BUF = 512 * 1024   # a peer must send a newline within this many bytes
 DEFERRED_MAX_MSGS = 64           # max messages held pre-authentication
 DEFERRED_MAX_BYTES = 256 * 1024  # max raw bytes held pre-authentication
 MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
+# Server-side TLS handshake deadline. The accept loop must never block in a
+# handshake: an unauthenticated client can complete the TCP connect, then
+# withhold its ClientHello indefinitely. The handshake therefore runs on a
+# worker thread (bounded by MAX_INBOUND_CONNS slots) with this hard timeout,
+# after which the socket is closed and the slot released (issue #9076).
+_TLS_HANDSHAKE_TIMEOUT = 5.0
 
 # Version of the plugin/daemon. This is the SINGLE source of truth; manifest.json
 # is stamped from it by `make bump-version` (scripts/bump_version.py). Never edit
@@ -302,7 +308,7 @@ MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.91"
+VERSION = "1.5.92"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -2066,30 +2072,57 @@ def tcp_loop() -> None:
     except OSError as e:
         _emit({"event": "error", "message": "lanchat TCP bind failed on port %d: %s" % (port(), e)})
         return
-    # Always serve the CURRENT cert, never a stale one loaded once at boot.
-    # If the cert is regenerated while this daemon runs (e.g. a reinstall
-    # wiped + regenerated lanchat-certs), host_id() reads the new cert fresh
-    # but a cached tls_ctx would keep serving the old one — a fingerprint
-    # mismatch that silently breaks every peer connection. Reload per accept
-    # so the served cert always matches the announced identity.
-    def _current_tls_ctx() -> ssl.SSLContext:
-        ensure_tls()  # generate if missing
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_cert_chain(CERT_PEM, CERT_KEY)
-        return ctx
 
     while True:
         try:
             raw_conn, addr = srv.accept()
-            conn = _current_tls_ctx().wrap_socket(raw_conn, server_side=True)
-        except (OSError, ssl.SSLError):
+        except OSError:
             continue
         if not _conn_slot_taken():
             # Over the connection cap — refuse and drop.
             _log("inbound-conn-limit addr=%s conns=%d" % (addr[0], MAX_INBOUND_CONNS))
-            _close_sock(conn)
+            _close_sock(raw_conn)
             continue
-        threading.Thread(target=_reader_inbound_wrapper, args=(conn,), daemon=True).start()
+        # The TLS handshake happens OFF this single accept loop, on a worker
+        # with a hard deadline (_handshake_and_serve). Handshaking inline let
+        # one client that connects but never sends its ClientHello block the
+        # accept loop indefinitely, freezing all new inbound connections —
+        # before the connection cap could even be reached (issue #9076).
+        threading.Thread(target=_handshake_and_serve, args=(raw_conn, addr), daemon=True).start()
+
+
+def _handshake_and_serve(raw_conn, addr) -> None:
+    """Complete the server-side TLS handshake away from the accept loop,
+    under a hard timeout, then hand the connection to the reader.
+
+    An unauthenticated client can complete the TCP connect and then withhold
+    its ClientHello; without a deadline this thread (and previously the whole
+    accept loop) waits forever. On any handshake failure or timeout the
+    socket is closed and the accept-loop connection slot is released, so the
+    attack at worst occupies a slot for _TLS_HANDSHAKE_TIMEOUT seconds.
+
+    Always serves the CURRENT cert, never a stale one loaded once at boot:
+    if the cert is regenerated while this daemon runs (e.g. a reinstall
+    wiped + regenerated lanchat-certs), host_id() reads the new cert fresh
+    but a cached tls_ctx would keep serving the old one — a fingerprint
+    mismatch that silently breaks every peer connection. Rebuild per
+    connection so the served cert always matches the announced identity.
+    """
+    try:
+        ensure_tls()  # generate if missing
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(CERT_PEM, CERT_KEY)
+        raw_conn.settimeout(_TLS_HANDSHAKE_TIMEOUT)
+        conn = ctx.wrap_socket(raw_conn, server_side=True)
+        conn.settimeout(None)  # after handshake the reader blocks normally
+    except (OSError, ssl.SSLError) as e:
+        # Includes socket.timeout (subclass of OSError): ClientHello never
+        # arrived (or never completed) within the deadline — drop it.
+        _log("inbound-handshake-failed addr=%s err=%s" % (addr[0], e))
+        _close_sock(raw_conn)
+        _conn_slot_release()
+        return
+    threading.Thread(target=_reader_inbound_wrapper, args=(conn,), daemon=True).start()
 
 
 # Handshake hold: pid -> list of held messages awaiting the recipient's accept.

@@ -235,6 +235,43 @@ def main():
         assert m and m["message"]["text"] == "after flood", "message after flood not delivered"
         print("OK  transport still delivers after flood dropped")
 
+        # --- Slow-client handshake guard (1.5.92, issue #9076): a client may
+        # complete the TCP connect and then withhold its TLS ClientHello. That
+        # must NOT stall the sole accept loop: new connections must keep being
+        # served, and the stalled socket must be closed within the handshake
+        # deadline rather than held open forever.
+        stall = socket.create_connection(("127.0.0.1", b.port), timeout=3)
+        stall.settimeout(3)
+        # (connected, intentionally silent — no ClientHello)
+        # A second client must still get its TLS handshake + challenge within
+        # ~1s even while the staller holds a socket open.
+        t0 = time.time()
+        live = _ctx.wrap_socket(socket.create_connection(("127.0.0.1", b.port), timeout=3))
+        live.sendall((json.dumps({"t": "identity", "from": ida, "cert": a_pem}) + "\n").encode())
+        live.settimeout(3)
+        got_challenge = False
+        try:
+            bbuf = b""
+            while b"\n" not in bbuf and time.time() - t0 < 3:
+                bbuf += live.recv(8192)
+                got_challenge = b'"challenge"' in bbuf
+        except OSError:
+            pass
+        live.close()
+        assert got_challenge, "accept loop stalled: new connection not served while a client withheld its ClientHello"
+        assert time.time() - t0 < 2.0, "new connection was delayed by the stalling client"
+        # The stalled socket must be dropped by the server's handshake
+        # deadline (_TLS_HANDSHAKE_TIMEOUT = 5s), not held open forever.
+        stalled_closed = False
+        try:
+            stall.settimeout(9)
+            stalled_closed = stall.recv(1) == b""
+        except OSError:
+            stalled_closed = True
+        stall.close()
+        assert stalled_closed, "ClientHello-withholding socket was never closed (no handshake timeout)"
+        print("OK  ClientHello stall does not block accept loop (timed handshake)")
+
         # --- Pre-auth holdback bound (1.5.91, issue #9076): messages that
         # arrive before the identity proof completes are queued so honest
         # dialers can pipeline. The queue must be HARD-BOUNDED per connection:
