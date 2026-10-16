@@ -95,6 +95,7 @@ def _unsolicited_accept(victim_port, attacker_home, attacker_id, victim_id, name
     is genuine (it proves identity) but it asserts consent the victim never
     requested."""
     import secrets as _sec
+
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
     cert_dir = os.path.join(attacker_home, ".config", "omarchy", "lanchat-certs")
@@ -318,7 +319,7 @@ def main():
         evil = "![x](http://attacker.example/x.png) <b>t</b>"
         _disco(n.port, idn2, evil, o.port)
         time.sleep(1.0)
-        snap = n.wait_event("peer", timeout=5)
+        n.wait_event("peer", timeout=5)
         got = None
         dl = time.time() + 5
         while time.time() < dl and not got:

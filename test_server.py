@@ -532,6 +532,107 @@ def main():
         assert aev and aev["enabled"] is False, "http disable event not emitted"
         print("OK  HTTP API disabled via stdin")
 
+        # --- Post-auth friend-request holdback bound (1.5.93, issue #9076):
+        # a LAN stranger that LEGALLY proves ownership of its own cert passes
+        # the identity challenge, then may repeatedly send `msg` frames with
+        # friendRequest:true. Every such message is held in pending_first
+        # until the user accepts/rejects — so the hold must be HARD-BOUNDED
+        # per pending peer (32 msgs / 128 KB) and per daemon, or one stranger
+        # (or an army of them) exhausts the persistent daemon's memory.
+        import test_peer as _tp
+        fr_home = tempfile.mkdtemp(prefix="lanchat-frflood-")
+        fr_home2 = tempfile.mkdtemp(prefix="lanchat-frflood2-")
+        fr_home3 = tempfile.mkdtemp(prefix="lanchat-frflood3-")
+        fr_cert, fr_key = _tp.make_certs(fr_home)
+        fr2_cert, fr2_key = _tp.make_certs(fr_home2)
+        fr3_cert, fr3_key = _tp.make_certs(fr_home3)
+        fr_id = _tp.fingerprint(fr_cert)
+        fr2_id = _tp.fingerprint(fr2_cert)
+        fr3_id = _tp.fingerprint(fr3_cert)
+        try:
+            # (a) One stranger floods >> the per-peer cap (64 x small). The
+            # held queue must cap at PENDING_FIRST_MAX_MSGS=32; the excess is
+            # dropped with a diagnostic, never held, never surfaced.
+            sconn = _tp.authed_connect("127.0.0.1", b.port, fr_cert, fr_key)
+            for i in range(64):
+                sconn.sendall((json.dumps({"t": "msg", "from": fr_id, "fromName": "Framer",
+                                           "text": "FRFLOOD-%03d" % i,
+                                           "friendRequest": True}) + "\n").encode())
+            sconn.close()
+            assert wait_until(lambda: _count_events(b, "friend-request", fr_id) >= 32,
+                              timeout=6.0), "held friend requests never reached the per-peer cap"
+            time.sleep(0.6)
+            held_fr = _count_events(b, "friend-request", fr_id)
+            assert held_fr == 32, "held friend-request queue unbounded: got %d events, cap is 32" % held_fr
+            drops = _count_diag(b, "inbound-friend-request-dropped", fr_id[:12])
+            assert drops >= 32, "flood excess was not dropped with a diagnostic (drops=%d)" % drops
+            print("OK  friend-request flood per-peer bound (held capped at 32, excess dropped)")
+
+            # (a2) Byte bound: the same hold must cap on BYTES. 20 KB request
+            # texts: floor(128 KB / 20 KB) = 6 held, the rest dropped.
+            sconn2 = _tp.authed_connect("127.0.0.1", b.port, fr2_cert, fr2_key)
+            big = "B" * 20480
+            for i in range(12):
+                sconn2.sendall((json.dumps({"t": "msg", "from": fr2_id, "fromName": "BigFramer",
+                                            "text": "FRBIG-%03d-%s" % (i, big),
+                                            "friendRequest": True}) + "\n").encode())
+            sconn2.close()
+            assert wait_until(lambda: _count_diag(b, "inbound-friend-request-dropped", fr2_id[:12]) > 0,
+                              timeout=6.0), "byte-bound flood was never dropped (bytes unbounded)"
+            time.sleep(0.5)
+            held_big = _count_events(b, "friend-request", fr2_id)
+            assert held_big == 6, "byte-bound hold wrong: got %d held, expected 6 (128KB / 20KB)" % held_big
+            print("OK  friend-request hold capped by bytes too (6 x 20 KB held, rest dropped)")
+
+            # (b) Accept reveals exactly the kept messages (32), nothing more.
+            b.cmd(cmd="acceptFriend", id=fr_id)
+            assert b.wait_event("friend-accepted", timeout=5), "acceptFriend did not confirm the peer"
+            assert wait_until(lambda: _count_messages(b, "FRFLOOD-") >= 32, timeout=6.0), \
+                "accept did not reveal the kept flood messages"
+            time.sleep(0.5)
+            assert _count_messages(b, "FRFLOOD-") == 32, \
+                "accept revealed %d messages, expected exactly the 32 kept" % _count_messages(b, "FRFLOOD-")
+            assert not _has_message(b, "FRBIG-"), "dropped byte-bound message surfaced on accept"
+            print("OK  accept reveals exactly the kept messages (32 revealed, dropped never surface)")
+
+            # (c) Reject clears the hold AND resets every counter fully: the
+            # same stranger, rejected then re-flooding, must again get a full
+            # fresh 32-message budget (a leaked byte/count entry would wedge
+            # the re-flood far below the cap — a worse bug than the original).
+            sconn3 = _tp.authed_connect("127.0.0.1", b.port, fr3_cert, fr3_key)
+            for i in range(64):
+                sconn3.sendall((json.dumps({"t": "msg", "from": fr3_id, "fromName": "RejectMe",
+                                            "text": "FRREJ-%03d" % i,
+                                            "friendRequest": True}) + "\n").encode())
+            sconn3.close()
+            assert wait_until(lambda: _count_events(b, "friend-request", fr3_id) >= 32, timeout=6.0), \
+                "reject-path flood never reached the cap"
+            b.cmd(cmd="rejectFriend", id=fr3_id)
+            assert b.wait_event("friend-rejected", timeout=5), "rejectFriend did not emit friend-rejected"
+            time.sleep(0.5)
+            # Same peer floods again: counters must have been reset to zero.
+            sconn4 = _tp.authed_connect("127.0.0.1", b.port, fr3_cert, fr3_key)
+            for i in range(64):
+                sconn4.sendall((json.dumps({"t": "msg", "from": fr3_id, "fromName": "RejectMe",
+                                            "text": "FRREJ2-%03d" % i,
+                                            "friendRequest": True}) + "\n").encode())
+            sconn4.close()
+            assert wait_until(lambda: _count_events(b, "friend-request", fr3_id) >= 64, timeout=8.0), \
+                ("friend-request counters leaked across reject: re-flood only reached %d/64 "
+                 "(stale per-peer accounting wedges future requests)"
+                 % _count_events(b, "friend-request", fr3_id))
+            print("OK  reject clears the hold and resets counters fully (re-flood gets a fresh full budget)")
+
+            # (d) Global cap + counter symmetry: verified in-process below
+            # (4096 held msgs across all peers, with every pop path required
+            # to release the accounting atomically).
+            _check_pending_first_global_bound()
+            print("OK  global friend-request hold cap bounds the aggregate and releases fully")
+        finally:
+            shutil.rmtree(fr_home, ignore_errors=True)
+            shutil.rmtree(fr_home2, ignore_errors=True)
+            shutil.rmtree(fr_home3, ignore_errors=True)
+
         print("\nALL TESTS PASSED")
         return 0
     finally:
@@ -554,6 +655,101 @@ def _has_message(d, text):
 def _has_friend_request(d, pid):
     with d._lock:
         return any(e.get("event") == "friend-request" and e.get("from") == pid for e in d.events)
+
+
+def _count_events(d, kind, from_id=None):
+    """Count (without consuming) events of `kind`, optionally by `from` id."""
+    with d._lock:
+        return sum(1 for e in d.events
+                   if e.get("event") == kind
+                   and (from_id is None or e.get("from") == from_id))
+
+
+def _count_diag(d, message, peer_prefix):
+    """Count diagnostic events whose peer field starts with peer_prefix."""
+    with d._lock:
+        return sum(1 for e in d.events if e.get("event") == "diagnostic"
+                   and e.get("message") == message
+                   and str(e.get("peer", "")).startswith(peer_prefix))
+
+
+def _count_messages(d, prefix):
+    """Count delivered message events whose text starts with `prefix`."""
+    with d._lock:
+        return sum(1 for e in d.events if e.get("event") == "message"
+                   and str(e["message"].get("text", "")).startswith(prefix))
+
+
+def _check_pending_first_global_bound():
+    """In-process (fast, no certs): the DAEMON-GLOBAL cap on pending_first.
+
+    Drives server._hold_friend_request / server._release_pending_first
+    directly against the imported module's STATE (the subprocess daemons have
+    their own separate STATE — this exercises the enforcement + symmetry logic
+    itself). 200 distinct stranger pids x 21 msgs = 4200 attempts: the
+    aggregate hold must stop at PENDING_FIRST_GLOBAL_MAX_MSGS (4096) and EVERY
+    release path must return the accounting to exactly zero afterwards.
+    Shared STATE may hold entries from earlier tests: snapshot and restore it
+    in finally, and never leak a peer entry behind us.
+    """
+    import server as srv
+    st = srv.STATE
+    snap_pf = dict(st.pending_first)
+    snap_pf_b = dict(st.pending_first_bytes)
+    diag_calls = []
+    real_diag = srv._diag
+    srv._diag = lambda msg, **f: diag_calls.append((msg, f))
+    try:
+        def glob_count():
+            return sum(len(q) for q in st.pending_first.values())
+        def glob_bytes():
+            return sum(st.pending_first_bytes.values())
+        base_c, base_b = glob_count(), glob_bytes()
+        admitted = 0
+        for p in range(200):
+            pid = "fr-global-%03d" % p
+            for i in range(21):
+                if srv._hold_friend_request(pid, {"text": "g%03d-%02d" % (p, i),
+                                                  "friendRequest": True}):
+                    admitted += 1
+        assert admitted == srv.PENDING_FIRST_GLOBAL_MAX_MSGS - base_c, (
+            "global count cap wrong: admitted %d, expected %d"
+            % (admitted, srv.PENDING_FIRST_GLOBAL_MAX_MSGS - base_c))
+        assert glob_count() == srv.PENDING_FIRST_GLOBAL_MAX_MSGS, "aggregate hold exceeded the cap"
+        assert glob_bytes() > base_b, "byte accounting did not track the admitted messages"
+        assert srv._held_msg_bytes({"text": "abc"}) == 3, "byte measure inconsistent"
+        reasons = [f.get("reason") for (m, f) in diag_calls if m == "inbound-friend-request-dropped"]
+        assert reasons and all(r == "global-cap" for r in reasons), (
+            "overflow diagnostics must all cite the global cap, got %r" % set(reasons))
+        # Every pid that got in below the cap kept its first held message:
+        # none of the admitted queues may be empty, and each is per-peer bounded.
+        for pid, q in st.pending_first.items():
+            if pid.startswith("fr-global-"):
+                assert 1 <= len(q) <= srv.PENDING_FIRST_MAX_MSGS
+        # Symmetry: release every pid; accounting must return to EXACTLY the
+        # pre-test snapshot — a leak here is the wedge bug this guards.
+        released = 0
+        for pid in [p for p in st.pending_first if p.startswith("fr-global-")]:
+            released += len(srv._release_pending_first(pid))
+        assert released == admitted, (
+            "releases returned %d held messages, expected %d admitted" % (released, admitted))
+        assert dict(st.pending_first) == snap_pf, "pending_first not restored by releases"
+        assert dict(st.pending_first_bytes) == snap_pf_b, "byte accounting leaked across releases"
+        # Fresh capacity: a brand-new peer is admitted again (no leak).
+        assert srv._hold_friend_request("fr-after-cap", {"text": "fresh",
+                                                         "friendRequest": True})
+        srv._release_pending_first("fr-after-cap")
+        assert "fr-after-cap" not in st.pending_first
+        assert "fr-after-cap" not in st.pending_first_bytes
+    finally:
+        srv._diag = real_diag
+        st.pending_first.clear()
+        st.pending_first.update(snap_pf)
+        st.pending_first_bytes.clear()
+        st.pending_first_bytes.update(snap_pf_b)
+        for pid in [p for p in st.pending_first if p.startswith(("fr-global-", "fr-after-"))]:
+            st.pending_first.pop(pid, None)
+            st.pending_first_bytes.pop(pid, None)
 
 
 if __name__ == "__main__":

@@ -178,6 +178,19 @@ MAX_FRAME_BUF = 512 * 1024   # a peer must send a newline within this many bytes
 # daemon's memory (issue #9076).
 DEFERRED_MAX_MSGS = 64           # max messages held pre-authentication
 DEFERRED_MAX_BYTES = 256 * 1024  # max raw bytes held pre-authentication
+# Post-authentication friend-request holdback: every friend request from a
+# non-confirmed peer is held in pending_first until the user accepts or
+# rejects. A LAN stranger that legally proves ownership of its own cert
+# passes the identity challenge, so without a bound it can queue request
+# messages at will before anyone locally accepts (issue #9076). The hold is
+# HARD-BOUNDED per pending peer AND across the whole daemon: excess messages
+# are dropped (never the kept ones, and never a peer's first held message
+# while the daemon is below the global cap). The global cap stops many
+# strangers, each at their per-peer cap, from multiplying to exhaustion.
+PENDING_FIRST_MAX_MSGS = 32          # max held friend-request msgs per pending peer
+PENDING_FIRST_MAX_BYTES = 128 * 1024  # max held text bytes per pending peer
+PENDING_FIRST_GLOBAL_MAX_MSGS = 4096  # max held msgs across ALL pending peers
+PENDING_FIRST_GLOBAL_MAX_BYTES = 8 * 1024 * 1024  # ditto, by bytes
 MAX_INBOUND_CONNS = 64       # cap concurrent inbound reader threads
 # Server-side TLS handshake deadline. The accept loop must never block in a
 # handshake: an unauthenticated client can complete the TCP connect, then
@@ -308,7 +321,7 @@ _TLS_HANDSHAKE_TIMEOUT = 5.0
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.92"
+VERSION = "1.5.93"
 def _git_version() -> str:
     try:
         import subprocess as _sp
@@ -343,6 +356,14 @@ class State:
         self.conns = {}
         self.pending_sent = {}
         self.pending_first = {}
+        # Byte accounting for pending_first (same pending_lock): pid -> total
+        # text bytes of that peer's held friend-request messages. Kept in
+        # lock-step with pending_first ONLY through the _hold_friend_request /
+        # _release_pending_first helpers so the two dicts can never drift.
+        # The global caps derive counts by summing these (bounded work under
+        # the lock), so a counter leak can never permanently wedge friend
+        # requests. (issue #9076)
+        self.pending_first_bytes = {}
         # Outbound friend-request intents: peers WE have sent a request to and
         # are waiting on. When one of them requests us back, the handshake
         # completes automatically on both sides (mutual auto-accept) without
@@ -1440,8 +1461,7 @@ def _handle_udp_friend_cancel(sock: socket.socket, pkt: dict, addr: str) -> None
     # banner. If the canceller was merely a pending (unconfirmed) request we
     # recorded, remove that record too — but NEVER unfriend a confirmed friend
     # (a confirmed relationship is not retractable by a stray cancel).
-    with STATE.pending_lock:
-        STATE.pending_first.pop(claimed, None)
+    _release_pending_first(claimed)
     _unfriend_if_unconfirmed(claimed)
     _emit({"event": "friend-rejected", "id": claimed, "name": name})
     _diag("udp-friend-cancelled", peer=claimed[:12], name=name)
@@ -2142,6 +2162,75 @@ def _reveal(held, outgoing: bool = False) -> None:
         _emit({"event": "message", "message": m})
 
 
+def _held_msg_bytes(message: dict) -> int:
+    """UTF-8 byte cost used for the pending_first caps (text + attachment
+    metadata; one consistent measure for per-peer and global accounting)."""
+    n = len(str(message.get("text", "")).encode("utf-8"))
+    att = message.get("attachment")
+    if att:
+        try:
+            n += len(json.dumps(att, separators=(",", ":")).encode("utf-8"))
+        except (TypeError, ValueError):
+            pass
+    return n
+
+
+def _hold_friend_request(pid: str, message: dict) -> bool:
+    """Queue one held friend-request message for `pid` under the pending_lock.
+
+    Hard bounds (issue #9076): per pending peer, PENDING_FIRST_MAX_MSGS /
+    PENDING_FIRST_MAX_BYTES; across the daemon, PENDING_FIRST_GLOBAL_MAX_MSGS
+    / PENDING_FIRST_GLOBAL_MAX_BYTES so N strangers each at their per-peer cap
+    cannot multiply to memory exhaustion. Overflow drops ONLY the new message
+    (kept messages are never evicted), and a peer's very first held message is
+    always admitted once the daemon is below the global caps — a legitimate
+    single request always surfaces. Global counts are DERIVED from the live
+    per-peer structures (bounded sum) rather than a running counter, so no pop
+    path can leak an aggregate count and wedge future requests. Returns True
+    if the message was held. Callers must hold no pending_lock.
+    """
+    size = _held_msg_bytes(message)
+    with STATE.pending_lock:
+        queue = STATE.pending_first.get(pid)
+        per_count = len(queue) if queue else 0
+        per_bytes = STATE.pending_first_bytes.get(pid, 0)
+        if queue and (per_count >= PENDING_FIRST_MAX_MSGS
+                      or per_bytes + size > PENDING_FIRST_MAX_BYTES):
+            _diag("inbound-friend-request-dropped", peer=pid[:12],
+                  reason="per-peer-cap", held=per_count,
+                  bytes=per_bytes, size=size)
+            return False
+        glob_count = 0
+        glob_bytes = 0
+        for q in STATE.pending_first.values():
+            glob_count += len(q)
+        for b in STATE.pending_first_bytes.values():
+            glob_bytes += b
+        if glob_count + 1 > PENDING_FIRST_GLOBAL_MAX_MSGS \
+                or glob_bytes + size > PENDING_FIRST_GLOBAL_MAX_BYTES:
+            _diag("inbound-friend-request-dropped", peer=pid[:12],
+                  reason="global-cap", held=glob_count,
+                  bytes=glob_bytes, size=size)
+            return False
+        STATE.pending_first.setdefault(pid, []).append(message)
+        STATE.pending_first_bytes[pid] = per_bytes + size
+        return True
+
+
+def _release_pending_first(pid: str) -> list:
+    """Pop a peer's held friend-request queue AND its byte accounting as one
+    atomic unit, so pending_first and pending_first_bytes can never drift.
+
+    EVERY removal path (accept, reject, UDP cancel) must use this instead of
+    popping pending_first directly — a leaked bytes entry would permanently
+    eat into the per-daemon budget. Returns the held messages. Callers must
+    hold no pending_lock.
+    """
+    with STATE.pending_lock:
+        STATE.pending_first_bytes.pop(pid, None)
+        return STATE.pending_first.pop(pid, [])
+
+
 def _handle_incoming(msg: dict, addr, verified: str = "") -> None:
     """Dispatch an authenticated connection's message.
 
@@ -2404,8 +2493,12 @@ def _handle_incoming(msg: dict, addr, verified: str = "") -> None:
         if not message.get("mid"):
             message["mid"] = secrets.token_hex(8)
         message["held"] = True
-        with STATE.pending_lock:
-            STATE.pending_first.setdefault(pid, []).append(message)
+        # HARD-BOUNDED hold (issue #9076): past the per-peer/global caps the
+        # excess request message is dropped — not surfaced, not held — with a
+        # diagnostic. A friend-request event would surface its content, so a
+        # dropped message emits nothing.
+        if not _hold_friend_request(pid, message):
+            return
         # Emit the request WITH the requester's verified cert fingerprint
         # (pid is the identity `_reader_inbound` cryptographically proved),
         # so the UI can show it and require confirmation it matches what the
@@ -3122,8 +3215,7 @@ def handle_command(cmd: dict) -> None:
         # completes on both sides.
         add_friend(pid, peer["address"] if peer else "", pname, confirmed=True)
         _emit({"event": "friend-accepted", "id": pid, "name": pname})
-        with STATE.pending_lock:
-            held = STATE.pending_first.pop(pid, [])
+        held = _release_pending_first(pid)
         _diag("accepted-friend-request", peer=pid[:12], name=pname, revealed=len(held))
         _reveal(held)
         if not _notify_accept(pid):
@@ -3179,8 +3271,7 @@ def handle_command(cmd: dict) -> None:
         if pid and STATE.udp_sock is not None:
             _send_udp_friend_reject(STATE.udp_sock, pid)
         send_control(pid, "friendReject")
-        with STATE.pending_lock:
-            STATE.pending_first.pop(pid, None)
+        _release_pending_first(pid)
         unfriend(pid)
         _emit({"event": "friend-rejected", "id": pid})
         _diag("rejected-friend-request", peer=pid[:12])

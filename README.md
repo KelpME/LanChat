@@ -435,7 +435,12 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
   identity proof gets dropped rather than growing an unbounded queue. The
   server-side TLS handshake (1.5.92) runs off the accept loop with a 5-second
   deadline, so a client that connects and withholds its ClientHello can no
-  longer stall every new inbound connection.
+  longer stall every new inbound connection. Held friend-request messages from
+  authenticated non-friends (1.5.93) are hard-bounded too — 32 messages /
+  128 KB per pending peer and 4096 / 8 MB across the daemon — so a stranger
+  that legitimately proves its identity cannot grow the pre-acceptance hold
+  without limit, and many strangers cannot multiply per-peer caps into memory
+  exhaustion.
 - **Attachment disk limits** — being a friend does not entitle a peer to fill
   your disk. Accepting a file is gated by a per-file ceiling (4 GiB), an
   aggregate budget across concurrent transfers (8 GiB), and a keep-free floor
