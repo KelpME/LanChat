@@ -647,7 +647,8 @@ Panel {
   property bool showRoomNameDialog: false
   property string newRoomName: ""
   function commitCreateRoom() {
-    var n = roomNameField ? roomNameField.text.trim() : ""
+    var f = roomNameLoader.item
+    var n = f ? f.text.trim() : ""
     if (n !== "") {
       Lanchat.createRoom(n)
       roomListSection.expand()
@@ -750,12 +751,22 @@ Panel {
             font.weight: Font.DemiBold
           }
 
-          TextField {
-            id: roomNameField
+          // #9076: the editable field is only instantiated while the
+          // dialog is visible (it is recreated fresh each open, so it
+          // always starts empty).
+          Loader {
+            id: roomNameLoader
+            active: root.showRoomNameDialog
             width: parent.width
-            placeholderText: "room name"
-            focus: root.showRoomNameDialog
-            onAccepted: root.commitCreateRoom()
+            sourceComponent: Component {
+              TextField {
+                width: parent.width
+                placeholderText: "room name"
+                focus: root.showRoomNameDialog
+                onAccepted: root.commitCreateRoom()
+              }
+            }
+            onLoaded: item.forceActiveFocus()
           }
 
           Row {
@@ -772,8 +783,6 @@ Panel {
             }
           }
         }
-        // Bind the field to the root state while the dialog is open.
-        onVisibleChanged: if (visible) roomNameField.text = ""
       }
 
       // ---- body: peer list + thread -----------------------------------
@@ -1406,6 +1415,9 @@ Panel {
               visibleChatAlert: root.visibleChatAlert
               selectedPeerId: root.selectedPeerId
               isImagePath: root.isImagePath
+              // #9076: the editable field is only instantiated while the
+              // panel window is visible.
+              panelVisible: root.opened
               onSendRequested: root.send()
               onAttachRequested: root.attachAndSend()
               onCancelRequested: root.cancelAttachments()

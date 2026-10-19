@@ -29,6 +29,12 @@ Rectangle {
   property bool visibleChatAlert: false
   property string selectedPeerId: ""
   property var isImagePath: null
+  // #9076: the panel binds this to root.opened. The editable TextField only
+  // exists while the panel window is visible (Loader below), so Qt's
+  // clipboard-change/canPaste path cannot read foreign clipboard text from
+  // a hidden surface. Draft text survives close via `draft`.
+  property bool panelVisible: false
+  property string draft: ""
 
   // Emitted on Send (header button + input onAccepted) — the panel's send()
   // runs with the exact text currently in the field.
@@ -46,13 +52,14 @@ Rectangle {
   signal typingStopped()
 
   // Input accessors — the panel reads/clears the text and focuses the field
-  // without reaching into the child's internal ids.
-  readonly property alias inputText: input.text
+  // without reaching into the child's internal ids. The field lives inside
+  // the visibility-gated Loader, so every accessor guards on the item.
+  readonly property string inputText: inputLoader.item ? inputLoader.item.text : ""
   // Write access goes through this function: the panel cannot assign the
-  // readonly alias from outside (TypeError), and setInputText() lives here
+  // input's text directly, and setInputText() lives here
   // so the clear-on-send path works (whole-panel bench caught this).
-  function setInputText(t) { input.text = t }
-  function focusInput() { input.forceActiveFocus() }
+  function setInputText(t) { if (inputLoader.item) inputLoader.item.text = t }
+  function focusInput() { if (inputLoader.item) inputLoader.item.forceActiveFocus() }
 
   width: parent.width
   // Grows to fit the staged-attachment preview (header + list)
@@ -218,74 +225,85 @@ Rectangle {
         enabled: composeBox.selectedPeer !== null || composeBox.inRoom
       }
 
-      TextField {
-        id: input
+      // #9076: the editable field is only instantiated while the panel
+      // window is visible (panelVisible <- root.opened), so a hidden panel
+      // cannot run Qt's clipboard-change/canPaste retrieval on foreign
+      // clipboard text. Draft text survives close via composeBox.draft.
+      Loader {
+        id: inputLoader
+        active: composeBox.panelVisible
         anchors.left: attachBtn.right
         anchors.leftMargin: Style.spacing.sm
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.topMargin: Style.spacing.md
-        anchors.bottomMargin: Style.spacing.md
-        placeholderText: composeBox.inRoom
-          ? "Message #" + (composeBox.selectedRoom ? composeBox.selectedRoom.name : "room") + "…"
-          : (composeBox.selectedPeer
-            ? "Message " + composeBox.selectedPeer.name + "…"
-            : "Select a peer to chat")
-        enabled: composeBox.selectedPeer !== null || composeBox.inRoom
-        onAccepted: composeBox.sendRequested()
-        onTextChanged: {
-          if (composeBox.selectedPeerId && text.length > 0) {
-            Lanchat.sendTyping(composeBox.selectedPeerId)
-            composeBox.typingStarted()
-          } else {
-            if (composeBox.selectedPeerId) Lanchat.sendTypingStopped(composeBox.selectedPeerId)
-            composeBox.typingStopped()
-          }
-        }
-        onEditingFinished: {
-          if (composeBox.selectedPeerId) Lanchat.sendTypingStopped(composeBox.selectedPeerId)
-          composeBox.typingStopped()
-        }
-
-        // ---- in-input chat alert (warnings, save results, notices)
-        // A temporary overlay INSIDE the input box: shows the
-        // alert text for a few seconds (chatAlertTimer on the
-        // singleton auto-clears it), then the placeholder
-        // returns. Layout never changes — nothing can be pushed
-        // off-screen. Warnings tint the border urgent; non-error
-        // alerts (save results, notices) keep the normal border.
-        Rectangle {
-          id: inputAlert
-          anchors.fill: parent
-          visible: composeBox.visibleChatAlert
-          radius: Style.cornerRadius
-          color: Color.popups.background
-          border.width: 1
-          border.color: Lanchat.chatAlertIsError ? Color.urgent : Style.normalBorderColor
-
-          Text {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: Style.space(10)
-            anchors.rightMargin: Style.space(10)
-            text: Lanchat.chatAlert
-            color: Lanchat.chatAlertIsError ? Color.urgent : Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-          }
-
-          MouseArea {
+        sourceComponent: Component {
+          TextField {
+            id: input
             anchors.fill: parent
-            onClicked: {
-              // Clicking dismisses immediately and focuses the
-              // input so typing is never blocked.
-              Lanchat.chatAlert = ""
-              input.forceActiveFocus()
+            placeholderText: composeBox.inRoom
+              ? "Message #" + (composeBox.selectedRoom ? composeBox.selectedRoom.name : "room") + "…"
+              : (composeBox.selectedPeer
+                ? "Message " + composeBox.selectedPeer.name + "…"
+                : "Select a peer to chat")
+            enabled: composeBox.selectedPeer !== null || composeBox.inRoom
+            onAccepted: composeBox.sendRequested()
+            onTextChanged: {
+              composeBox.draft = text
+              if (composeBox.selectedPeerId && text.length > 0) {
+                Lanchat.sendTyping(composeBox.selectedPeerId)
+                composeBox.typingStarted()
+              } else {
+                if (composeBox.selectedPeerId) Lanchat.sendTypingStopped(composeBox.selectedPeerId)
+                composeBox.typingStopped()
+              }
+            }
+            onEditingFinished: {
+              if (composeBox.selectedPeerId) Lanchat.sendTypingStopped(composeBox.selectedPeerId)
+              composeBox.typingStopped()
+            }
+
+            // ---- in-input chat alert (warnings, save results, notices)
+            // A temporary overlay INSIDE the input box: shows the
+            // alert text for a few seconds (chatAlertTimer on the
+            // singleton auto-clears it), then the placeholder
+            // returns. Layout never changes — nothing can be pushed
+            // off-screen. Warnings tint the border urgent; non-error
+            // alerts (save results, notices) keep the normal border.
+            Rectangle {
+              id: inputAlert
+              anchors.fill: parent
+              visible: composeBox.visibleChatAlert
+              radius: Style.cornerRadius
+              color: Color.popups.background
+              border.width: 1
+              border.color: Lanchat.chatAlertIsError ? Color.urgent : Style.normalBorderColor
+
+              Text {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(10)
+                text: Lanchat.chatAlert
+                color: Lanchat.chatAlertIsError ? Color.urgent : Color.popups.text
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                  // Clicking dismisses immediately and focuses the
+                  // input so typing is never blocked.
+                  Lanchat.chatAlert = ""
+                  input.forceActiveFocus()
+                }
+              }
             }
           }
         }
+        onLoaded: item.text = composeBox.draft
       }
     }
   }

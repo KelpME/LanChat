@@ -35,6 +35,9 @@ Item {
     visibleChatAlert: false
     selectedPeerId: "peer-1"
     isImagePath: function(p) { return p.endsWith(".png") }
+    // The bench models an OPEN panel — the visibility gate (#9076) must be
+    // on for the field to exist.
+    panelVisible: true
 
     onAttachRequested: benchRoot.attachCount++
     onSendRequested: benchRoot.sendCount++
@@ -123,7 +126,19 @@ Item {
         if (!tf.activeFocus) return fail("focusInput did not focus the input")
         console.log("BENCH-OK-INPUT-ACCESS")
 
-        Qt.exit(0)
+        // 6) #9076 draft survival: closing (panelVisible=false) destroys the
+        // field; reopening restores the draft text.
+        tf.text = "draft survivor"
+        composeBox.panelVisible = false
+        Qt.callLater(function() {
+          if (composeBox.inputText !== "") return fail("field alive while panelVisible=false")
+          composeBox.panelVisible = true
+          Qt.callLater(function() {
+            if (composeBox.inputText !== "draft survivor") return fail("draft lost: " + composeBox.inputText)
+            console.log("BENCH-OK-DRAFT-SURVIVES")
+            Qt.exit(0)
+          })
+        })
       })
     })
   }
