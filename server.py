@@ -321,7 +321,7 @@ _TLS_HANDSHAKE_TIMEOUT = 5.0
 #   (accent when peers are online / muted at zero / urgent when the daemon is
 #   down); the firewall alert stays pinned below the header.
 
-VERSION = "1.5.94"
+VERSION = "1.5.95"
 def _git_version() -> str:
     try:
         import subprocess as _sp

@@ -200,6 +200,8 @@ Item {
     // The expanded body height flows through Flickable contentHeight, which
     // updates on the NEXT layout pass — expand here, verify across frames.
     var st = settingsObj
+    // #9076: the body Loader also needs the panel-visible gate on.
+    st.panelVisible = true
     setH0 = st.height
     st.expanded = true
     Qt.callLater(function() { verifyExpanded(st) })
@@ -227,6 +229,23 @@ Item {
     if (st.height > setH0 + 0.5) return fail("settings collapse did not restore: " + setH0 + " -> " + st.height)
     console.log(p + "-OK settings expand/collapse cycle completed (collapsed height restored: "
                 + Math.round(st.height) + ")")
+
+    // #9076: collapsed => body Loader inactive, editable fields destroyed.
+    var col = st.children.length > 0 ? st.children[0] : null
+    var body = col && col.children.length > 1 ? col.children[1] : null
+    var loader = null
+    if (body) {
+      var scopes = [body.contentItem, body]
+      for (var s = 0; s < scopes.length && !loader; s++) {
+        var sc = scopes[s]
+        if (!sc) continue
+        for (var i = 0; i < sc.children.length; i++)
+          if (sc.children[i].toString().indexOf("QQuickLoader") !== -1) { loader = sc.children[i]; break }
+      }
+    }
+    if (!loader) return fail("settings body Loader not found")
+    if (loader.item !== null) return fail("settings body loader item not null while collapsed")
+    console.log(p + "-OK settings body loader item null when collapsed (fields destroyed)")
 
     // ---- assert 3: interaction paths
     try {

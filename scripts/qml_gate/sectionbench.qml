@@ -34,6 +34,12 @@ Item {
     console.log(p + "-FAIL " + msg)
     Qt.exit(1)
   }
+  function countTextFields(node) {
+    var n = 0
+    if (node.toString().indexOf("TextField") !== -1) n++
+    for (var i = 0; i < node.children.length; i++) n += countTextFields(node.children[i])
+    return n
+  }
 
   property url panelUrl: Qt.resolvedUrl("Panel.qml")
   property var panelComp: null
@@ -118,6 +124,8 @@ Item {
     if (!pl) return fail("PeerList instance not found in tree")
     if (!rs) return fail("RoomListSection instance not found in tree")
     if (!st) return fail("SettingsPanel instance not found in tree")
+    // #9076: the settings body Loader is gated on panelVisible too.
+    st.panelVisible = true
 
     // Panel init is async (multi-frame); let geometry settle before
     // the first height read, or listClip reports 0 spuriously.
@@ -275,6 +283,23 @@ Item {
     if (pl.expanded !== false) return fail("A3: settings open must collapse peers")
     if (rs.expanded !== false) return fail("A3: settings open must collapse rooms")
     console.log(p + "-OK A3 settings header click collapses peers AND rooms")
+
+    // A3b: #9076 — expanded+visible settings must have its TextFields live.
+    var stBody = st.children.length > 0 && st.children[0].children.length > 1 ? st.children[0].children[1] : null
+    var stLoader = null
+    if (stBody) {
+      var scopes = [stBody.contentItem, stBody]
+      for (var s = 0; s < scopes.length && !stLoader; s++) {
+        var sc = scopes[s]
+        if (!sc) continue
+        for (var i = 0; i < sc.children.length; i++)
+          if (sc.children[i].toString().indexOf("QQuickLoader") !== -1) { stLoader = sc.children[i]; break }
+      }
+    }
+    if (!stLoader || !stLoader.item) return fail("A3b: settings body loader item missing while expanded+visible")
+    var tf = benchRoot.countTextFields(stLoader.item)
+    if (tf <= 0) return fail("A3b: no TextFields instantiated while settings expanded+visible")
+    console.log(p + "-OK A3b settings fields instantiated while expanded+visible (" + tf + " TextFields)")
 
     // A4: peers + rooms can be open together
     stH.clicked(null) // close settings again

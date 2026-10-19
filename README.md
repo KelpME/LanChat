@@ -441,11 +441,11 @@ curl -k 'https://localhost:4814/peers?token=<TOKEN>'
   that legitimately proves its identity cannot grow the pre-acceptance hold
   without limit, and many strangers cannot multiply per-peer caps into memory
   exhaustion.
-- **Hidden UI holds no editable fields** (1.5.94, issue #9076) — the compose
-  input and the room-name field are only instantiated while their surface
-  (panel / room-name dialog) is visible, so Qt's automatic
-  clipboard-change/canPaste path cannot retrieve foreign clipboard text from
-  a hidden UI.
+- **Hidden UI holds no editable fields** (1.5.94, issue #9076) — ALL editable
+  fields (compose input, room-name field, and every settings-panel field) are
+  only instantiated while their surface (panel / room-name dialog) is visible,
+  so Qt's automatic clipboard-change/canPaste path cannot retrieve foreign
+  clipboard text from a hidden UI.
 - **Attachment disk limits** — being a friend does not entitle a peer to fill
   your disk. Accepting a file is gated by a per-file ceiling (4 GiB), an
   aggregate budget across concurrent transfers (8 GiB), and a keep-free floor

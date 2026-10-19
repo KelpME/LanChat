@@ -865,6 +865,9 @@ Panel {
                 anchors.bottom: parent.bottom
 
                 expanded: false
+                // #9076: the settings body's editable fields are only
+                // instantiated while the panel window is visible.
+                panelVisible: root.opened
                 alertStackBottom: peerListPanel.alertStackBottom
                 hostHeight: parent.height
                 animateSections: root.animateSections

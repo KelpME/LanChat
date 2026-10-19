@@ -30,6 +30,12 @@ Item {
   }
 
   property bool expanded: false
+  // True only while the host panel window is actually shown. The body's
+  // editable fields (7 TextFields) are instantiated inside a Loader gated on
+  // expanded && panelVisible — Qt's clipboard-change/canPaste tracking runs
+  // on instantiated editable items even when visible:false, so the fields
+  // must not exist while the panel window is hidden (#9076).
+  property bool panelVisible: false
   property bool diagExpanded: false
   signal collapseRoomsRequested()
   signal collapsePeersRequested()
@@ -204,21 +210,33 @@ Item {
               Flickable {
                 id: settingsBody
                 width: parent.width
-                height: Math.min(bodyCol.implicitHeight,
+                height: Math.min(bodyLoader.item ? bodyLoader.item.implicitHeight : 0,
                                  Math.min(settingsPanel.hostHeight * 0.8,
                                           Math.max(0, settingsPanel.hostHeight - settingsPanel.alertStackBottom - settingsHeader.height - Style.space(12))))
                 visible: settingsPanel.expanded
                 contentWidth: width
-                contentHeight: bodyCol.implicitHeight
+                contentHeight: bodyLoader.item ? bodyLoader.item.implicitHeight : 0
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 interactive: contentHeight > height
 
+                // The body's editable fields may only exist while the panel
+                // window is shown AND the body is expanded (see panelVisible).
+                Loader {
+                  id: bodyLoader
+                  anchors.top: parent.top
+                  width: parent.width
+                  active: settingsPanel.expanded && settingsPanel.panelVisible
+                  sourceComponent: bodyComp
+                }
+              }
+
+              Component {
+                id: bodyComp
                 Column {
                   id: bodyCol
                   width: parent.width
                   spacing: Style.spacing.xs
-                  anchors.top: parent.top
 
                 // ---- Identity ----
                 Item {
