@@ -232,6 +232,11 @@ Rectangle {
       Loader {
         id: inputLoader
         active: composeBox.panelVisible
+        // #9076: the inner TextField anchors.fill:s this Loader, so the
+        // Loader must carry an explicit height — an unbound Loader height
+        // reads 0 (the field's height would derive from the Loader, and
+        // the Loader's from the field) and the input renders 0px tall.
+        height: Style.space(30)
         anchors.left: attachBtn.right
         anchors.leftMargin: Style.spacing.sm
         anchors.right: parent.right
