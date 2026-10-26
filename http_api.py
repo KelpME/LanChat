@@ -17,6 +17,7 @@ Ownership: the module-private _http_server/_http_server_thread globals.
 import http.server
 import json
 import os
+import ssl
 import threading
 import time
 import urllib.parse
@@ -28,6 +29,57 @@ STATE = None
 
 # /attachment streams in this chunk size instead of buffering whole files.
 ATT_HTTP_CHUNK = 64 * 1024
+
+# Per-connection TLS handshake deadline. The handshake runs on the
+# serve_forever thread (in get_request), so an unauthenticated local
+# connection that never completes the handshake must not be able to stall
+# new API connections or srv.shutdown() for longer than this.
+HANDSHAKE_TIMEOUT_S = 5.0
+
+
+class _TlsHTTPServer(http.server.ThreadingHTTPServer):
+    """ThreadingHTTPServer that TLS-wraps each accepted connection instead of
+    the listening socket.
+
+    Wrapping the LISTENING socket (the old approach) made accept() perform a
+    synchronous, deadline-less handshake on the serve_forever thread: any
+    local UID could hold a raw TCP connection open and block every new API
+    connection — and even shutdown — before any handler ran or the token was
+    checked. Here the handshake happens per-connection with a hard timeout,
+    so a stalled client costs at most HANDSHAKE_TIMEOUT_S; a failed/garbage
+    handshake raises OSError, which _handle_request_noblock swallows and the
+    accept loop stays alive.
+    """
+
+    def __init__(self, address, handler, tls_ctx):
+        # Capture the context at construction time (in _start_http) rather
+        # than importing `server` inside get_request: get_request runs on the
+        # serve_forever thread and http_api's ghost-module pattern keeps
+        # `import server` deferred to function bodies.
+        self._tls_ctx = tls_ctx
+        super().__init__(address, handler)
+
+    def get_request(self):
+        conn, addr = self.socket.accept()
+        try:
+            # Bound the handshake, not just the connect: a client that
+            # connects and then sends nothing is the attack this class exists
+            # to neutralize.
+            conn.settimeout(HANDSHAKE_TIMEOUT_S)
+            tls = self._tls_ctx.wrap_socket(conn, server_side=True)
+        except (OSError, ssl.SSLError):
+            # SSLError subclasses OSError; both mean the client never became
+            # a valid TLS peer. Drop it and let _handle_request_noblock's
+            # get_request OSError path keep the accept loop alive.
+            try:
+                conn.close()
+            except OSError:
+                pass
+            raise OSError("tls handshake failed or timed out")
+        # The timeout was only for the handshake; handlers keep the old
+        # no-timeout I/O behavior.
+        tls.settimeout(None)
+        return tls, addr
 
 
 def init(state):
@@ -211,8 +263,11 @@ def _start_http() -> bool:
     last_err = None
     for attempt in range(5):
         try:
-            srv = http.server.ThreadingHTTPServer((server.http_bind(), server.http_port()), _ApiHandler)
-            srv.socket = server.ensure_tls().wrap_socket(srv.socket, server_side=True)
+            # Per-connection TLS: _TlsHTTPServer wraps each accepted socket
+            # (with a handshake deadline) instead of the listening socket, so
+            # an unauthenticated local connection cannot stall the accept
+            # loop before dispatch/token check.
+            srv = _TlsHTTPServer((server.http_bind(), server.http_port()), _ApiHandler, server.ensure_tls())
             _http_server = srv
             _http_server_thread = threading.Thread(target=srv.serve_forever, daemon=True)
             _http_server_thread.start()
