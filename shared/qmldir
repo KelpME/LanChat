@@ -8,3 +8,5 @@ SettingsPanel 1.0 SettingsPanel.qml
 ChatThread 1.0 ChatThread.qml
 RoomView 1.0 RoomView.qml
 ComposeBox 1.0 ComposeBox.qml
+MessageBubble 1.0 MessageBubble.qml
+TurnDivider 1.0 TurnDivider.qml
