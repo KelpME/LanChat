@@ -14,6 +14,10 @@ Verified here:
     slack),
   - a connection sending garbage TLS bytes is dropped and the server keeps
     serving,
+  - a client that completes the handshake then sends nothing is dropped and
+    its handler thread freed within REQUEST_TIMEOUT_S,
+  - connections beyond MAX_WORKERS are refused without spawning another
+    handler thread,
   - _stop_http()/srv.shutdown() completes within HANDSHAKE_TIMEOUT_S + slack
     while the stalled connection is still open.
 
@@ -126,7 +130,93 @@ def main():
         finally:
             stalled.close()
 
-        # 3. shutdown() completes while the stalled connection is open — the
+        # 3. Post-handshake stalled client releases its thread within
+        # REQUEST_TIMEOUT_S. Complete the TLS handshake, then send NOTHING: the
+        # handler blocks on the request read, and the socket timeout must drop
+        # it and free the worker. REQUEST_TIMEOUT_S is shrunk here so the suite
+        # stays fast — the mechanism (a bounded read deadline) is what's tested.
+        orig_rto = http_api.REQUEST_TIMEOUT_S
+        http_api.REQUEST_TIMEOUT_S = 2.0
+        http_api._active_workers = 0
+        try:
+            stall = socket.create_connection(("127.0.0.1", port), timeout=5)
+            stalled_tls = _client_ctx().wrap_socket(stall)  # handshake done
+            try:
+                stalled_tls.settimeout(5)
+                t0 = time.time()
+                deadline = http_api.REQUEST_TIMEOUT_S + 5.0
+                while http_api._active_workers > 0 and time.time() - t0 < deadline:
+                    time.sleep(0.1)
+                dt = time.time() - t0
+                assert http_api._active_workers == 0, (
+                    "worker not released after post-handshake stall: %d after %.2fs"
+                    % (http_api._active_workers, dt))
+                assert dt < http_api.REQUEST_TIMEOUT_S + 3.0, (
+                    "post-handshake thread released too late (%.2fs)" % dt)
+                print("OK  post-handshake stalled client released its thread (%.2fs)" % dt)
+            finally:
+                try:
+                    stalled_tls.close()
+                except OSError:
+                    pass
+                try:
+                    stall.close()
+                except OSError:
+                    pass
+        finally:
+            http_api.REQUEST_TIMEOUT_S = orig_rto
+            http_api._active_workers = 0
+
+        # 4. Worker cap refuses connections beyond MAX_WORKERS. Open MAX_WORKERS
+        # completed-but-idle TLS connections (each holds a handler thread), then
+        # assert the next connection is refused without spawning another thread.
+        orig_max = http_api.MAX_WORKERS
+        http_api.MAX_WORKERS = 4
+        http_api._active_workers = 0
+        held = []
+        try:
+            for _ in range(http_api.MAX_WORKERS):
+                s = socket.create_connection(("127.0.0.1", port), timeout=5)
+                t = _client_ctx().wrap_socket(s)
+                t.settimeout(5)
+                held.append(t)
+            time.sleep(0.3)  # let the handler threads register
+            assert http_api._active_workers == http_api.MAX_WORKERS, (
+                "expected %d active workers, got %d"
+                % (http_api.MAX_WORKERS, http_api._active_workers))
+            extra = None
+            refused = False
+            try:
+                extra = socket.create_connection(("127.0.0.1", port), timeout=5)
+                extra.settimeout(3)
+                _client_ctx().wrap_socket(extra)  # refused: server closes it
+                # If the handshake unexpectedly succeeded, the server kept it —
+                # send and expect the connection to be dropped.
+                extra.sendall(b"GET /health HTTP/1.0\r\n\r\n")
+                if not extra.recv(16):
+                    refused = True
+            except (OSError, ssl.SSLError, socket.timeout):
+                refused = True
+            finally:
+                if extra is not None:
+                    try:
+                        extra.close()
+                    except OSError:
+                        pass
+            assert refused, "connection beyond MAX_WORKERS was not refused"
+            assert http_api._active_workers <= http_api.MAX_WORKERS, (
+                "worker cap exceeded: %d active" % http_api._active_workers)
+            print("OK  worker cap refused connection beyond MAX_WORKERS")
+        finally:
+            for t in held:
+                try:
+                    t.close()
+                except OSError:
+                    pass
+            http_api.MAX_WORKERS = orig_max
+            http_api._active_workers = 0
+
+        # 5. shutdown() completes while the stalled connection is open — the
         # handshake deadline bounds the accept loop, and serve_forever's 0.5s
         # poll interval observes the shutdown flag right after.
         http_api._http_server = srv

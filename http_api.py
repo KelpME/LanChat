@@ -18,6 +18,7 @@ import http.server
 import json
 import os
 import ssl
+import sys
 import threading
 import time
 import urllib.parse
@@ -35,6 +36,23 @@ ATT_HTTP_CHUNK = 64 * 1024
 # connection that never completes the handshake must not be able to stall
 # new API connections or srv.shutdown() for longer than this.
 HANDSHAKE_TIMEOUT_S = 5.0
+
+# Per-connection request-read deadline, applied to the TLS socket AFTER the
+# handshake. A client that completes TLS but then withholds HTTP data (the
+# post-handshake stall) must not retain its handler thread indefinitely:
+# BaseHTTPRequestHandler.handle_one_request catches the resulting
+# socket.timeout, sets close_connection, and frees the thread. Generous for a
+# local/loopback API with short requests — a real request completes far faster.
+REQUEST_TIMEOUT_S = 15.0
+
+# Cap on concurrent handler threads. ThreadingHTTPServer spawns one thread per
+# connection with no limit, so a flood of completed-but-idle TLS connections
+# (each held for REQUEST_TIMEOUT_S) could still exhaust the daemon's
+# threads/sockets — fatal when the API is bound to a non-loopback address.
+# get_request refuses connections beyond this without spawning a handler.
+MAX_WORKERS = 64
+_active_workers = 0
+_worker_lock = threading.Lock()
 
 
 class _TlsHTTPServer(http.server.ThreadingHTTPServer):
@@ -60,7 +78,19 @@ class _TlsHTTPServer(http.server.ThreadingHTTPServer):
         super().__init__(address, handler)
 
     def get_request(self):
+        global _active_workers
         conn, addr = self.socket.accept()
+        # Bound concurrent handler threads BEFORE any per-connection work: a
+        # flood of completed-but-idle TLS clients (each held for
+        # REQUEST_TIMEOUT_S) cannot exhaust the daemon's threads/sockets.
+        with _worker_lock:
+            if _active_workers >= MAX_WORKERS:
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+                raise OSError("worker cap reached")
+            _active_workers += 1
         try:
             # Bound the handshake, not just the connect: a client that
             # connects and then sends nothing is the attack this class exists
@@ -69,17 +99,43 @@ class _TlsHTTPServer(http.server.ThreadingHTTPServer):
             tls = self._tls_ctx.wrap_socket(conn, server_side=True)
         except (OSError, ssl.SSLError):
             # SSLError subclasses OSError; both mean the client never became
-            # a valid TLS peer. Drop it and let _handle_request_noblock's
-            # get_request OSError path keep the accept loop alive.
+            # a valid TLS peer. Release the reserved worker slot, drop it, and
+            # let _handle_request_noblock's get_request OSError path keep the
+            # accept loop alive.
+            with _worker_lock:
+                _active_workers -= 1
             try:
                 conn.close()
             except OSError:
                 pass
             raise OSError("tls handshake failed or timed out")
-        # The timeout was only for the handshake; handlers keep the old
-        # no-timeout I/O behavior.
-        tls.settimeout(None)
+        # Bound the request-read path too: keep the TLS socket on
+        # REQUEST_TIMEOUT_S so a client that completes the handshake then
+        # withholds HTTP data is dropped by handle_one_request's own
+        # socket.timeout handling, freeing its thread (was settimeout(None) —
+        # unbounded, the round-3 reviewer finding).
+        tls.settimeout(REQUEST_TIMEOUT_S)
         return tls, addr
+
+    def process_request_thread(self, request, client_address):
+        global _active_workers
+        # Release the worker slot this connection reserved in get_request once
+        # its handler thread is done (success or failure), so the cap tracks
+        # live handlers, not just accepted connections.
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with _worker_lock:
+                _active_workers -= 1
+
+    def handle_error(self, request, client_address):
+        # A client that disconnects mid-read (or while idle) surfaces here as
+        # ConnectionResetError/BrokenPipeError — normal teardown noise, not a
+        # server fault. Swallow those quietly; anything else still reports.
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def init(state):
