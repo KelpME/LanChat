@@ -17,6 +17,7 @@ Ownership: the module-private _http_server/_http_server_thread globals.
 import http.server
 import json
 import os
+import socket
 import ssl
 import sys
 import threading
@@ -37,11 +38,15 @@ ATT_HTTP_CHUNK = 64 * 1024
 # new API connections or srv.shutdown() for longer than this.
 HANDSHAKE_TIMEOUT_S = 5.0
 
-# Per-connection request-read deadline, applied to the TLS socket AFTER the
-# handshake. A client that completes TLS but then withholds HTTP data (the
-# post-handshake stall) must not retain its handler thread indefinitely:
-# BaseHTTPRequestHandler.handle_one_request catches the resulting
-# socket.timeout, sets close_connection, and frees the thread. Generous for a
+# Total per-request deadline (wall clock, monotonic). A client that completes
+# TLS but then withholds or TRICKLES HTTP data (the post-handshake stall) must
+# not retain its handler thread indefinitely. A plain per-operation socket
+# timeout cannot stop a trickler: each recv returns just before it fires, so
+# the read never times out and the thread — and its worker slot — is held for
+# as long as the client keeps poking. _RequestReader enforces THIS value as a
+# single deadline across the whole request; handle_one_request turns the
+# resulting socket.timeout into a connection close, freeing the thread within
+# REQUEST_TIMEOUT_S of the request starting to read. Generous for a
 # local/loopback API with short requests — a real request completes far faster.
 REQUEST_TIMEOUT_S = 15.0
 
@@ -109,11 +114,13 @@ class _TlsHTTPServer(http.server.ThreadingHTTPServer):
             except OSError:
                 pass
             raise OSError("tls handshake failed or timed out")
-        # Bound the request-read path too: keep the TLS socket on
-        # REQUEST_TIMEOUT_S so a client that completes the handshake then
-        # withholds HTTP data is dropped by handle_one_request's own
-        # socket.timeout handling, freeing its thread (was settimeout(None) —
-        # unbounded, the round-3 reviewer finding).
+        # Bound the request-read path: the per-op socket timeout is a fallback
+        # floor, but the TOTAL request deadline is enforced by _RequestReader
+        # (see _ApiHandler.setup) — a per-op timeout alone cannot stop a client
+        # that trickles bytes just under it and so never times out (the round-4
+        # reviewer finding: the 15s socket timeout is not a total request
+        # deadline). Keep the per-op timeout so any read outside the reader is
+        # still bounded.
         tls.settimeout(REQUEST_TIMEOUT_S)
         return tls, addr
 
@@ -148,9 +155,119 @@ _http_server = None
 _http_server_thread = None
 
 
+class _RequestReader:
+    """Deadline-enforcing replacement for the handler's ``rfile``.
+
+    ``BaseHTTPRequestHandler`` reads the request line, headers, and body
+    through ``self.rfile`` in unbounded blocking calls. A per-operation socket
+    timeout (REQUEST_TIMEOUT_S, set on the TLS socket in get_request) bounds
+    each *individual* recv — but a client that trickles bytes just under it
+    keeps every read alive forever and holds its handler thread (and thus a
+    worker slot) indefinitely. That is the post-handshake stall the per-op
+    timeout alone could not stop.
+
+    This reader wraps the socket and enforces ONE monotonic wall-clock deadline
+    over the WHOLE request: before every blocking read it sets the socket
+    timeout to the time remaining until the deadline, so a trickle that clears
+    each recv still converges on the deadline and is dropped there. When the
+    deadline passes it raises socket.timeout, which handle_one_request catches
+    and turns into a connection close — freeing the thread and its worker slot
+    within REQUEST_TIMEOUT_S of the request starting to read, no matter how
+    slowly the client sends.
+    """
+
+    _MAXLINE = 65536  # guard a single line (matches BaseHTTPRequestHandler)
+
+    def __init__(self, sock, deadline):
+        # deadline: a zero-arg callable returning this request's monotonic
+        # deadline (time.monotonic()), re-armed per request in handle_one_request.
+        self._sock = sock
+        self._deadline = deadline
+        self._buf = b""
+
+    def _remaining(self):
+        """Set the socket timeout to the time left until the deadline, or raise
+        if it has already passed. Called before every blocking recv."""
+        rem = self._deadline() - time.monotonic()
+        if rem <= 0:
+            raise socket.timeout("request deadline exceeded")
+        self._sock.settimeout(rem)
+
+    def readline(self, maxlen=_MAXLINE):
+        # Return one line (including its trailing newline) up to maxlen bytes,
+        # reading more from the socket as needed. A line longer than maxlen is
+        # returned truncated so parse_request can reject it, exactly as the
+        # stdlib makefile reader would.
+        while True:
+            nl = self._buf.find(b"\n")
+            if nl != -1:
+                if nl + 1 > maxlen:
+                    line = self._buf[:maxlen]
+                    self._buf = self._buf[maxlen:]
+                    return line
+                line = self._buf[: nl + 1]
+                self._buf = self._buf[nl + 1:]
+                return line
+            self._remaining()
+            try:
+                chunk = self._sock.recv(4096)
+            except socket.timeout:
+                raise
+            if not chunk:
+                break
+            self._buf += chunk
+        return self._buf[:maxlen]
+
+    def read(self, n=-1):
+        # Read up to n bytes (or all remaining data until EOF/deadline when n <
+        # 0), draining buffered bytes first so a body that arrived in the same
+        # recv as the headers is served from the buffer, not re-read from the
+        # (already-drained) socket.
+        out = bytearray()
+        while n < 0 or len(out) < n:
+            if self._buf:
+                take = self._buf if n < 0 else self._buf[: n - len(out)]
+                out += take
+                self._buf = self._buf[len(take):]
+                continue
+            self._remaining()
+            try:
+                chunk = self._sock.recv(4096 if n < 0 else min(n - len(out), 4096))
+            except socket.timeout:
+                raise
+            if not chunk:
+                break
+            out += chunk
+        return bytes(out)
+
+    def close(self):
+        # finish() closes rfile; nothing to release — the socket is torn down by
+        # the server, not by this reader.
+        pass
+
+
 class _ApiHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):  # silence request logging
         pass
+
+    def setup(self):
+        # Wrap rfile in a deadline-enforcing reader instead of the plain
+        # makefile reader, so every blocking request read (line, headers, body)
+        # is bounded by a single wall-clock deadline. setup() runs once per
+        # connection; the per-request deadline is re-armed in handle_one_request.
+        self.connection = self.request
+        self.rfile = _RequestReader(self.request, lambda: self._request_deadline)
+        self.wfile = self.request.makefile("wb", 0)
+        self.close_connection = True
+
+    def handle_one_request(self):
+        # Arm a fresh total-request deadline before any blocking read, then let
+        # the stdlib parse/dispatch run through the deadline-aware rfile. A slow
+        # (trickled) request — headers or body — is dropped within
+        # REQUEST_TIMEOUT_S of starting to read, releasing its worker slot.
+        self._request_deadline = time.monotonic() + REQUEST_TIMEOUT_S
+        return super().handle_one_request()
+
 
     # --- rate limiting ------------------------------------------------------
     # Class-level shared state: a simple sliding-window throttle on outbound

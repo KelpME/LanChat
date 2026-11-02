@@ -16,6 +16,10 @@ Verified here:
     serving,
   - a client that completes the handshake then sends nothing is dropped and
     its handler thread freed within REQUEST_TIMEOUT_S,
+  - a client that completes the handshake then TRICKLES an unauthenticated
+    POST body just under the per-op timeout (the round-4 finding: a per-op
+    socket timeout is not a total request deadline) is dropped within
+    REQUEST_TIMEOUT_S of the request starting to read, not held indefinitely,
   - connections beyond MAX_WORKERS are refused without spawning another
     handler thread,
   - _stop_http()/srv.shutdown() completes within HANDSHAKE_TIMEOUT_S + slack
@@ -167,7 +171,65 @@ def main():
             http_api.REQUEST_TIMEOUT_S = orig_rto
             http_api._active_workers = 0
 
-        # 4. Worker cap refuses connections beyond MAX_WORKERS. Open MAX_WORKERS
+        # 4. Post-handshake TRICKLE — the round-4 reviewer finding: a per-op
+        # socket timeout is NOT a total request deadline. A client that
+        # completes TLS then trickles an unauthenticated POST body just under
+        # that interval keeps every recv alive and held its worker slot (and so
+        # could hold all slots up to the cap) indefinitely. It must now be
+        # dropped within REQUEST_TIMEOUT_S of the request starting to read,
+        # freeing its worker — no matter how slowly it sends. Shrunk here so the
+        # suite stays fast; the mechanism (a total request deadline) is tested.
+        orig_rto = http_api.REQUEST_TIMEOUT_S
+        http_api.REQUEST_TIMEOUT_S = 2.0
+        http_api._active_workers = 0
+        trickler = None
+        try:
+            s = socket.create_connection(("127.0.0.1", port), timeout=5)
+            trickler = _client_ctx().wrap_socket(s)
+            trickler.settimeout(5)
+            time.sleep(0.3)  # let the handler register a worker
+            assert http_api._active_workers >= 1, (
+                "worker not registered after handshake: %d" % http_api._active_workers)
+            # Declare a body we only ever trickle toward, with a bad token: the
+            # unauthenticated body read is exactly what used to hang.
+            trickler.sendall(
+                b"POST /send HTTP/1.1\r\n"
+                + b"Host: localhost\r\n"
+                + b"Authorization: Bearer ***\r\n"
+                + b"Content-Length: 64\r\n"
+                + b"Content-Type: application/json\r\n\r\n"
+            )
+            t0 = time.time()
+            max_wait = http_api.REQUEST_TIMEOUT_S + 2.0
+            # Trickle every 0.25s — well under the per-op timeout — so only the
+            # total deadline (not silence, which test 3 covers) can release it.
+            while http_api._active_workers > 0 and time.time() - t0 < max_wait:
+                try:
+                    trickler.sendall(b"x")
+                except OSError:
+                    break  # server closed the connection at the deadline
+                time.sleep(0.25)
+            dt = time.time() - t0
+            assert http_api._active_workers == 0, (
+                "trickled unauthenticated POST body held the worker past the "
+                "deadline: still %d after %.2fs" % (http_api._active_workers, dt))
+            assert dt <= http_api.REQUEST_TIMEOUT_S + 1.5, (
+                "trickler released too late (%.2fs)" % dt)
+            print("OK  trickled unauthenticated POST body dropped within the request deadline (%.2fs)" % dt)
+            # The API keeps serving after dropping a trickler.
+            code = _authed_post("127.0.0.1", port)
+            assert code == 404, "expected 404 after a trickler, got %s" % code
+            print("OK  API still serving after dropping a trickler")
+        finally:
+            if trickler is not None:
+                try:
+                    trickler.close()
+                except OSError:
+                    pass
+            http_api.REQUEST_TIMEOUT_S = orig_rto
+            http_api._active_workers = 0
+
+        # 5. Worker cap refuses connections beyond MAX_WORKERS. Open MAX_WORKERS
         # completed-but-idle TLS connections (each holds a handler thread), then
         # assert the next connection is refused without spawning another thread.
         orig_max = http_api.MAX_WORKERS
@@ -216,7 +278,7 @@ def main():
             http_api.MAX_WORKERS = orig_max
             http_api._active_workers = 0
 
-        # 5. shutdown() completes while the stalled connection is open — the
+        # 6. shutdown() completes while the stalled connection is open — the
         # handshake deadline bounds the accept loop, and serve_forever's 0.5s
         # poll interval observes the shutdown flag right after.
         http_api._http_server = srv
