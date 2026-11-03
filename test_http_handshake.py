@@ -20,6 +20,10 @@ Verified here:
     POST body just under the per-op timeout (the round-4 finding: a per-op
     socket timeout is not a total request deadline) is dropped within
     REQUEST_TIMEOUT_S of the request starting to read, not held indefinitely,
+  - a client that streams a request line with NO newline is bounded to maxlen
+    and rejected with 414 promptly (the round-5 finding: readline(maxlen) was
+    applied only when returning a line, so a newline-less line grew the reader
+    buffer without limit before any token check),
   - connections beyond MAX_WORKERS are refused without spawning another
     handler thread,
   - _stop_http()/srv.shutdown() completes within HANDSHAKE_TIMEOUT_S + slack
@@ -278,7 +282,81 @@ def main():
             http_api.MAX_WORKERS = orig_max
             http_api._active_workers = 0
 
-        # 6. shutdown() completes while the stalled connection is open — the
+        # 6. Byte-bounded request line — the round-5 finding: the deadline
+        # reader's readline(maxlen) applied maxlen only when RETURNING a line, so
+        # a client that streams bytes with NO newline grew the reader's buffer
+        # without limit (memory/CPU) before any token check. readline must stop
+        # accumulating at maxlen and let parse_request reject the over-long line
+        # (414) promptly, not buffer it to the deadline. Shrunk REQUEST_TIMEOUT_S
+        # so a regression (accumulate-to-deadline, no 414) fails fast.
+        orig_rto = http_api.REQUEST_TIMEOUT_S
+        http_api.REQUEST_TIMEOUT_S = 3.0
+        # Settle any in-flight teardown from the worker-cap case (its idle
+        # connections decrement _active_workers asynchronously), then measure
+        # THIS connection's worker as a delta off that stable baseline — the
+        # shared counter can read slightly negative under that race, so an
+        # absolute == 0 check is flaky here.
+        tsettle = time.time()
+        last = None
+        while time.time() - tsettle < 3.0:
+            cur = http_api._active_workers
+            if last is not None and cur == last:
+                break
+            last = cur
+            time.sleep(0.05)
+        baseline = http_api._active_workers
+        big = None
+        try:
+            s = socket.create_connection(("127.0.0.1", port), timeout=5)
+            big = _client_ctx().wrap_socket(s)
+            big.settimeout(http_api.REQUEST_TIMEOUT_S + 3.0)
+            # ~200 KiB, no newline anywhere: an unbounded reader would buffer it
+            # all and block to the deadline; the bounded reader returns at maxlen
+            # and parse_request answers 414.
+            payload = b"A" * 200 * 1024
+            t0 = time.time()
+            try:
+                big.sendall(payload)
+            except OSError:
+                pass  # server closed the conn after 414 — expected
+            data = b""
+            try:
+                while b"\r\n" not in data:
+                    chunk = big.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+            except OSError:
+                pass
+            dt = time.time() - t0
+            parts = data.split(b" ")
+            code = int(parts[1]) if len(parts) > 1 else -1
+            assert code == 414, "expected 414 (request line too long), got %s (data=%r)" % (
+                code, data[:60])
+            assert dt <= http_api.REQUEST_TIMEOUT_S + 1.0, (
+                "over-long newline-less line not rejected promptly (%.2fs)" % dt)
+            print("OK  over-long newline-less request line rejected with 414 promptly (%.2fs)" % dt)
+            # worker released: the over-long line's handler must drop back to
+            # baseline, not leave a worker stuck behind the 414.
+            t1 = time.time()
+            while http_api._active_workers > baseline and time.time() - t1 < 2.0:
+                time.sleep(0.05)
+            assert http_api._active_workers <= baseline, (
+                "over-long line held a worker: %d (baseline %d)"
+                % (http_api._active_workers, baseline))
+            code = _authed_post("127.0.0.1", port)
+            assert code == 404, "expected 404 after over-long line, got %s" % code
+            print("OK  API still serving after rejecting an over-long line")
+        finally:
+            if big is not None:
+                try:
+                    big.close()
+                except OSError:
+                    pass
+            http_api.REQUEST_TIMEOUT_S = orig_rto
+            http_api._active_workers = 0
+
+        # 7. shutdown() completes while the stalled connection is open — the
         # handshake deadline bounds the accept loop, and serve_forever's 0.5s
         # poll interval observes the shutdown flag right after.
         http_api._http_server = srv

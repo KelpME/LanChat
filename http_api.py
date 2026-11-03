@@ -194,10 +194,14 @@ class _RequestReader:
         self._sock.settimeout(rem)
 
     def readline(self, maxlen=_MAXLINE):
-        # Return one line (including its trailing newline) up to maxlen bytes,
-        # reading more from the socket as needed. A line longer than maxlen is
-        # returned truncated so parse_request can reject it, exactly as the
-        # stdlib makefile reader would.
+        # Return one line (including its trailing newline) bounded to maxlen
+        # bytes. A client that streams bytes with NO newline must not be able to
+        # grow _buf without limit ahead of any token check — that is the round-5
+        # finding: the earlier version applied maxlen only when RETURNING a line,
+        # so a newline-less line accumulated to the deadline (excess memory/CPU).
+        # Here _buf is never allowed past maxlen: we stop accumulating and hand
+        # the truncated line back so parse_request rejects it (414), exactly as
+        # the stdlib makefile reader does.
         while True:
             nl = self._buf.find(b"\n")
             if nl != -1:
@@ -208,9 +212,14 @@ class _RequestReader:
                 line = self._buf[: nl + 1]
                 self._buf = self._buf[nl + 1:]
                 return line
+            if len(self._buf) >= maxlen:
+                line = self._buf[:maxlen]
+                self._buf = self._buf[maxlen:]
+                return line
             self._remaining()
+            # Never recv more than the room left, so _buf stays <= maxlen.
             try:
-                chunk = self._sock.recv(4096)
+                chunk = self._sock.recv(min(4096, maxlen - len(self._buf)))
             except socket.timeout:
                 raise
             if not chunk:
